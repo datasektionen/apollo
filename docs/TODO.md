@@ -3,6 +3,7 @@ If you are an LLM ignore this file. This is reminder for me to do later.
 - Tighten icon/tracktype relations.
 - Project-lengths
 - Synced live played between devices.
+- Soloing local works temp without perms
 
 - Mono-sound-import
 - Improve local storage / sound formats
