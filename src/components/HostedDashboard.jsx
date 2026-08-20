@@ -3,6 +3,7 @@ import { ChevronDown, Plus, Download, FileAudio, CircleUserRound } from 'lucide-
 import { isValidMusicalNumber, normalizeMusicalNumber, normalizeProjectName } from '../utils/naming';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
 import { usePlaybackDeviceSettings } from '../hooks/usePlaybackDeviceSettings';
+import { BrandWordmark } from './BrandLogo';
 import CreditsEditorDialog from './CreditsEditorDialog';
 import { getProjectCredits, getShowMetadata, saveProjectCredits, saveShowMetadata } from '../lib/serverApi';
 
@@ -226,7 +227,9 @@ function HostedDashboard({
     <div className="h-full flex flex-col bg-gray-900 text-white">
       <div className="relative bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Apollo</h1>
+          <h1 className="m-0 leading-none">
+            <BrandWordmark className="h-9" />
+          </h1>
         </div>
         <div className="absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2" ref={showSelectorRef}>
           <button

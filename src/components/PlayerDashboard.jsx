@@ -26,6 +26,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import { BrandWordmark } from './BrandLogo';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
 import {
   addPlayerPlaylistItem,
@@ -2493,7 +2494,9 @@ function PlayerDashboard({
     <div className="h-full flex flex-col bg-gray-900 text-white">
       <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Apollo</h1>
+          <h1 className="m-0 leading-none">
+            <BrandWordmark className="h-9" />
+          </h1>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center rounded-lg bg-gray-700 p-0.5">

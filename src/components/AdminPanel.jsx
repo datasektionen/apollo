@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CircleUserRound, MoreHorizontal, Plus, Search } from 'lucide-react';
+import { BrandWordmark } from './BrandLogo';
 import {
   addRbacRoleMember,
   addUserRole,
@@ -1240,7 +1241,9 @@ export default function AdminPanel({
       <div className="flex h-full w-full flex-col overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b border-gray-700 bg-gray-800 px-4 py-3">
           <div>
-            <h1 className="text-2xl font-bold">Apollo</h1>
+            <h1 className="m-0 leading-none">
+              <BrandWordmark className="h-9" />
+            </h1>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center rounded-lg bg-gray-700 p-0.5">
