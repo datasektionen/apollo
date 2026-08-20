@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CircleUserRound, MoreHorizontal, Plus, Search } from 'lucide-react';
+import { ArrowLeft, CircleUserRound, HardDrive, MoreHorizontal, Plus, Search } from 'lucide-react';
 import { BrandWordmark } from './BrandLogo';
+import AdminStoragePanel from './AdminStoragePanel';
 import {
   addRbacRoleMember,
   addUserRole,
@@ -15,6 +16,7 @@ import {
   getRbacRole,
   getUserAccessDetail,
   listAdminArtists,
+  listAdminStorage,
   listRbacRoles,
   listUsers,
   removeRbacRoleMember,
@@ -710,6 +712,7 @@ export default function AdminPanel({
   const [showRedundantAccesses, setShowRedundantAccesses] = useState(false);
   const [showRedundantUserAccesses, setShowRedundantUserAccesses] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [storage, setStorage] = useState(null);
   const profileMenuRef = useRef(null);
   const rolePickerRef = useRef(null);
   const userActionMenuRef = useRef(null);
@@ -733,6 +736,11 @@ export default function AdminPanel({
       partNames: [],
       permissions: [],
       scopeTypes: [],
+    });
+    listAdminStorage(session).then((nextStorage) => {
+      setStorage(nextStorage);
+    }).catch(() => {
+      // Storage is optional for the rest of the admin UI.
     });
     setSelectedRoleId((current) => (
       nextRoles.some((role) => role.id === current) ? current : ''
@@ -834,6 +842,15 @@ export default function AdminPanel({
       setSelectedRoleId('');
     }
   }, [selectedRoleId, tab]);
+
+  useEffect(() => {
+    if (tab !== 'storage' || !session) return;
+    listAdminStorage(session).then((nextStorage) => {
+      setStorage(nextStorage);
+    }).catch(() => {
+      // Keep any previously loaded storage snapshot.
+    });
+  }, [session, tab]);
 
   const filteredRoles = useMemo(() => (
     roles.filter((role) => role.name.toLowerCase().includes(roleSearch.trim().toLowerCase()))
@@ -1375,6 +1392,35 @@ export default function AdminPanel({
                     {roles.length}
                   </span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRoleId('');
+                    setTab('storage');
+                  }}
+                  className={`relative flex min-w-36 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition md:w-full ${
+                    tab === 'storage'
+                      ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
+                      : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
+                  }`}
+                >
+                  {tab === 'storage' ? (
+                    <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-500" />
+                  ) : null}
+                  <span className="flex items-center gap-2 pl-2 font-medium">
+                    <HardDrive size={14} className="text-gray-500" />
+                    Storage
+                  </span>
+                  {storage?.summary?.quarantineCount ? (
+                    <span className="rounded-full bg-amber-900/70 px-2 py-0.5 text-xs font-semibold text-amber-100">
+                      {storage.summary.quarantineCount}
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
+                      {storage?.summary?.mediaCount || 0}
+                    </span>
+                  )}
+                </button>
               </nav>
             </aside>
 
@@ -1869,6 +1915,12 @@ export default function AdminPanel({
                     </div>
                   </div>
                 )
+              ) : tab === 'storage' ? (
+                <AdminStoragePanel
+                  session={session}
+                  storage={storage}
+                  onStorageChange={setStorage}
+                />
               ) : (
                 <div className="mx-auto max-w-6xl space-y-5">
                   <div className="flex flex-col gap-3 md:flex-row md:items-center">

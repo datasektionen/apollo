@@ -30,6 +30,9 @@ This file documents the environment variables used by Apollo.
 | `RECORD_LOCK_TIMEOUT_SECONDS` | How long a record or edit lock is kept before timing out. | `30` |
 | `CHECKPOINT_EVERY_OPS` | How many operations Apollo processes before forcing a checkpoint/save boundary. | `100` |
 | `CHECKPOINT_EVERY_SECONDS` | Time-based checkpoint interval used together with the operation-based checkpoint limit. | `30` |
+| `MEDIA_GC_TTL_HOURS` | How long unused audio blobs stay on disk after the last project stops referencing them. | `168` (7 days) |
+| `MEDIA_GC_HOUR` | Local server hour when expired-media cleanup runs once per night. | `4` (04:00) |
+| `MEDIA_GC_ATTACH_GRACE_SECONDS` | Delay before a newly uploaded blob with no project reference is marked unused. Avoids quarantining in-flight uploads. | `3600` |
 
 ## Sessions
 

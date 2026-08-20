@@ -11,6 +11,18 @@ import bcrypt from 'bcryptjs';
 
 import { config } from './config.js';
 import { buildStoredMediaPath, resolveMediaPath } from './mediaPaths.js';
+import {
+  MediaGcActionError,
+  deleteMediaById,
+  deleteQuarantinedMedia,
+  getFollowingMediaGcRunAt,
+  getMediaStorageOverview,
+  quarantineMediaById,
+  runMediaGarbageCollection,
+  syncProjectMediaRefs,
+  refreshMediaUnreferencedAt,
+  validateUnusedMedia,
+} from './mediaGc.js';
 import { pool, waitForDatabase, runMigrations, closeDb, logDatabaseConnectionDetails } from './db.js';
 import {
   isRefreshTokenPersisted,
@@ -421,19 +433,61 @@ function preserveLocalOnlyProjectFields(nextSnapshot = {}, currentSnapshot = {})
   return sharedSnapshot;
 }
 
-function collectSnapshotMediaIds(snapshot) {
-  const ids = new Set();
-  const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  tracks.forEach((track) => {
-    const clips = Array.isArray(track?.clips) ? track.clips : [];
-    clips.forEach((clip) => {
-      const blobId = typeof clip?.blobId === 'string' ? clip.blobId : null;
-      if (blobId) {
-        ids.add(blobId);
-      }
+async function unlinkMediaFile(storedPath) {
+  if (!storedPath) return;
+  try {
+    await fs.unlink(resolveMediaPath(storedPath));
+  } catch {
+    // ignore missing file/delete errors
+  }
+}
+
+let mediaGcTimer = null;
+
+function msUntil(date) {
+  return Math.max(0, date.getTime() - Date.now());
+}
+
+function scheduleMediaGarbageCollection(delayMs, reason = '') {
+  if (mediaGcTimer) {
+    clearTimeout(mediaGcTimer);
+    mediaGcTimer = null;
+  }
+  const waitMs = Math.max(1000, Number(delayMs) || 0);
+  if (reason) {
+    const nextAt = new Date(Date.now() + waitMs);
+    console.log(`Media garbage collection ${reason}; next run ${nextAt.toString()}`);
+  }
+  mediaGcTimer = setTimeout(() => {
+    runScheduledMediaGarbageCollection().catch((error) => {
+      console.error('Failed to run media garbage collection', error);
     });
-  });
-  return Array.from(ids);
+  }, waitMs);
+  mediaGcTimer.unref();
+}
+
+function scheduleNextMediaGc(now = new Date()) {
+  const nextRun = getFollowingMediaGcRunAt(now, { hour: config.mediaGcHour });
+  scheduleMediaGarbageCollection(msUntil(nextRun), `waiting for ${String(config.mediaGcHour).padStart(2, '0')}:00`);
+}
+
+async function runScheduledMediaGarbageCollection() {
+  try {
+    const result = await runMediaGarbageCollection(pool, {
+      ttlHours: config.mediaGcTtlHours,
+      attachGraceSeconds: config.mediaGcAttachGraceSeconds,
+      unlinkFile: unlinkMediaFile,
+    });
+    if (result?.deletedCount) {
+      console.log(`Media garbage collection deleted ${result.deletedCount} unused blob(s)`);
+    } else if (!result?.skipped) {
+      console.log('Media garbage collection found nothing expired to delete');
+    }
+  } catch (error) {
+    console.error('Failed to run media garbage collection', error);
+  }
+
+  scheduleNextMediaGc(new Date());
 }
 
 async function appendProjectOp({ projectId, userId, clientOpId, op }) {
@@ -571,17 +625,7 @@ async function appendProjectOp({ projectId, userId, clientOpId, op }) {
       [projectId, nextSeq, JSON.stringify(nextSnapshot), shouldCheckpoint]
     );
 
-    const mediaIds = collectSnapshotMediaIds(nextSnapshot);
-    if (mediaIds.length > 0) {
-      await client.query(
-        `INSERT INTO project_media_refs(project_id, media_id, snapshot_id)
-         SELECT $1, m.id, NULL
-         FROM unnest($2::text[]) AS t(id)
-         JOIN media_objects m ON m.id = t.id
-         ON CONFLICT (project_id, media_id) DO NOTHING`,
-        [projectId, mediaIds]
-      );
-    }
+    await syncProjectMediaRefs(client, projectId, nextSnapshot);
 
     if (shouldCheckpoint) {
       await client.query(
@@ -1680,6 +1724,82 @@ app.post('/api/artists/guest-artists', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/admin/storage', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const overview = await getMediaStorageOverview(pool, {
+      mediaRoot: config.mediaRoot,
+      ttlHours: config.mediaGcTtlHours,
+    });
+    res.json(overview);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to load storage overview' });
+  }
+});
+
+async function sendAdminStorage(res, extra = {}, status = 200) {
+  const overview = await getMediaStorageOverview(pool, {
+    mediaRoot: config.mediaRoot,
+    ttlHours: config.mediaGcTtlHours,
+  });
+  res.status(status).json({ ...overview, ...extra });
+}
+
+function handleMediaGcActionError(res, error, fallbackMessage) {
+  if (error instanceof MediaGcActionError) {
+    res.status(error.status || 400).json({
+      error: error.message,
+      ...(error.details || {}),
+    });
+    return true;
+  }
+  console.error(error);
+  res.status(500).json({ error: fallbackMessage });
+  return false;
+}
+
+app.post('/api/admin/storage/validate', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const result = await validateUnusedMedia(pool, { attachGraceSeconds: 0 });
+    await sendAdminStorage(res, { result });
+  } catch (error) {
+    handleMediaGcActionError(res, error, 'Failed to validate unused media');
+  }
+});
+
+app.post('/api/admin/storage/media/:mediaId/quarantine', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await quarantineMediaById(pool, req.params.mediaId);
+    await sendAdminStorage(res, { result });
+  } catch (error) {
+    handleMediaGcActionError(res, error, 'Failed to move media to quarantine');
+  }
+});
+
+app.delete('/api/admin/storage/media/:mediaId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const force = Boolean(req.body?.force)
+      || req.query?.force === 'true'
+      || req.query?.force === '1';
+    const result = await deleteMediaById(pool, req.params.mediaId, {
+      unlinkFile: unlinkMediaFile,
+      force,
+    });
+    await sendAdminStorage(res, { result });
+  } catch (error) {
+    handleMediaGcActionError(res, error, 'Failed to delete media');
+  }
+});
+
+app.delete('/api/admin/storage/quarantine', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const result = await deleteQuarantinedMedia(pool, { unlinkFile: unlinkMediaFile });
+    await sendAdminStorage(res, { result });
+  } catch (error) {
+    handleMediaGcActionError(res, error, 'Failed to delete quarantined media');
+  }
+});
+
 app.get('/api/admin/artists', requireAuth, requireAdmin, async (_req, res) => {
   try {
     const catalog = await loadArtistCatalog();
@@ -2484,17 +2604,7 @@ app.post('/api/projects', requireAuth, async (req, res) => {
 
       await replaceProjectAccessTags(client, projectId, snapshot);
 
-      const mediaIds = collectSnapshotMediaIds(snapshot);
-      if (mediaIds.length > 0) {
-        await client.query(
-          `INSERT INTO project_media_refs(project_id, media_id, snapshot_id)
-           SELECT $1, m.id, NULL
-           FROM unnest($2::text[]) AS t(id)
-           JOIN media_objects m ON m.id = t.id
-           ON CONFLICT (project_id, media_id) DO NOTHING`,
-          [projectId, mediaIds]
-        );
-      }
+      await syncProjectMediaRefs(client, projectId, snapshot);
 
       await client.query('COMMIT');
     } catch (error) {
@@ -2529,7 +2639,6 @@ app.delete('/api/projects/:id', requireAuth, async (req, res) => {
   if (!permission) return;
 
   const client = await pool.connect();
-  let orphanMedia = [];
   try {
     await client.query('BEGIN');
 
@@ -2554,29 +2663,7 @@ app.delete('/api/projects/:id', requireAuth, async (req, res) => {
       return;
     }
 
-    if (candidateMediaIds.length > 0) {
-      const orphanRows = await client.query(
-        `SELECT mo.id, mo.path
-         FROM media_objects mo
-         WHERE mo.id = ANY($1::text[])
-           AND NOT EXISTS (
-             SELECT 1
-             FROM project_media_refs r
-             WHERE r.media_id = mo.id
-           )`,
-        [candidateMediaIds]
-      );
-      orphanMedia = orphanRows.rows;
-      const orphanIds = orphanMedia.map((row) => row.id);
-      if (orphanIds.length > 0) {
-        await client.query(
-          `DELETE FROM media_objects
-           WHERE id = ANY($1::text[])`,
-          [orphanIds]
-        );
-      }
-    }
-
+    await refreshMediaUnreferencedAt(client, candidateMediaIds);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -2586,16 +2673,6 @@ app.delete('/api/projects/:id', requireAuth, async (req, res) => {
   } finally {
     client.release();
   }
-
-  // Best-effort file cleanup after DB commit.
-  await Promise.all(orphanMedia.map(async (row) => {
-    if (!row?.path) return;
-    try {
-      await fs.unlink(resolveMediaPath(row.path));
-    } catch {
-      // ignore missing file/delete errors
-    }
-  }));
 
   res.json({ ok: true, projectId: permission.projectId });
 });
@@ -4840,6 +4917,8 @@ async function start() {
       console.error('Failed to cleanup expired locks', error);
     });
   }, 5000).unref();
+
+  scheduleNextMediaGc();
 }
 
 start().catch(async (error) => {

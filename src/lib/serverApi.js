@@ -374,6 +374,37 @@ export async function listAdminArtists(session) {
   return await apiFetch('/api/admin/artists', {}, session);
 }
 
+export async function listAdminStorage(session) {
+  return await apiFetch('/api/admin/storage', {}, session);
+}
+
+export async function validateAdminStorage(session) {
+  return await apiFetch('/api/admin/storage/validate', {
+    method: 'POST',
+    body: {},
+  }, session);
+}
+
+export async function quarantineAdminMedia(mediaId, session) {
+  return await apiFetch(`/api/admin/storage/media/${encodeURIComponent(mediaId)}/quarantine`, {
+    method: 'POST',
+    body: {},
+  }, session);
+}
+
+export async function deleteAdminMedia(mediaId, session, { force = false } = {}) {
+  const params = force ? '?force=1' : '';
+  return await apiFetch(`/api/admin/storage/media/${encodeURIComponent(mediaId)}${params}`, {
+    method: 'DELETE',
+  }, session);
+}
+
+export async function deleteAdminQuarantinedMedia(session) {
+  return await apiFetch('/api/admin/storage/quarantine', {
+    method: 'DELETE',
+  }, session);
+}
+
 export async function updateAdminArtist(kind, artistId, updates, session) {
   const pathKind = kind === 'group'
     ? 'music-groups'

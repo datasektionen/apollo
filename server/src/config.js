@@ -130,6 +130,14 @@ function actionValidate() {
   }
 }
 
+function parseHour(value, fallback) {
+  const hour = Number(firstDefined(value, fallback));
+  if (!Number.isFinite(hour)) return fallback;
+  const truncated = Math.trunc(hour);
+  if (truncated < 0 || truncated > 23) return fallback;
+  return truncated;
+}
+
 const mediaRoot = resolveMediaRoot();
 const oidcIssuer = buildOidcIssuer();
 const oidcPublicIssuer = buildOidcPublicIssuer(oidcIssuer);
@@ -148,6 +156,9 @@ export const config = {
   lockTimeoutSeconds: Number(process.env.RECORD_LOCK_TIMEOUT_SECONDS || 30),
   checkpointEveryOps: Number(process.env.CHECKPOINT_EVERY_OPS || 100),
   checkpointEverySeconds: Number(process.env.CHECKPOINT_EVERY_SECONDS || 30),
+  mediaGcTtlHours: Math.max(1, Number(process.env.MEDIA_GC_TTL_HOURS || 168)),
+  mediaGcHour: parseHour(process.env.MEDIA_GC_HOUR, 4),
+  mediaGcAttachGraceSeconds: Math.max(0, Number(process.env.MEDIA_GC_ATTACH_GRACE_SECONDS || 3600)),
   cookieSecure: parseBoolean(process.env.COOKIE_SECURE, false),
   oidcIssuer,
   oidcPublicIssuer,
