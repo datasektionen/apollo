@@ -18,6 +18,7 @@ function makeProject() {
       {
         id: 'track-1',
         name: 'Track 1',
+        role: 'instrument',
         volume: 100,
         pan: 0,
         muted: false,
@@ -36,6 +37,31 @@ function makeProject() {
       },
     ],
   };
+}
+
+function makeProjectWithMetronome({ metronomeMuted = false } = {}) {
+  const project = makeProject();
+  project.tracks.push({
+    id: 'metro-1',
+    name: 'Click',
+    role: 'metronome',
+    volume: 100,
+    pan: 0,
+    muted: metronomeMuted,
+    soloed: false,
+    clips: [
+      {
+        id: 'metro-clip-1',
+        blobId: 'blob-metro',
+        timelineStartMs: 0,
+        cropStartMs: 0,
+        cropEndMs: 2000,
+        gainDb: 0,
+        muted: false,
+      },
+    ],
+  });
+  return project;
 }
 
 describe('AudioManager playback requests', () => {
@@ -160,5 +186,46 @@ describe('AudioManager playback requests', () => {
     expect(startedSources).toHaveLength(0);
     expect(manager.activeSources.size).toBe(0);
     expect(manager.isPlaying).toBe(false);
+  });
+
+  it('keeps muted metronome sources scheduled so mute can change without restarting', async () => {
+    const { AudioManager, getPlaybackTrackState } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+    manager.mediaCache.set('blob-metro', { duration: 2 });
+
+    routingPlayback.resolve();
+    await manager.play(makeProjectWithMetronome({ metronomeMuted: true }), 500);
+
+    expect(startedSources).toHaveLength(2);
+    expect(manager.activeSources.size).toBe(2);
+    expect(manager.isPlaying).toBe(true);
+    expect(manager.startTime).toBeCloseTo(9.5);
+    expect(manager.activeSources.get('metro-1-metro-clip-1').gainNode.gain.value).toBe(0);
+
+    const playbackRequestId = manager.playbackRequestId;
+    const startTime = manager.startTime;
+    startedSources.forEach((source) => source.stop.mockClear());
+
+    manager.updateTrackMix('metro-1', 1, 0);
+
+    expect(manager.playbackRequestId).toBe(playbackRequestId);
+    expect(manager.startTime).toBe(startTime);
+    expect(manager.isPlaying).toBe(true);
+    expect(startedSources).toHaveLength(2);
+    startedSources.forEach((source) => {
+      expect(source.stop).not.toHaveBeenCalled();
+    });
+    expect(manager.activeSources.get('metro-1-metro-clip-1').gainNode.gain.value).toBeGreaterThan(0);
+
+    const mutedState = getPlaybackTrackState(
+      { role: 'metronome' },
+      { audible: false, effectiveGain: 0.8, effectivePan: 12 }
+    );
+    expect(mutedState).toEqual({
+      audible: true,
+      effectiveGain: 0,
+      effectivePan: 12,
+    });
   });
 });

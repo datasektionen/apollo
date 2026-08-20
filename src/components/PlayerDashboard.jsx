@@ -61,6 +61,7 @@ import {
 } from '../lib/exportEngine';
 import { audioManager } from '../lib/audioManager';
 import { getMediaBlob, storeMediaBlob } from '../lib/db';
+import { getEffectiveTrackMix } from '../utils/trackTree';
 import {
   createQueueItemFromMix,
   PLAYER_COLLECTION_TYPES,
@@ -194,6 +195,18 @@ function withSnapshotMetronomeMuted(snapshot, muted) {
         : track
     )),
   };
+}
+
+function applyLiveMetronomeMix(snapshot) {
+  const mix = getEffectiveTrackMix(snapshot);
+  getSnapshotMetronomeTracks(snapshot).forEach((track) => {
+    const state = mix.statesByTrackId.get(track.id);
+    audioManager.updateTrackMix(
+      track.id,
+      state?.audible === true && Number.isFinite(state.effectiveGain) ? state.effectiveGain : 0,
+      Number.isFinite(state?.effectivePan) ? state.effectivePan : 0
+    );
+  });
 }
 
 function selectFromPrompt(label, options) {
@@ -1246,7 +1259,8 @@ function PlayerDashboard({
 
       const isRealtimeMix = isPracticePresetId(item.presetId)
         || isAdvancedMixPreset(item.presetId)
-        || isGroupMixPresetId(item.presetId);
+        || isGroupMixPresetId(item.presetId)
+        || snapshotHasMetronome;
       const realtimeControlOverrides = isGroupMixPresetId(item.presetId)
         ? createEditableMixSource(playbackSnapshot, item).controls
         : null;
@@ -1260,6 +1274,9 @@ function PlayerDashboard({
         audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
         await audioManager.play(playbackSnapshot, 0, { useProjectMasterVolume: false });
         applyRealtimeMixSettings(playbackSnapshot, item, realtimeControlOverrides);
+        if (snapshotHasMetronome) {
+          applyLiveMetronomeMix(playbackSnapshot);
+        }
         realtimePlaybackRef.current = {
           project: playbackSnapshot,
           item,
@@ -1491,7 +1508,7 @@ function PlayerDashboard({
     });
   }, []);
 
-  const handleToggleMetronomeMute = useCallback(async () => {
+  const handleToggleMetronomeMute = useCallback(() => {
     const current = realtimePlaybackRef.current;
     if (!current?.project || !current?.item || !hasSnapshotMetronome(current.project)) return;
 
@@ -1504,89 +1521,11 @@ function PlayerDashboard({
     setPreferredMetronomeMuted(nextMuted);
     setIsRealtimeMetronomeMuted(nextMuted);
 
-    try {
-      if (playbackEngineRef.current === 'realtime') {
-        if (!isPlaying) return;
-        const currentMs = Math.max(0, Math.round((Number(currentTimeSec) || 0) * 1000));
-        await audioManager.pause(currentMs);
-        await applyPlaybackOutputConfig();
-        audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
-        await audioManager.play(nextProject, currentMs, { useProjectMasterVolume: false });
-        applyRealtimeMixSettings(nextProject, current.item);
-        setIsPlaying(true);
-        return;
-      }
-
-      const audio = audioRef.current;
-      if (!audio) return;
-
-      const shouldResume = isPlaying;
-      const currentSec = Math.max(0, Number(currentTimeSec) || 0);
-      setIsRendering(true);
-      audio.pause();
-
-      const audioBuffers = await ensureSnapshotAudioBuffers(nextProject);
-      const rendered = await renderPresetVariant(
-        nextProject,
-        current.item.presetId,
-        current.item.presetVariantKey,
-        audioBuffers,
-        buildPlaybackExportSettings(nextProject),
-        nextProject.projectName || current.item.projectName || current.item.name || 'mix',
-        'wav'
-      );
-      if (!rendered?.blob) {
-        throw new Error('Failed to build playback mix');
-      }
-
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
-
-      const url = URL.createObjectURL(rendered.blob);
-      objectUrlRef.current = url;
-      await new Promise((resolve, reject) => {
-        const handleLoadedMetadata = () => {
-          audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-          audio.removeEventListener('error', handleError);
-          resolve();
-        };
-        const handleError = () => {
-          audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-          audio.removeEventListener('error', handleError);
-          reject(new Error('Failed to load playback mix'));
-        };
-        audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-        audio.addEventListener('error', handleError);
-        audio.src = url;
-        audio.load();
-      });
-
-      audio.currentTime = Math.max(0, Math.min(currentSec, Number.isFinite(audio.duration) ? audio.duration : currentSec));
-      setDurationSec(Number.isFinite(audio.duration) ? audio.duration : 0);
-      setCurrentTimeSec(audio.currentTime);
-
-      if (shouldResume) {
-        await audio.play();
-      }
-    } catch (toggleError) {
-      setError(toggleError.message || 'Failed to update metronome playback');
-    } finally {
-      if (playbackEngineRef.current === 'html') {
-        setIsRendering(false);
-      }
+    if (playbackEngineRef.current === 'realtime') {
+      applyRealtimeMixSettings(nextProject, current.item);
+      applyLiveMetronomeMix(nextProject);
     }
-  }, [
-    applyPlaybackOutputConfig,
-    applyRealtimeMixSettings,
-    buildPlaybackExportSettings,
-    currentTimeSec,
-    ensureSnapshotAudioBuffers,
-    isPlaying,
-    isRealtimeMetronomeMuted,
-    volume,
-  ]);
+  }, [applyRealtimeMixSettings, isRealtimeMetronomeMuted]);
 
   const beginSliderDrag = useCallback((event, config) => {
     if (event.button !== 0) return;

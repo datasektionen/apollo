@@ -7,6 +7,7 @@ import {
 } from '../utils/audio';
 import { SAMPLE_RATE } from '../types/project';
 import { getEffectiveTrackMix } from '../utils/trackTree';
+import { isMetronomeRole } from '../utils/trackRoles';
 import { reportUserError } from '../utils/errorReporter';
 import { applySinkIdToMediaElement } from '../utils/playbackOutput';
 import { audioBufferToLocalWavBlob } from './mediaEncoding';
@@ -169,10 +170,16 @@ export class AudioManager {
       this.applyMasterGain();
       const mix = getEffectiveTrackMix(project);
 
-      // Start all tracks
+      // Start all tracks. Metronome stays scheduled at gain 0 when muted so mute
+      // can be toggled live without restarting playback.
       for (const track of project.tracks) {
         if (!this.isPlaybackRequestCurrent(playbackRequestId)) return;
-        await this.playTrack(track, currentTimeMs, mix.statesByTrackId.get(track.id), playbackRequestId);
+        await this.playTrack(
+          track,
+          currentTimeMs,
+          getPlaybackTrackState(track, mix.statesByTrackId.get(track.id)),
+          playbackRequestId
+        );
       }
     } finally {
       if (this.initializingPlaybackRequestId === playbackRequestId) {
@@ -596,6 +603,17 @@ export class AudioManager {
       // Ignore autoplay-related routing element failures.
     }
   }
+}
+
+export function getPlaybackTrackState(track, mixState) {
+  if (!isMetronomeRole(track?.role)) return mixState;
+  return {
+    audible: true,
+    effectiveGain: mixState?.audible === true && Number.isFinite(mixState.effectiveGain)
+      ? mixState.effectiveGain
+      : 0,
+    effectivePan: Number.isFinite(mixState?.effectivePan) ? mixState.effectivePan : 0,
+  };
 }
 
 // Singleton instance
