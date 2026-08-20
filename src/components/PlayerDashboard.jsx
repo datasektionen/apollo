@@ -73,6 +73,11 @@ import { usePlaybackDeviceSettings } from '../hooks/usePlaybackDeviceSettings';
 import { applySinkIdToMediaElement } from '../utils/playbackOutput';
 import { cacheRemoteBlobAsLocalWav } from '../lib/mediaEncoding';
 import { reportUserError } from '../utils/errorReporter';
+import { isTextEntryTarget } from '../utils/keyboard';
+import {
+  canResumePlayerPlayback,
+  resolvePlayerSpaceAction,
+} from '../utils/playerSpacePlayback';
 import {
   ADVANCED_MIX_PRESET_ID,
   ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX,
@@ -1386,7 +1391,6 @@ function PlayerDashboard({
   }, []);
 
   const handleTogglePlay = useCallback(async () => {
-    if (!activeQueueItems.length) return;
     if (isPlaying) {
       if (playbackEngineRef.current === 'realtime') {
         const currentMs = Math.max(0, Math.round((Number(currentTimeSec) || 0) * 1000));
@@ -1399,6 +1403,8 @@ function PlayerDashboard({
       }
       return;
     }
+
+    if (!activeQueueItems.length) return;
 
     if (
       playbackEngineRef.current === 'realtime'
@@ -1416,9 +1422,57 @@ function PlayerDashboard({
       return;
     }
 
+    if (audioRef.current?.src && !audioRef.current.ended) {
+      await audioRef.current.play();
+      return;
+    }
+
     const startIndex = activeIndex >= 0 ? activeIndex : 0;
     await playQueueItem(startIndex);
   }, [activeIndex, activeQueueItems.length, applyPlaybackOutputConfig, applyRealtimeMixSettings, currentTimeSec, durationSec, isPlaying, playQueueItem, volume]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.code !== 'Space') return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (isTextEntryTarget(event)) return;
+      event.preventDefault();
+      if (event.repeat || isRendering) return;
+
+      const action = resolvePlayerSpaceAction({
+        isPlaying,
+        canResumeCurrent: canResumePlayerPlayback({
+          playbackEngine: playbackEngineRef.current,
+          currentTimeSec,
+          durationSec,
+          hasRealtimeItem: Boolean(
+            realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item
+          ),
+          htmlAudio: audioRef.current,
+        }),
+        highlightedIndex: activeIndex,
+      });
+
+      if (action === 'toggle-current') {
+        void handleTogglePlay();
+        return;
+      }
+      if (action === 'play-highlighted' && activeIndex >= 0) {
+        void playQueueItem(activeIndex);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [
+    activeIndex,
+    currentTimeSec,
+    durationSec,
+    handleTogglePlay,
+    isPlaying,
+    isRendering,
+    playQueueItem,
+  ]);
 
   const handleNext = useCallback(async () => {
     if (!activeQueueItems.length) return;

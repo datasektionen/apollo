@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { isPrimaryModifierPressed } from './keyboard';
+import { isPrimaryModifierPressed, isTextEntryTarget } from './keyboard';
 
 /**
  * Keyboard shortcuts hook
@@ -25,6 +25,17 @@ function useKeyboardShortcuts({
     if (!enabled) return;
 
     const handleKeyDown = (e) => {
+      // Space toggles play/pause and suppresses native button activation.
+      // Text fields, checkboxes, and selects keep their native Space behavior.
+      if (e.code === 'Space') {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (isTextEntryTarget(e)) return;
+        e.preventDefault();
+        if (e.repeat) return;
+        onPlayPause?.();
+        return;
+      }
+
       // Ignore if typing in an input field
       if (
         e.target.tagName === 'INPUT' ||
@@ -32,12 +43,6 @@ function useKeyboardShortcuts({
         e.target.isContentEditable
       ) {
         return;
-      }
-
-      // Space - Play/Pause
-      if (e.code === 'Space') {
-        e.preventDefault();
-        onPlayPause?.();
       }
 
       // R - Record
@@ -110,10 +115,10 @@ function useKeyboardShortcuts({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
     };
   }, [
     enabled,
