@@ -80,3 +80,25 @@ export async function applySinkIdToMediaElement(element, outputDeviceId = '') {
     // Ignore output routing failures; playback can continue on the default sink.
   }
 }
+
+export async function applySinkIdToAudioContext(audioContext, outputDeviceId = '') {
+  if (!audioContext || typeof audioContext.setSinkId !== 'function') return false;
+  try {
+    await audioContext.setSinkId(String(outputDeviceId || ''));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * MediaStreamDestination + HTMLAudioElement resampling is a known source of
+ * brief pitch/speed glitches on Android. Use it only when a custom output
+ * device is selected and AudioContext.setSinkId could not be applied.
+ */
+export function shouldRoutePlaybackThroughMediaElement({
+  outputDeviceId = '',
+  audioContextSinkApplied = false,
+} = {}) {
+  return Boolean(String(outputDeviceId || '')) && audioContextSinkApplied !== true;
+}

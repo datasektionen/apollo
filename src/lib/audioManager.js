@@ -9,7 +9,11 @@ import { SAMPLE_RATE } from '../types/project';
 import { getEffectiveTrackMix } from '../utils/trackTree';
 import { isMetronomeRole } from '../utils/trackRoles';
 import { reportUserError } from '../utils/errorReporter';
-import { applySinkIdToMediaElement } from '../utils/playbackOutput';
+import {
+  applySinkIdToAudioContext,
+  applySinkIdToMediaElement,
+  shouldRoutePlaybackThroughMediaElement,
+} from '../utils/playbackOutput';
 import { audioBufferToLocalWavBlob } from './mediaEncoding';
 
 /**
@@ -38,6 +42,7 @@ export class AudioManager {
     this.outputStreamDestination = null;
     this.outputRoutingElement = null;
     this.outputTargetNode = null;
+    this.outputClockPrimed = false;
   }
 
   /**
@@ -46,9 +51,12 @@ export class AudioManager {
   async init() {
     if (this.audioContext) return;
 
-    this.audioContext = new AudioContext({
-      sampleRate: SAMPLE_RATE,
-    });
+    // Use the hardware native rate. Forcing 44100 on 48kHz Android devices
+    // causes a brief pitch+speed mismatch until the output path settles.
+    // "playback" prefers a larger output buffer so music is less likely to
+    // drop out on phones; start/stop latency is still fine for rehearsal.
+    const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
+    this.audioContext = new AudioContextCtor({ latencyHint: 'playback' });
 
     // Create master gain node
     this.masterGainNode = this.audioContext.createGain();
@@ -68,10 +76,13 @@ export class AudioManager {
    * Ensure audio context is running (handle browser autoplay policies)
    */
   async resume() {
-    if (this.audioContext && this.audioContext.state === 'suspended') {
+    if (this.audioContext && this.audioContext.state !== 'running') {
       await this.audioContext.resume();
     }
-    await this.resumeOutputRoutingElement();
+    if (this.outputTargetNode && this.outputTargetNode === this.outputStreamDestination) {
+      await this.resumeOutputRoutingElement();
+    }
+    this.primeSilentOutput();
   }
 
   /**
@@ -83,28 +94,32 @@ export class AudioManager {
     }
 
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-    
-    // Resample to 44.1kHz if needed
-    if (audioBuffer.sampleRate !== SAMPLE_RATE) {
-      console.log(`Resampling from ${audioBuffer.sampleRate}Hz to ${SAMPLE_RATE}Hz`);
-      return await this.resampleAudioBuffer(audioBuffer);
+
+    // decodeAudioData already matches the live context. If a buffer still
+    // disagrees, resample to the hardware rate rather than a fixed 44.1kHz.
+    if (audioBuffer.sampleRate !== this.audioContext.sampleRate) {
+      console.log(
+        `Resampling from ${audioBuffer.sampleRate}Hz to ${this.audioContext.sampleRate}Hz`
+      );
+      return await this.resampleAudioBuffer(audioBuffer, this.audioContext.sampleRate);
     }
 
     return audioBuffer;
   }
 
   /**
-   * Resample AudioBuffer to 44.1kHz
+   * Resample AudioBuffer to a target sample rate
    */
-  async resampleAudioBuffer(audioBuffer) {
+  async resampleAudioBuffer(audioBuffer, targetSampleRate = this.audioContext?.sampleRate || SAMPLE_RATE) {
     const duration = audioBuffer.duration;
     const numberOfChannels = audioBuffer.numberOfChannels;
-    const length = Math.ceil(duration * SAMPLE_RATE);
+    const sampleRate = Math.max(1, Math.round(Number(targetSampleRate) || SAMPLE_RATE));
+    const length = Math.ceil(duration * sampleRate);
 
     const offlineContext = new OfflineAudioContext(
       numberOfChannels,
       length,
-      SAMPLE_RATE
+      sampleRate
     );
 
     const source = offlineContext.createBufferSource();
@@ -457,6 +472,7 @@ export class AudioManager {
     }
     this.outputStreamDestination = null;
     this.outputTargetNode = null;
+    this.outputClockPrimed = false;
     
     if (this.audioContext) {
       this.audioContext.close();
@@ -526,28 +542,77 @@ export class AudioManager {
   async configureOutputRouting() {
     if (!this.audioContext || !this.masterGainNode) return;
 
+    this.disconnectMasterOutput();
+
+    const contextSinkApplied = await applySinkIdToAudioContext(
+      this.audioContext,
+      this.currentOutputDeviceId
+    );
+    const useMediaElementRoute = shouldRoutePlaybackThroughMediaElement({
+      outputDeviceId: this.currentOutputDeviceId,
+      audioContextSinkApplied: contextSinkApplied,
+    });
+
+    if (useMediaElementRoute) {
+      const routedTarget = await this.ensureOutputRoutingTarget();
+      if (routedTarget) {
+        this.outputTargetNode = routedTarget;
+        this.masterGainNode.connect(this.outputTargetNode);
+        return;
+      }
+    }
+
+    this.connectMasterToDestination();
+    this.pauseOutputRoutingElement();
+  }
+
+  disconnectMasterOutput() {
+    if (!this.masterGainNode) return;
     if (this.outputTargetNode) {
       try {
         this.masterGainNode.disconnect(this.outputTargetNode);
       } catch {
         // Ignore reconnect noise when the previous route is already gone.
       }
-    } else {
-      try {
-        this.masterGainNode.disconnect();
-      } catch {
-        // Ignore initial disconnect attempts before anything is connected.
-      }
+      return;
     }
-
-    const routedTarget = await this.ensureOutputRoutingTarget();
-    this.outputTargetNode = routedTarget || this.audioContext.destination;
-
-    if (this.outputTargetNode === this.audioContext.destination) {
-      this.applyOutputChannelConfig();
+    try {
+      this.masterGainNode.disconnect();
+    } catch {
+      // Ignore initial disconnect attempts before anything is connected.
     }
+  }
 
+  connectMasterToDestination() {
+    this.applyOutputChannelConfig();
+    this.outputTargetNode = this.audioContext.destination;
     this.masterGainNode.connect(this.outputTargetNode);
+  }
+
+  pauseOutputRoutingElement() {
+    if (!this.outputRoutingElement) return;
+    try {
+      this.outputRoutingElement.pause();
+    } catch {
+      // Ignore pause failures on the hidden routing element.
+    }
+  }
+
+  primeSilentOutput() {
+    if (!this.audioContext || !this.masterGainNode || this.outputClockPrimed) return;
+    try {
+      const silence = this.audioContext.createBuffer(1, 1, this.audioContext.sampleRate);
+      const source = this.audioContext.createBufferSource();
+      const mute = this.audioContext.createGain();
+      mute.gain.value = 0;
+      source.buffer = silence;
+      source.connect(mute);
+      mute.connect(this.masterGainNode);
+      source.start(0);
+      this.outputClockPrimed = true;
+    } catch {
+      // Hardware warmup is best-effort and must not block playback.
+    }
   }
 
   applyOutputChannelConfig() {

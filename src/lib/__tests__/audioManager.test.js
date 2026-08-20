@@ -67,11 +67,17 @@ function makeProjectWithMetronome({ metronomeMuted = false } = {}) {
 describe('AudioManager playback requests', () => {
   let routingPlayback;
   let startedSources;
+  let createdAudioElements;
+  let audioContextOptions;
+  let audioContextSetSinkId;
 
   beforeEach(() => {
     vi.resetModules();
     routingPlayback = deferred();
     startedSources = [];
+    createdAudioElements = [];
+    audioContextOptions = [];
+    audioContextSetSinkId = null;
 
     class MockAudioNode {
       constructor() {
@@ -80,19 +86,27 @@ describe('AudioManager playback requests', () => {
         this.channelCount = 2;
         this.channelCountMode = 'explicit';
         this.channelInterpretation = 'speakers';
+        this.connections = [];
       }
 
-      connect() {}
+      connect(node) {
+        this.connections.push(node);
+      }
 
       disconnect() {}
     }
 
     class MockAudioContext {
-      constructor() {
+      constructor(options) {
+        audioContextOptions.push(options);
         this.currentTime = 10;
         this.state = 'running';
+        this.sampleRate = options?.sampleRate || 48000;
         this.destination = new MockAudioNode();
         this.destination.maxChannelCount = 2;
+        if (audioContextSetSinkId) {
+          this.setSinkId = audioContextSetSinkId;
+        }
       }
 
       createGain() {
@@ -134,6 +148,7 @@ describe('AudioManager playback requests', () => {
         this.autoplay = false;
         this.preload = '';
         this.srcObject = null;
+        createdAudioElements.push(this);
       }
 
       setSinkId() {
@@ -227,5 +242,69 @@ describe('AudioManager playback requests', () => {
       effectiveGain: 0,
       effectivePan: 12,
     });
+  });
+
+  it('uses the hardware sample rate and native destination for default output', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    await manager.play(makeProject(), 0);
+
+    expect(audioContextOptions[0]?.sampleRate).toBeUndefined();
+    expect(audioContextOptions[0]?.latencyHint).toBe('playback');
+    expect(manager.audioContext.sampleRate).toBe(48000);
+    expect(createdAudioElements).toHaveLength(0);
+    expect(manager.outputTargetNode).toBe(manager.audioContext.destination);
+    expect(manager.masterGainNode.connections).toContain(manager.audioContext.destination);
+    expect(startedSources).toHaveLength(1);
+  });
+
+  it('routes through a media element only when a custom sink cannot use AudioContext.setSinkId', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+    manager.currentOutputDeviceId = 'headphones';
+
+    const playPromise = manager.play(makeProject(), 0);
+    routingPlayback.resolve();
+    await playPromise;
+
+    expect(createdAudioElements).toHaveLength(1);
+    expect(manager.outputTargetNode).toBe(manager.outputStreamDestination);
+    expect(manager.masterGainNode.connections).toContain(manager.outputStreamDestination);
+    expect(startedSources).toHaveLength(1);
+  });
+
+  it('prefers AudioContext.setSinkId over media-element routing', async () => {
+    audioContextSetSinkId = vi.fn().mockResolvedValue(undefined);
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+    manager.currentOutputDeviceId = 'headphones';
+
+    await manager.play(makeProject(), 0);
+
+    expect(audioContextSetSinkId).toHaveBeenCalledWith('headphones');
+    expect(createdAudioElements).toHaveLength(0);
+    expect(manager.outputTargetNode).toBe(manager.audioContext.destination);
+    expect(startedSources).toHaveLength(1);
+  });
+
+  it('does not resample decoded audio that already matches the live context rate', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    await manager.init();
+    manager.audioContext.decodeAudioData = vi.fn().mockResolvedValue({
+      sampleRate: 48000,
+      duration: 1,
+      numberOfChannels: 1,
+    });
+    const resampleSpy = vi.spyOn(manager, 'resampleAudioBuffer');
+
+    const decoded = await manager.decodeAudioFile(new ArrayBuffer(8));
+
+    expect(decoded.sampleRate).toBe(48000);
+    expect(resampleSpy).not.toHaveBeenCalled();
   });
 });

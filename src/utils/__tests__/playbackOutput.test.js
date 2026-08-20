@@ -3,6 +3,7 @@ import {
   isMonoOutputActive,
   normalizePlaybackDeviceSettings,
   resolvePlaybackPanLawDisplayDb,
+  shouldRoutePlaybackThroughMediaElement,
 } from '../playbackOutput';
 
 describe('playbackOutput', () => {
@@ -28,5 +29,17 @@ describe('playbackOutput', () => {
     expect(resolvePlaybackPanLawDisplayDb({ stereoPanLawDb: -6, forceMonoOutput: false }, 2)).toBe(-6);
     expect(resolvePlaybackPanLawDisplayDb({ stereoPanLawDb: -6, forceMonoOutput: true }, 2)).toBe(0);
     expect(resolvePlaybackPanLawDisplayDb({ stereoPanLawDb: -6, forceMonoOutput: false }, 1)).toBe(0);
+  });
+
+  it('routes through a media element only for custom sinks without an AudioContext sink', () => {
+    expect(shouldRoutePlaybackThroughMediaElement({ outputDeviceId: '' })).toBe(false);
+    expect(shouldRoutePlaybackThroughMediaElement({
+      outputDeviceId: 'headphones',
+      audioContextSinkApplied: true,
+    })).toBe(false);
+    expect(shouldRoutePlaybackThroughMediaElement({
+      outputDeviceId: 'headphones',
+      audioContextSinkApplied: false,
+    })).toBe(true);
   });
 });
