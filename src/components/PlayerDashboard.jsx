@@ -80,6 +80,11 @@ import {
   resolvePlayerSpaceAction,
 } from '../utils/playerSpacePlayback';
 import {
+  computeSnapshotDurationMs,
+  formatClock,
+  formatDurationMs,
+} from '../utils/playerTime';
+import {
   ADVANCED_MIX_PRESET_ID,
   ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX,
   ADVANCED_MIX_PRACTICE_FOCUS_MAX_INDEX,
@@ -124,13 +129,6 @@ function normalizePlayerPlaybackPreferences(settings = {}) {
   };
 }
 
-function formatClock(seconds) {
-  const safe = Math.max(0, Number(seconds) || 0);
-  const mins = Math.floor(safe / 60);
-  const secs = Math.floor(safe % 60);
-  return `${mins}:${String(secs).padStart(2, '0')}`;
-}
-
 function pickRandomQueueIndex(currentIndex, totalCount) {
   if (totalCount <= 1) return currentIndex;
   let candidate = currentIndex;
@@ -163,22 +161,6 @@ function reorderPlaylistItems(items, fromIndex, slotIndex) {
     ...item,
     orderIndex: index,
   }));
-}
-
-function computeSnapshotDurationMs(snapshot) {
-  let maxDurationMs = 0;
-  (snapshot?.tracks || []).forEach((track) => {
-    (track?.clips || []).forEach((clip) => {
-      if (clip?.muted) return;
-      const clipStartMs = Number(clip?.timelineStartMs || 0);
-      const clipDurationMs = Math.max(0, Number(clip?.cropEndMs || 0) - Number(clip?.cropStartMs || 0));
-      const clipEndMs = clipStartMs + clipDurationMs;
-      if (Number.isFinite(clipEndMs)) {
-        maxDurationMs = Math.max(maxDurationMs, clipEndMs);
-      }
-    });
-  });
-  return maxDurationMs;
 }
 
 function getSnapshotMetronomeTracks(snapshot) {
@@ -832,9 +814,12 @@ function PlayerDashboard({
       if (playbackEngineRef.current !== 'html') return;
       setCurrentTimeSec(Number(audio.currentTime || 0));
     };
-    const handleLoadedMetadata = () => {
+    const applyHtmlAudioDuration = () => {
       if (playbackEngineRef.current !== 'html') return;
-      setDurationSec(Number.isFinite(audio.duration) ? audio.duration : 0);
+      const audioDuration = Number(audio.duration);
+      if (Number.isFinite(audioDuration) && audioDuration > 0) {
+        setDurationSec(audioDuration);
+      }
     };
     const handlePause = () => {
       if (playbackEngineRef.current !== 'html') return;
@@ -850,7 +835,8 @@ function PlayerDashboard({
     };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('loadedmetadata', applyHtmlAudioDuration);
+    audio.addEventListener('durationchange', applyHtmlAudioDuration);
     audio.addEventListener('pause', handlePause);
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('ended', handleEnded);
@@ -859,7 +845,8 @@ function PlayerDashboard({
       audio.pause();
       audioManager.stop();
       audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('loadedmetadata', applyHtmlAudioDuration);
+      audio.removeEventListener('durationchange', applyHtmlAudioDuration);
       audio.removeEventListener('pause', handlePause);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('ended', handleEnded);
@@ -1249,7 +1236,7 @@ function PlayerDashboard({
       }
 
       setCurrentTimeSec(0);
-      setDurationSec(0);
+      setDurationSec(Math.max(0, Number(item.durationMs || 0) / 1000));
       if (typeof indexForState === 'number' && indexForState >= 0) {
         setActiveIndex(indexForState);
       }
@@ -1259,6 +1246,8 @@ function PlayerDashboard({
       const snapshotHasMetronome = hasSnapshotMetronome(mixSnapshot);
       const metronomeMuted = snapshotHasMetronome ? preferredMetronomeMutedRef.current : false;
       const playbackSnapshot = withSnapshotMetronomeMuted(mixSnapshot, metronomeMuted);
+      const durationMs = computeSnapshotDurationMs(playbackSnapshot);
+      setDurationSec(Math.max(0, durationMs / 1000));
       const audioBuffers = await ensureSnapshotAudioBuffers(playbackSnapshot);
       setHasRealtimeMetronome(snapshotHasMetronome);
       setIsRealtimeMetronomeMuted(snapshotHasMetronome ? metronomeMuted : false);
@@ -1275,7 +1264,6 @@ function PlayerDashboard({
       }
 
       if (isRealtimeMix) {
-        const durationMs = computeSnapshotDurationMs(playbackSnapshot);
         await applyPlaybackOutputConfig();
         audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
         await audioManager.play(playbackSnapshot, 0, { useProjectMasterVolume: false });
@@ -1290,7 +1278,6 @@ function PlayerDashboard({
         };
         playbackEngineRef.current = 'realtime';
         setPlaybackEngine('realtime');
-        setDurationSec(Math.max(0, durationMs / 1000));
         setIsPlaying(true);
         return;
       }
@@ -1298,7 +1285,7 @@ function PlayerDashboard({
       realtimePlaybackRef.current = {
         project: playbackSnapshot,
         item,
-        durationMs: computeSnapshotDurationMs(snapshot),
+        durationMs,
       };
       const rendered = await renderPresetVariant(
         playbackSnapshot,
@@ -2953,7 +2940,9 @@ function PlayerDashboard({
                                   ) : null}
                                 </div>
                                 <div className="truncate">{rowTitle}</div>
-                                <div className="text-right text-gray-400">--:--</div>
+                                <div className="text-right text-gray-400 tabular-nums">
+                                  {formatDurationMs(row.mix?.durationMs, isActive ? durationSec : 0)}
+                                </div>
                                 <div className="flex justify-end">
                                   {!row.unavailable && row.mix ? (
                                     <button
@@ -3036,7 +3025,9 @@ function PlayerDashboard({
                                 </button>
                               </div>
                               <div className="truncate text-gray-100">{listTitle}</div>
-                              <div className="text-right text-gray-400">--:--</div>
+                              <div className="text-right text-gray-400 tabular-nums">
+                                {formatDurationMs(mix.durationMs, isActive ? durationSec : 0)}
+                              </div>
                               <div className="flex justify-end">
                                 <button
                                   onClick={(event) => {
@@ -3429,7 +3420,7 @@ function PlayerDashboard({
 	            </div>
 
             <div className="mt-3 flex items-center gap-3 w-full">
-              <span className="text-sm text-gray-300">{formatClock(currentTimeSec)}</span>
+              <span className="text-sm text-gray-300 tabular-nums">{formatClock(currentTimeSec)}</span>
               <input
                 type="range"
                 min="0"
@@ -3439,7 +3430,7 @@ function PlayerDashboard({
                 onChange={(e) => handleSeek(Number(e.target.value))}
                 className="flex-1 volume-slider volume-slider-lg cursor-pointer block"
               />
-              <span className="text-sm text-gray-300">{formatClock(durationSec)}</span>
+              <span className="text-sm text-gray-300 tabular-nums">{formatClock(durationSec)}</span>
             </div>
           </div>
 

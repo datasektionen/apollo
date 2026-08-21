@@ -35,6 +35,7 @@ export function createQueueItemFromMix(mix, collectionType, collectionId = null)
     musicalNumber: String(mix.musicalNumber || ''),
     showId: String(mix.showId || ''),
     showName: String(mix.showName || ''),
+    durationMs: Number(mix.durationMs) || 0,
     canWrite: Boolean(mix.canWrite),
     collectionType,
     collectionId: collectionId ? String(collectionId) : null,

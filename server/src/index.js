@@ -101,6 +101,9 @@ import {
   userHasAdminRole,
   validateAndTransformProjectWrite,
 } from './rbac.js';
+import { snapshotDurationMsSql } from './projectDuration.js';
+
+const PROJECT_SNAPSHOT_DURATION_MS_SQL = snapshotDurationMsSql('ph');
 
 const app = express();
 const server = http.createServer(app);
@@ -3426,12 +3429,15 @@ app.get('/api/player/my-device', requireAuth, async (req, res) => {
                 p.scene_order AS "sceneOrder",
                 p.show_id AS "showId",
                 s.name AS "showName",
-                s.order_index AS "showOrderIndex"
+                s.order_index AS "showOrderIndex",
+                ${PROJECT_SNAPSHOT_DURATION_MS_SQL} AS "durationMs"
          FROM virtual_mixes vm
          JOIN projects p
            ON p.id = vm.project_id
          LEFT JOIN shows s
            ON s.id = p.show_id
+         LEFT JOIN project_heads ph
+           ON ph.project_id = p.id
          WHERE vm.owner_user_id = $1
          ORDER BY vm.updated_at DESC`,
         [userId]
@@ -3470,7 +3476,8 @@ app.get('/api/player/my-device', requireAuth, async (req, res) => {
                 p.scene_order AS "sceneOrder",
                 p.show_id AS "showId",
                 s.name AS "showName",
-                s.order_index AS "showOrderIndex"
+                s.order_index AS "showOrderIndex",
+                ${PROJECT_SNAPSHOT_DURATION_MS_SQL} AS "durationMs"
          FROM player_playlist_items pli
          JOIN player_playlists pl
            ON pl.id = pli.playlist_id
@@ -3480,6 +3487,8 @@ app.get('/api/player/my-device', requireAuth, async (req, res) => {
            ON p.id = vm.project_id
          LEFT JOIN shows s
            ON s.id = p.show_id
+         LEFT JOIN project_heads ph
+           ON ph.project_id = p.id
          WHERE pl.owner_user_id = $1
          ORDER BY pli.playlist_id ASC, pli.order_index ASC`,
         [userId]
@@ -3529,6 +3538,7 @@ app.get('/api/player/my-device', requireAuth, async (req, res) => {
           showId: row.showId,
           showName: row.showName,
           showOrderIndex: row.showOrderIndex,
+          durationMs: Number(row.durationMs) || 0,
           canRead: true,
           canWrite: Boolean(isAdmin || permission?.compatibility?.canWrite),
           canCreateMixes: Boolean(isAdmin || canCreateProjectMixes(permission)),
@@ -3555,6 +3565,7 @@ app.get('/api/player/my-device', requireAuth, async (req, res) => {
         const permission = permissionMap.get(String(row.projectId)) || null;
         return {
           ...row,
+          durationMs: Number(row.durationMs) || 0,
           access: permission,
           canRead: Boolean(isAdmin || permission?.compatibility?.canRead),
           canWrite: Boolean(isAdmin || permission?.compatibility?.canWrite),
@@ -3580,10 +3591,13 @@ app.get('/api/player/tutti', requireAuth, async (req, res) => {
               p.show_id AS "showId",
               s.name AS "showName",
               s.order_index AS "showOrderIndex",
-              p.created_by AS "createdByUserId"
+              p.created_by AS "createdByUserId",
+              ${PROJECT_SNAPSHOT_DURATION_MS_SQL} AS "durationMs"
        FROM projects p
        LEFT JOIN shows s
-         ON s.id = p.show_id`
+         ON s.id = p.show_id
+       LEFT JOIN project_heads ph
+         ON ph.project_id = p.id`
     );
     const permissionMap = await buildProjectPermissionMapForRows(req.user.id, result.rows);
     const projects = result.rows
@@ -3603,6 +3617,7 @@ app.get('/api/player/tutti', requireAuth, async (req, res) => {
         showId: project.showId,
         showName: project.showName,
         showOrderIndex: project.showOrderIndex,
+        durationMs: Number(project.durationMs) || 0,
         canWrite: Boolean(project.canWrite),
         canCreateMixes: Boolean(project.canCreateMixes),
         canListenTutti: Boolean(project.canListenTutti),
@@ -3636,12 +3651,15 @@ app.get('/api/player/mixes/global', requireAuth, async (req, res) => {
               s.name AS "showName",
               s.order_index AS "showOrderIndex",
               p.created_by AS "createdByUserId",
-              u.username AS "ownerUsername"
+              u.username AS "ownerUsername",
+              ${PROJECT_SNAPSHOT_DURATION_MS_SQL} AS "durationMs"
        FROM virtual_mixes vm
        JOIN projects p
          ON p.id = vm.project_id
        LEFT JOIN shows s
          ON s.id = p.show_id
+       LEFT JOIN project_heads ph
+         ON ph.project_id = p.id
        JOIN users u
          ON u.id = vm.owner_user_id
        WHERE vm.visibility = 'global'
@@ -3653,6 +3671,7 @@ app.get('/api/player/mixes/global', requireAuth, async (req, res) => {
       mixes: result.rows
         .map((row) => ({
           ...row,
+          durationMs: Number(row.durationMs) || 0,
           access: permissionMap.get(String(row.projectId)) || null,
           canWrite: Boolean((permissionMap.get(String(row.projectId)) || {}).compatibility?.canWrite),
           canRead: Boolean((permissionMap.get(String(row.projectId)) || {}).compatibility?.canRead),
