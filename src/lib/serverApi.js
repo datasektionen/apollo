@@ -385,8 +385,15 @@ export async function validateAdminStorage(session) {
   }, session);
 }
 
-export async function quarantineAdminMedia(mediaId, session) {
+export async function quarantineAdminMedia(mediaId, session, { force = false } = {}) {
   return await apiFetch(`/api/admin/storage/media/${encodeURIComponent(mediaId)}/quarantine`, {
+    method: 'POST',
+    body: { force: Boolean(force) },
+  }, session);
+}
+
+export async function restoreAdminMedia(mediaId, session) {
+  return await apiFetch(`/api/admin/storage/media/${encodeURIComponent(mediaId)}/restore`, {
     method: 'POST',
     body: {},
   }, session);

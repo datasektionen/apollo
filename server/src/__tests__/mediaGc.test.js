@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  classifyDatabaseHost,
+  classifyFstype,
   classifyMediaStatus,
+  classifyStorageLayout,
   collectSnapshotMediaIds,
   computeDeletesAt,
   fileNameFromStoredPath,
   getFollowingMediaGcRunAt,
+  isLocalDatabaseUrl,
+  parseMountInfo,
 } from '../mediaGc.js';
 
 describe('collectSnapshotMediaIds', () => {
@@ -46,11 +51,11 @@ describe('computeDeletesAt', () => {
 });
 
 describe('classifyMediaStatus', () => {
-  it('treats blobs still present in a live snapshot as in use even if a tombstone exists', () => {
+  it('classifies tombstoned blobs as quarantine even if a snapshot still mentions them', () => {
     expect(classifyMediaStatus({
       clipCount: 1,
       unreferencedAt: '2026-08-20T12:00:00.000Z',
-    })).toBe('in_use');
+    })).toBe('quarantine');
   });
 
   it('classifies unreferenced tombstones as quarantine', () => {
@@ -79,5 +84,92 @@ describe('media GC schedule', () => {
     const next = getFollowingMediaGcRunAt(new Date(2026, 7, 20, 4, 0, 1), { hour: 4 });
     expect(next.getDate()).toBe(21);
     expect(next.getHours()).toBe(4);
+  });
+});
+
+describe('storage layout', () => {
+  it('classifies database hosts', () => {
+    expect(classifyDatabaseHost('postgres://apollo:apollo@localhost:5432/apollo')).toBe('loopback');
+    expect(classifyDatabaseHost('postgresql://apollo:apollo@127.0.0.1/apollo')).toBe('loopback');
+    expect(classifyDatabaseHost('postgres://apollo:apollo@/apollo')).toBe('loopback');
+    expect(classifyDatabaseHost('postgres://apollo:apollo@db:5432/apollo')).toBe('docker-internal');
+    expect(classifyDatabaseHost('postgres://apollo:apollo@10.0.0.8:5432/apollo')).toBe('remote');
+    expect(classifyDatabaseHost('postgres://apollo:apollo@db.example.com:5432/apollo')).toBe('remote');
+    expect(isLocalDatabaseUrl('postgres://apollo:apollo@db:5432/apollo')).toBe(true);
+    expect(isLocalDatabaseUrl('postgres://apollo:apollo@db.example.com:5432/apollo')).toBe(false);
+  });
+
+  it('reads the closest mount from mountinfo', () => {
+    const mountinfo = [
+      '1 0 8:1 / / rw - ext4 /dev/sda1 rw',
+      '2 1 0:75 / /data/media rw - virtiofs media rw',
+    ].join('\n');
+    expect(parseMountInfo(mountinfo, '/data/media/clip.wav')).toEqual({
+      mountPoint: '/data/media',
+      fstype: 'virtiofs',
+    });
+    expect(classifyFstype('virtiofs')).toBe('host-share');
+    expect(classifyFstype('nfs4')).toBe('network');
+    expect(classifyFstype('ext4')).toBe('local-disk');
+  });
+
+  it('combines when a visible local database directory is on the same device', () => {
+    expect(classifyStorageLayout({
+      mediaDevice: 16777232,
+      databaseDevice: 16777232,
+      databaseHostKind: 'loopback',
+    })).toBe('combined');
+  });
+
+  it('splits when a visible local database directory is on another device', () => {
+    expect(classifyStorageLayout({
+      mediaDevice: 16777232,
+      databaseDevice: 16777233,
+      databaseHostKind: 'loopback',
+      mediaMountKind: 'local-disk',
+    })).toBe('split');
+  });
+
+  it('combines Docker Desktop host mounts even when device ids differ', () => {
+    expect(classifyStorageLayout({
+      mediaDevice: 40,
+      databaseDevice: 99,
+      databaseHostKind: 'docker-internal',
+      mediaMountKind: 'host-share',
+    })).toBe('combined');
+    expect(classifyStorageLayout({
+      mediaDevice: 40,
+      databaseDevice: null,
+      databaseHostKind: 'docker-internal',
+      mediaMountKind: 'host-share',
+    })).toBe('combined');
+  });
+
+  it('splits when media is a linux bind mount on another disk and postgres is not visible', () => {
+    expect(classifyStorageLayout({
+      mediaDevice: 8,
+      databaseDevice: null,
+      databaseHostKind: 'docker-internal',
+      mediaMountKind: 'local-disk',
+      rootDevice: 1,
+    })).toBe('split');
+  });
+
+  it('combines a compose database when media lives on the container root disk', () => {
+    expect(classifyStorageLayout({
+      mediaDevice: 1,
+      databaseDevice: null,
+      databaseHostKind: 'docker-internal',
+      mediaMountKind: 'local-disk',
+      rootDevice: 1,
+    })).toBe('combined');
+  });
+
+  it('splits remote postgres even if a local data directory happens to exist', () => {
+    expect(classifyStorageLayout({
+      mediaDevice: 16777232,
+      databaseDevice: 16777232,
+      databaseHostKind: 'remote',
+    })).toBe('split');
   });
 });

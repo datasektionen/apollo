@@ -1,0 +1,2 @@
+ALTER TABLE media_objects
+  ADD COLUMN IF NOT EXISTS quarantined_by TEXT REFERENCES users(id) ON DELETE SET NULL;

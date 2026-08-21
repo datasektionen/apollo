@@ -54,8 +54,8 @@ export function computeDeletesAt(unreferencedAt, ttlHours) {
 }
 
 export function classifyMediaStatus({ clipCount = 0, unreferencedAt = null } = {}) {
-  if (Number(clipCount || 0) > 0) return 'in_use';
   if (unreferencedAt) return 'quarantine';
+  if (Number(clipCount || 0) > 0) return 'in_use';
   return 'unused';
 }
 
@@ -91,13 +91,15 @@ const LIVE_CLIP_USAGE_SQL = `
   WHERE COALESCE(clip->>'blobId', '') <> ''
 `;
 
-export async function refreshMediaUnreferencedAt(client, mediaIds) {
+export async function refreshMediaUnreferencedAt(client, mediaIds, { quarantinedBy = null } = {}) {
   const ids = Array.from(new Set((mediaIds || []).filter(Boolean)));
   if (!ids.length) return 0;
 
   await client.query(
     `UPDATE media_objects mo
-     SET unreferenced_at = NULL
+     SET unreferenced_at = NULL,
+         retained = FALSE,
+         quarantined_by = NULL
      WHERE mo.id = ANY($1::text[])
        AND EXISTS (
          SELECT 1
@@ -109,21 +111,23 @@ export async function refreshMediaUnreferencedAt(client, mediaIds) {
 
   const tombstoned = await client.query(
     `UPDATE media_objects mo
-     SET unreferenced_at = NOW()
+     SET unreferenced_at = NOW(),
+         quarantined_by = $2
      WHERE mo.id = ANY($1::text[])
        AND mo.unreferenced_at IS NULL
+       AND NOT mo.retained
        AND NOT EXISTS (
          SELECT 1
          FROM project_media_refs r
          WHERE r.media_id = mo.id
        )
      RETURNING mo.id`,
-    [ids]
+    [ids, quarantinedBy]
   );
   return tombstoned.rowCount;
 }
 
-export async function syncProjectMediaRefs(client, projectId, snapshot) {
+export async function syncProjectMediaRefs(client, projectId, snapshot, { quarantinedBy = null } = {}) {
   const desired = collectSnapshotMediaIds(snapshot);
   const previousResult = await client.query(
     `SELECT media_id AS "mediaId"
@@ -139,6 +143,7 @@ export async function syncProjectMediaRefs(client, projectId, snapshot) {
        SELECT $1, m.id, NULL
        FROM unnest($2::text[]) AS t(id)
        JOIN media_objects m ON m.id = t.id
+       WHERE m.unreferenced_at IS NULL
        ON CONFLICT (project_id, media_id) DO NOTHING`,
       [projectId, desired]
     );
@@ -152,15 +157,17 @@ export async function syncProjectMediaRefs(client, projectId, snapshot) {
   );
 
   const affected = Array.from(new Set([...previousIds, ...desired]));
-  return await refreshMediaUnreferencedAt(client, affected);
+  return await refreshMediaUnreferencedAt(client, affected, { quarantinedBy });
 }
 
-export async function markUnreferencedMedia(client, { attachGraceSeconds = 3600 } = {}) {
+export async function markUnreferencedMedia(client, { attachGraceSeconds = 3600, quarantinedBy = null } = {}) {
   const graceSeconds = Math.max(0, Number(attachGraceSeconds) || 0);
   const result = await client.query(
     `UPDATE media_objects mo
-     SET unreferenced_at = NOW()
+     SET unreferenced_at = NOW(),
+         quarantined_by = $2
      WHERE mo.unreferenced_at IS NULL
+       AND NOT mo.retained
        AND mo.created_at <= NOW() - ($1::numeric * INTERVAL '1 second')
        AND NOT EXISTS (
          SELECT 1
@@ -168,7 +175,7 @@ export async function markUnreferencedMedia(client, { attachGraceSeconds = 3600 
          WHERE r.media_id = mo.id
        )
      RETURNING mo.id`,
-    [graceSeconds]
+    [graceSeconds, quarantinedBy]
   );
   return result.rowCount;
 }
@@ -232,7 +239,7 @@ async function withMediaGcLock(db, fn) {
   }
 }
 
-export async function reconcileAllProjectMediaRefs(db, { attachGraceSeconds = 3600 } = {}) {
+export async function reconcileAllProjectMediaRefs(db, { attachGraceSeconds = 3600, quarantinedBy = null } = {}) {
   return withMediaGcLock(db, async (client) => {
     const heads = await client.query(
       `SELECT project_id AS "projectId",
@@ -244,9 +251,9 @@ export async function reconcileAllProjectMediaRefs(db, { attachGraceSeconds = 36
     try {
       let quarantinedCount = 0;
       for (const row of heads.rows) {
-        quarantinedCount += Number(await syncProjectMediaRefs(client, row.projectId, row.snapshot) || 0);
+        quarantinedCount += Number(await syncProjectMediaRefs(client, row.projectId, row.snapshot, { quarantinedBy }) || 0);
       }
-      quarantinedCount += Number(await markUnreferencedMedia(client, { attachGraceSeconds }) || 0);
+      quarantinedCount += Number(await markUnreferencedMedia(client, { attachGraceSeconds, quarantinedBy }) || 0);
       await client.query('COMMIT');
       return {
         projectCount: heads.rows.length,
@@ -259,8 +266,8 @@ export async function reconcileAllProjectMediaRefs(db, { attachGraceSeconds = 36
   });
 }
 
-export async function validateUnusedMedia(db, { attachGraceSeconds = 0 } = {}) {
-  const result = await reconcileAllProjectMediaRefs(db, { attachGraceSeconds });
+export async function validateUnusedMedia(db, { attachGraceSeconds = 0, quarantinedBy = null } = {}) {
+  const result = await reconcileAllProjectMediaRefs(db, { attachGraceSeconds, quarantinedBy });
   if (result?.skipped) {
     throw new MediaGcActionError('Storage maintenance is already running. Try again in a moment.', {
       status: 409,
@@ -269,7 +276,7 @@ export async function validateUnusedMedia(db, { attachGraceSeconds = 0 } = {}) {
   return result;
 }
 
-export async function quarantineMediaById(db, mediaId) {
+export async function quarantineMediaById(db, mediaId, { force = false, quarantinedBy = null } = {}) {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -285,10 +292,10 @@ export async function quarantineMediaById(db, mediaId) {
     }
 
     const usage = await getLiveMediaUsage(client, mediaId);
-    if (usage.clipCount > 0) {
+    if (usage.clipCount > 0 && !force) {
       throw new MediaGcActionError(
         `That file is still used by ${usage.clipCount} clip${usage.clipCount === 1 ? '' : 's'}.`,
-        { status: 409, details: { projectNames: usage.projectNames } }
+        { status: 409, details: { projectNames: usage.projectNames, clipCount: usage.clipCount } }
       );
     }
 
@@ -299,12 +306,52 @@ export async function quarantineMediaById(db, mediaId) {
     );
     await client.query(
       `UPDATE media_objects
-       SET unreferenced_at = COALESCE(unreferenced_at, NOW())
+       SET unreferenced_at = COALESCE(unreferenced_at, NOW()),
+           retained = FALSE,
+           quarantined_by = COALESCE($2, quarantined_by)
        WHERE id = $1`,
-      [mediaId]
+      [mediaId, quarantinedBy]
     );
     await client.query('COMMIT');
     return { mediaId, alreadyQuarantined: Boolean(media.rows[0].unreferencedAt) };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function restoreMediaById(db, mediaId) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const media = await client.query(
+      `SELECT id, unreferenced_at AS "unreferencedAt"
+       FROM media_objects
+       WHERE id = $1
+       FOR UPDATE`,
+      [mediaId]
+    );
+    if (media.rowCount === 0) {
+      throw new MediaGcActionError('Media not found', { status: 404 });
+    }
+    if (!media.rows[0].unreferencedAt) {
+      await client.query('COMMIT');
+      return { mediaId, restored: false, alreadyRestored: true };
+    }
+
+    const usage = await getLiveMediaUsage(client, mediaId);
+    await client.query(
+      `UPDATE media_objects
+       SET unreferenced_at = NULL,
+           retained = $2,
+           quarantined_by = NULL
+       WHERE id = $1`,
+      [mediaId, usage.clipCount === 0]
+    );
+    await client.query('COMMIT');
+    return { mediaId, restored: true, alreadyRestored: false };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -381,12 +428,9 @@ export async function deleteQuarantinedMedia(db, { unlinkFile = null } = {}) {
 
 export async function runMediaGarbageCollection(db, {
   ttlHours = 168,
-  attachGraceSeconds = 3600,
   unlinkFile = null,
 } = {}) {
   const result = await withMediaGcLock(db, async (client) => {
-    await markUnreferencedMedia(client, { attachGraceSeconds });
-
     await client.query('BEGIN');
     try {
       const expired = await client.query(
@@ -432,34 +476,175 @@ export async function runMediaGarbageCollection(db, {
   };
 }
 
-export async function getVolumeStats(mediaRoot) {
+export async function getVolumeStats(targetPath) {
   try {
-    const stats = await fs.statfs(mediaRoot);
+    const stats = await fs.statfs(targetPath);
     const blockSize = Number(stats.bsize || stats.frsize || 0);
     const totalBytes = Number(stats.blocks || 0) * blockSize;
     const availableBytes = Number(stats.bavail || 0) * blockSize;
     if (!Number.isFinite(totalBytes) || totalBytes <= 0) {
       return {
-        path: mediaRoot,
+        path: targetPath,
         totalBytes: null,
         availableBytes: null,
         usedBytes: null,
       };
     }
     return {
-      path: mediaRoot,
+      path: targetPath,
       totalBytes,
       availableBytes: Number.isFinite(availableBytes) ? availableBytes : null,
       usedBytes: Number.isFinite(availableBytes) ? Math.max(0, totalBytes - availableBytes) : null,
     };
   } catch {
     return {
-      path: mediaRoot,
+      path: targetPath,
       totalBytes: null,
       availableBytes: null,
       usedBytes: null,
     };
   }
+}
+
+const HOST_SHARE_FS_TYPES = new Set([
+  'virtiofs',
+  'osxfs',
+  'fuse.osxfs',
+  'fuse.grpcfuse',
+  'grpcfuse',
+  '9p',
+]);
+const NETWORK_FS_TYPES = new Set([
+  'nfs',
+  'nfs4',
+  'cifs',
+  'smb3',
+  'smbfs',
+  'fuse.sshfs',
+  'afs',
+]);
+
+export async function getFilesystemDevice(targetPath) {
+  if (!targetPath) return null;
+  try {
+    const stats = await fs.stat(targetPath);
+    return stats.dev == null ? null : stats.dev;
+  } catch {
+    return null;
+  }
+}
+
+function decodeMountField(value) {
+  return String(value || '').replace(/\\([0-7]{3})/g, (_match, octal) => (
+    String.fromCharCode(Number.parseInt(octal, 8))
+  ));
+}
+
+export function parseMountInfo(content, targetPath) {
+  const resolved = path.resolve(targetPath);
+  let best = null;
+  String(content || '').split('\n').forEach((line) => {
+    const separator = line.indexOf(' - ');
+    if (separator === -1) return;
+    const left = line.slice(0, separator).split(' ');
+    const right = line.slice(separator + 3).split(' ');
+    const mountPoint = decodeMountField(left[4]);
+    const fstype = right[0];
+    if (!mountPoint || !fstype) return;
+    const isMatch = mountPoint === '/'
+      ? resolved.startsWith('/')
+      : (resolved === mountPoint || resolved.startsWith(`${mountPoint}/`));
+    if (!isMatch) return;
+    if (!best || mountPoint.length > best.mountPoint.length) {
+      best = { mountPoint, fstype };
+    }
+  });
+  return best;
+}
+
+export function classifyFstype(fstype) {
+  const type = String(fstype || '').toLowerCase();
+  if (!type) return 'local-disk';
+  if (NETWORK_FS_TYPES.has(type) || type.startsWith('nfs') || type.startsWith('smb')) return 'network';
+  if (HOST_SHARE_FS_TYPES.has(type) || type.includes('virtiofs') || type.includes('osxfs') || type.includes('grpcfuse')) {
+    return 'host-share';
+  }
+  return 'local-disk';
+}
+
+export async function getMountKind(targetPath) {
+  if (!targetPath) return 'local-disk';
+  try {
+    const [mountInfo, resolved] = await Promise.all([
+      fs.readFile('/proc/self/mountinfo', 'utf8'),
+      fs.realpath(targetPath).catch(() => path.resolve(targetPath)),
+    ]);
+    return classifyFstype(parseMountInfo(mountInfo, resolved)?.fstype);
+  } catch {
+    return 'local-disk';
+  }
+}
+
+function parseDatabaseHostname(databaseUrl) {
+  const raw = String(databaseUrl || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw.replace(/^postgres(?:ql)?:/i, 'http:'));
+    const socketHost = String(parsed.searchParams.get('host') || '');
+    if (socketHost.startsWith('/')) return '';
+    return decodeURIComponent(parsed.hostname || '')
+      .replace(/^\[|\]$/g, '')
+      .toLowerCase();
+  } catch {
+    if (/:\/\/[^/?#]*@\//.test(raw) || /^postgres(?:ql)?:\/\/\//i.test(raw)) return '';
+    return null;
+  }
+}
+
+export function classifyDatabaseHost(databaseUrl) {
+  const host = parseDatabaseHostname(databaseUrl);
+  if (host === null) return 'remote';
+  if (!host) return 'loopback';
+  if (['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(host)) return 'loopback';
+  if (['host.docker.internal', 'docker.for.mac.localhost', 'docker.for.win.localhost'].includes(host)) {
+    return 'loopback';
+  }
+  if (!host.includes('.') && !/^\d+$/.test(host)) return 'docker-internal';
+  return 'remote';
+}
+
+export function isLocalDatabaseUrl(databaseUrl) {
+  return classifyDatabaseHost(databaseUrl) !== 'remote';
+}
+
+export function classifyStorageLayout({
+  mediaDevice = null,
+  databaseDevice = null,
+  databaseHostKind = 'remote',
+  mediaMountKind = 'local-disk',
+  rootDevice = null,
+} = {}) {
+  if (databaseHostKind === 'remote') return 'split';
+
+  if (mediaDevice != null && databaseDevice != null) {
+    if (String(mediaDevice) === String(databaseDevice)) return 'combined';
+    // Docker Desktop bind-mounts the host disk (virtiofs) while a Compose volume
+    // looks like a different Linux filesystem, even though both live on that host disk.
+    if (mediaMountKind === 'host-share') return 'combined';
+    return 'split';
+  }
+
+  if (mediaMountKind === 'network') return 'split';
+  if (mediaMountKind === 'host-share') return 'combined';
+  if (rootDevice != null && mediaDevice != null && String(mediaDevice) !== String(rootDevice)) {
+    return 'split';
+  }
+  return 'combined';
+}
+
+function toPositiveBytes(value) {
+  const bytes = Number(value);
+  return Number.isFinite(bytes) && bytes > 0 ? bytes : null;
 }
 
 function toIso(value) {
@@ -481,6 +666,7 @@ function mapMediaStorageItem(row, ttlHours) {
     createdAt: toIso(row.createdAt),
     createdByUserId: row.createdByUserId || null,
     createdByUsername: row.createdByUsername || null,
+    quarantinedByUsername: row.quarantinedByUsername || null,
     unreferencedAt,
     deletesAt: status === 'quarantine' ? computeDeletesAt(unreferencedAt, ttlHours) : null,
     status,
@@ -493,9 +679,25 @@ function mapMediaStorageItem(row, ttlHours) {
 export async function getMediaStorageOverview(db, {
   mediaRoot,
   ttlHours = 168,
+  databaseUrl = '',
 } = {}) {
   const [databaseResult, itemsResult, volume] = await Promise.all([
-    db.query('SELECT pg_database_size(current_database())::bigint AS "databaseBytes"'),
+    db.query(
+      `SELECT pg_database_size(current_database())::bigint AS "databaseBytes",
+              current_database() AS "databaseName",
+              current_setting('data_directory') AS "dataDirectory",
+              (
+                SELECT pg_size_bytes(split_part(opt, '=', 2))
+                FROM pg_tablespace ts
+                JOIN pg_database d ON d.dattablespace = ts.oid
+                CROSS JOIN LATERAL unnest(COALESCE(ts.spcoptions, ARRAY[]::text[])) AS opt
+                WHERE d.datname = current_database()
+                  AND split_part(opt, '=', 1) = 'max_size'
+                  AND NULLIF(split_part(opt, '=', 2), '') IS NOT NULL
+                  AND split_part(opt, '=', 2) <> '-1'
+                LIMIT 1
+              ) AS "quotaBytes"`
+    ),
     db.query(
       `WITH clip_usage AS (
          SELECT usage.media_id,
@@ -515,23 +717,45 @@ export async function getMediaStorageOverview(db, {
               mo.created_by AS "createdByUserId",
               mo.unreferenced_at AS "unreferencedAt",
               u.username AS "createdByUsername",
+              quarantiner.username AS "quarantinedByUsername",
               COALESCE(clip_usage.project_count, 0) AS "projectCount",
               COALESCE(clip_usage.project_names, ARRAY[]::text[]) AS "projectNames",
               COALESCE(clip_usage.clip_count, 0) AS "clipCount"
        FROM media_objects mo
        LEFT JOIN users u ON u.id = mo.created_by
+       LEFT JOIN users quarantiner ON quarantiner.id = mo.quarantined_by
        LEFT JOIN clip_usage ON clip_usage.media_id = mo.id
        ORDER BY mo.size_bytes DESC, mo.created_at DESC`
     ),
     getVolumeStats(mediaRoot),
   ]);
 
+  const databaseRow = databaseResult.rows[0] || {};
+  const dataDirectory = databaseRow.dataDirectory || null;
+  const databaseHostKind = classifyDatabaseHost(databaseUrl);
+  const [mediaDevice, databaseDevice, rootDevice, mediaMountKind] = await Promise.all([
+    getFilesystemDevice(mediaRoot),
+    databaseHostKind === 'remote' ? Promise.resolve(null) : getFilesystemDevice(dataDirectory),
+    process.platform === 'linux' ? getFilesystemDevice('/') : Promise.resolve(null),
+    getMountKind(mediaRoot),
+  ]);
+  const sameFilesystem = classifyStorageLayout({
+    mediaDevice,
+    databaseDevice,
+    databaseHostKind,
+    mediaMountKind,
+    rootDevice,
+  }) === 'combined';
+  const databaseVolume = (!sameFilesystem && databaseDevice != null)
+    ? await getVolumeStats(dataDirectory)
+    : null;
+
   const items = itemsResult.rows.map((row) => mapMediaStorageItem(row, ttlHours));
   const mediaBytes = items.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0);
   const quarantineItems = items.filter((item) => item.status === 'quarantine');
   const inUseItems = items.filter((item) => item.status === 'in_use');
   const unusedItems = items.filter((item) => item.status === 'unused');
-  const databaseBytes = Number(databaseResult.rows[0]?.databaseBytes || 0);
+  const databaseBytes = Number(databaseRow.databaseBytes || 0);
 
   return {
     summary: {
@@ -543,9 +767,14 @@ export async function getMediaStorageOverview(db, {
       inUseBytes: inUseItems.reduce((sum, item) => sum + Number(item.sizeBytes || 0), 0),
       unusedCount: unusedItems.length,
       databaseBytes,
+      databaseName: databaseRow.databaseName || null,
+      databasePath: dataDirectory,
+      databaseQuotaBytes: toPositiveBytes(databaseRow.quotaBytes),
       appBytes: mediaBytes + databaseBytes,
       ttlHours: Number(ttlHours) || 168,
+      sameFilesystem,
       volume,
+      databaseVolume,
     },
     items,
   };

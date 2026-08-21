@@ -18,6 +18,7 @@ import {
   getFollowingMediaGcRunAt,
   getMediaStorageOverview,
   quarantineMediaById,
+  restoreMediaById,
   runMediaGarbageCollection,
   syncProjectMediaRefs,
   refreshMediaUnreferencedAt,
@@ -475,7 +476,6 @@ async function runScheduledMediaGarbageCollection() {
   try {
     const result = await runMediaGarbageCollection(pool, {
       ttlHours: config.mediaGcTtlHours,
-      attachGraceSeconds: config.mediaGcAttachGraceSeconds,
       unlinkFile: unlinkMediaFile,
     });
     if (result?.deletedCount) {
@@ -625,7 +625,7 @@ async function appendProjectOp({ projectId, userId, clientOpId, op }) {
       [projectId, nextSeq, JSON.stringify(nextSnapshot), shouldCheckpoint]
     );
 
-    await syncProjectMediaRefs(client, projectId, nextSnapshot);
+    await syncProjectMediaRefs(client, projectId, nextSnapshot, { quarantinedBy: userId });
 
     if (shouldCheckpoint) {
       await client.query(
@@ -1729,6 +1729,7 @@ app.get('/api/admin/storage', requireAuth, requireAdmin, async (_req, res) => {
     const overview = await getMediaStorageOverview(pool, {
       mediaRoot: config.mediaRoot,
       ttlHours: config.mediaGcTtlHours,
+      databaseUrl: config.databaseUrl,
     });
     res.json(overview);
   } catch (error) {
@@ -1741,6 +1742,7 @@ async function sendAdminStorage(res, extra = {}, status = 200) {
   const overview = await getMediaStorageOverview(pool, {
     mediaRoot: config.mediaRoot,
     ttlHours: config.mediaGcTtlHours,
+    databaseUrl: config.databaseUrl,
   });
   res.status(status).json({ ...overview, ...extra });
 }
@@ -1758,9 +1760,12 @@ function handleMediaGcActionError(res, error, fallbackMessage) {
   return false;
 }
 
-app.post('/api/admin/storage/validate', requireAuth, requireAdmin, async (_req, res) => {
+app.post('/api/admin/storage/validate', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const result = await validateUnusedMedia(pool, { attachGraceSeconds: 0 });
+    const result = await validateUnusedMedia(pool, {
+      attachGraceSeconds: 0,
+      quarantinedBy: req.user.id,
+    });
     await sendAdminStorage(res, { result });
   } catch (error) {
     handleMediaGcActionError(res, error, 'Failed to validate unused media');
@@ -1769,10 +1774,25 @@ app.post('/api/admin/storage/validate', requireAuth, requireAdmin, async (_req, 
 
 app.post('/api/admin/storage/media/:mediaId/quarantine', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const result = await quarantineMediaById(pool, req.params.mediaId);
+    const force = Boolean(req.body?.force)
+      || req.query?.force === 'true'
+      || req.query?.force === '1';
+    const result = await quarantineMediaById(pool, req.params.mediaId, {
+      force,
+      quarantinedBy: req.user.id,
+    });
     await sendAdminStorage(res, { result });
   } catch (error) {
     handleMediaGcActionError(res, error, 'Failed to move media to quarantine');
+  }
+});
+
+app.post('/api/admin/storage/media/:mediaId/restore', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await restoreMediaById(pool, req.params.mediaId);
+    await sendAdminStorage(res, { result });
+  } catch (error) {
+    handleMediaGcActionError(res, error, 'Failed to restore media from quarantine');
   }
 });
 
@@ -2604,7 +2624,7 @@ app.post('/api/projects', requireAuth, async (req, res) => {
 
       await replaceProjectAccessTags(client, projectId, snapshot);
 
-      await syncProjectMediaRefs(client, projectId, snapshot);
+      await syncProjectMediaRefs(client, projectId, snapshot, { quarantinedBy: req.user.id });
 
       await client.query('COMMIT');
     } catch (error) {
@@ -2663,7 +2683,7 @@ app.delete('/api/projects/:id', requireAuth, async (req, res) => {
       return;
     }
 
-    await refreshMediaUnreferencedAt(client, candidateMediaIds);
+    await refreshMediaUnreferencedAt(client, candidateMediaIds, { quarantinedBy: req.user.id });
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

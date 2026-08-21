@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CircleUserRound, HardDrive, MoreHorizontal, Plus, Search } from 'lucide-react';
+import { ArrowLeft, CircleUserRound, MoreHorizontal, Plus, Search } from 'lucide-react';
 import { BrandWordmark } from './BrandLogo';
 import AdminStoragePanel from './AdminStoragePanel';
 import {
@@ -1256,7 +1256,7 @@ export default function AdminPanel({
   return (
     <div className="h-full w-full overflow-hidden bg-gray-900 text-white">
       <div className="flex h-full w-full flex-col overflow-hidden">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-700 bg-gray-800 px-4 py-3">
+        <div data-admin-topbar className="flex items-center justify-between gap-3 border-b border-gray-700 bg-gray-800 px-4 py-3">
           <div>
             <h1 className="m-0 leading-none">
               <BrandWordmark className="h-9" />
@@ -1407,19 +1407,7 @@ export default function AdminPanel({
                   {tab === 'storage' ? (
                     <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-500" />
                   ) : null}
-                  <span className="flex items-center gap-2 pl-2 font-medium">
-                    <HardDrive size={14} className="text-gray-500" />
-                    Storage
-                  </span>
-                  {storage?.summary?.quarantineCount ? (
-                    <span className="rounded-full bg-amber-900/70 px-2 py-0.5 text-xs font-semibold text-amber-100">
-                      {storage.summary.quarantineCount}
-                    </span>
-                  ) : (
-                    <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
-                      {storage?.summary?.mediaCount || 0}
-                    </span>
-                  )}
+                  <span className="pl-2 font-medium">Storage</span>
                 </button>
               </nav>
             </aside>
