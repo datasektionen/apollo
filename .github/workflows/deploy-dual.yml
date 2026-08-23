@@ -1,0 +1,32 @@
+name: Deploy Dual-Task Job
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - id: build-web
+        name: Build Frontend
+        uses: datasektionen/nomad-deploy@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          package-variant: web
+          build-context: .
+          build-dockerfile: ./docker/web.Dockerfile
+          skip-deploy: true
+
+      - name: Build Backend and Deploy Both
+        uses: datasektionen/nomad-deploy@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          nomad-token: ${{ secrets.NOMAD_TOKEN }}
+          nomad-addr: ${{ vars.NOMAD_ADDR }}
+          package-variant: api
+          build-context: ./server
+          build-dockerfile: ./server/Dockerfile
+          deploy-image-ref-var: api_image_tag
+          deploy-args: "-var=web_image_tag=${{ steps.build-web.outputs.built-image-ref }}"
