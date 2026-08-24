@@ -1,16 +1,10 @@
 export function canResumePlayerPlayback({
-  playbackEngine,
   currentTimeSec,
   durationSec,
   hasRealtimeItem,
-  htmlAudio,
 } = {}) {
-  if (playbackEngine === 'realtime') {
-    return Boolean(hasRealtimeItem)
-      && Number(currentTimeSec) < Math.max(0, (Number(durationSec) || 0) - 0.01);
-  }
-
-  return Boolean(htmlAudio?.src) && htmlAudio.ended !== true;
+  return Boolean(hasRealtimeItem)
+    && Number(currentTimeSec) < Math.max(0, (Number(durationSec) || 0) - 0.01);
 }
 
 /**

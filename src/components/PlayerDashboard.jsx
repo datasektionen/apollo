@@ -56,7 +56,6 @@ import {
   isPracticeOmittedPresetId,
   isPracticePresetId,
   listPresetVariants,
-  renderPresetVariant,
   resolveAdvancedMixRealtimeTrackMix,
   resolvePracticeRealtimeTrackMix,
 } from '../lib/exportEngine';
@@ -68,10 +67,8 @@ import {
   PLAYER_COLLECTION_TYPES,
   PLAYER_LOOP_MODES,
 } from '../types/player';
-import { normalizeExportSettings } from '../types/project';
 import { TRACK_ROLE_METRONOME } from '../utils/trackRoles';
 import { usePlaybackDeviceSettings } from '../hooks/usePlaybackDeviceSettings';
-import { applySinkIdToMediaElement } from '../utils/playbackOutput';
 import { cacheRemoteBlobAsLocalWav } from '../lib/mediaEncoding';
 import { reportUserError } from '../utils/errorReporter';
 import { isTextEntryTarget } from '../utils/keyboard';
@@ -526,7 +523,6 @@ function PlayerDashboard({
   const [shuffleEnabled, setShuffleEnabled] = useState(false);
   const [loopMode, setLoopMode] = useState(PLAYER_LOOP_MODES.OFF);
   const [nowPlayingLabel, setNowPlayingLabel] = useState('');
-  const [playbackEngine, setPlaybackEngine] = useState('html');
   const [practicePanRange, setPracticePanRange] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.practicePanRange);
   const [practiceFocusControl, setPracticeFocusControl] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.practiceFocusControl);
   const [hasRealtimeMetronome, setHasRealtimeMetronome] = useState(false);
@@ -551,13 +547,10 @@ function PlayerDashboard({
     || 'You do not currently have any permissions. Please contact an admin if you should.'
   );
 
-  const audioRef = useRef(null);
-  const objectUrlRef = useRef(null);
   const activeQueueRef = useRef([]);
   const activeIndexRef = useRef(-1);
   const loopModeRef = useRef(loopMode);
   const shuffleEnabledRef = useRef(shuffleEnabled);
-  const playbackEngineRef = useRef('html');
   const realtimePlaybackRef = useRef({
     project: null,
     item: null,
@@ -596,11 +589,6 @@ function PlayerDashboard({
     && tuttiMixes.length === 0
     && globalMixes.length === 0
   );
-  const buildPlaybackExportSettings = useCallback((projectLike) => normalizeExportSettings({
-    ...(projectLike?.exportSettings || {}),
-    panLawDb: playbackPanLawDb,
-    forceMonoOutput: monoOutputActive,
-  }), [monoOutputActive, playbackPanLawDb]);
 
   const applyPlaybackOutputConfig = useCallback(async () => {
     await audioManager.setPlaybackOutputConfig({
@@ -804,62 +792,11 @@ function PlayerDashboard({
   }, []);
 
   useEffect(() => {
-    const audio = new Audio();
-    audio.preload = 'auto';
-    audio.volume = volume / 100;
-    audioRef.current = audio;
-    void applySinkIdToMediaElement(audio, audioSettings.outputDeviceId);
-
-    const handleTimeUpdate = () => {
-      if (playbackEngineRef.current !== 'html') return;
-      setCurrentTimeSec(Number(audio.currentTime || 0));
-    };
-    const applyHtmlAudioDuration = () => {
-      if (playbackEngineRef.current !== 'html') return;
-      const audioDuration = Number(audio.duration);
-      if (Number.isFinite(audioDuration) && audioDuration > 0) {
-        setDurationSec(audioDuration);
-      }
-    };
-    const handlePause = () => {
-      if (playbackEngineRef.current !== 'html') return;
-      setIsPlaying(false);
-    };
-    const handlePlay = () => {
-      if (playbackEngineRef.current !== 'html') return;
-      setIsPlaying(true);
-    };
-    const handleEnded = async () => {
-      if (playbackEngineRef.current !== 'html') return;
-      await handlePlaybackEnded();
-    };
-
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('loadedmetadata', applyHtmlAudioDuration);
-    audio.addEventListener('durationchange', applyHtmlAudioDuration);
-    audio.addEventListener('pause', handlePause);
-    audio.addEventListener('play', handlePlay);
-    audio.addEventListener('ended', handleEnded);
-
     return () => {
-      audio.pause();
       audioManager.stop();
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('loadedmetadata', applyHtmlAudioDuration);
-      audio.removeEventListener('durationchange', applyHtmlAudioDuration);
-      audio.removeEventListener('pause', handlePause);
-      audio.removeEventListener('play', handlePlay);
-      audio.removeEventListener('ended', handleEnded);
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
-      setHasRealtimeMetronome(false);
-      setIsRealtimeMetronomeMuted(false);
-      audioRef.current = null;
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
     };
-  }, [handlePlaybackEnded]);
+  }, []);
 
   useEffect(() => {
     audioManager.setMasterVolumeCurve('unity');
@@ -875,13 +812,6 @@ function PlayerDashboard({
   }, [applyPlaybackOutputConfig]);
 
   useEffect(() => {
-    if (!audioRef.current) return;
-    void applySinkIdToMediaElement(audioRef.current, audioSettings.outputDeviceId);
-  }, [audioSettings.outputDeviceId]);
-
-  useEffect(() => {
-    if (!audioRef.current) return;
-    audioRef.current.volume = Math.max(0, Math.min(1, volume / 100));
     audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
   }, [volume]);
 
@@ -1154,10 +1084,6 @@ function PlayerDashboard({
   }, [shuffleEnabled]);
 
   useEffect(() => {
-    playbackEngineRef.current = playbackEngine;
-  }, [playbackEngine]);
-
-  useEffect(() => {
     if (!activeQueueItems.length) {
       setActiveIndex(-1);
       return;
@@ -1214,7 +1140,6 @@ function PlayerDashboard({
 
   const playMixItem = useCallback(async (item, indexForState = null) => {
     if (!session) return;
-    if (!audioRef.current) return;
     if (!item?.projectId || !item?.presetId) return;
 
     setIsRendering(true);
@@ -1225,15 +1150,9 @@ function PlayerDashboard({
       if (!snapshot || typeof snapshot !== 'object') {
         throw new Error('Project snapshot missing');
       }
-      const audio = audioRef.current;
-      audio.pause();
       audioManager.stop();
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
       realtimeEndInFlightRef.current = false;
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
 
       setCurrentTimeSec(0);
       setDurationSec(Math.max(0, Number(item.durationMs || 0) / 1000));
@@ -1248,14 +1167,10 @@ function PlayerDashboard({
       const playbackSnapshot = withSnapshotMetronomeMuted(mixSnapshot, metronomeMuted);
       const durationMs = computeSnapshotDurationMs(playbackSnapshot);
       setDurationSec(Math.max(0, durationMs / 1000));
-      const audioBuffers = await ensureSnapshotAudioBuffers(playbackSnapshot);
+      await ensureSnapshotAudioBuffers(playbackSnapshot);
       setHasRealtimeMetronome(snapshotHasMetronome);
       setIsRealtimeMetronomeMuted(snapshotHasMetronome ? metronomeMuted : false);
 
-      const isRealtimeMix = isPracticePresetId(item.presetId)
-        || isAdvancedMixPreset(item.presetId)
-        || isGroupMixPresetId(item.presetId)
-        || snapshotHasMetronome;
       const realtimeControlOverrides = isGroupMixPresetId(item.presetId)
         ? createEditableMixSource(playbackSnapshot, item).controls
         : null;
@@ -1263,54 +1178,22 @@ function PlayerDashboard({
         setPracticeFocusControl(realtimeControlOverrides.practiceFocusControl);
       }
 
-      if (isRealtimeMix) {
-        await applyPlaybackOutputConfig();
-        audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
-        await audioManager.play(playbackSnapshot, 0, { useProjectMasterVolume: false });
-        applyRealtimeMixSettings(playbackSnapshot, item, realtimeControlOverrides);
-        if (snapshotHasMetronome) {
-          applyLiveMetronomeMix(playbackSnapshot);
-        }
-        realtimePlaybackRef.current = {
-          project: playbackSnapshot,
-          item,
-          durationMs,
-        };
-        playbackEngineRef.current = 'realtime';
-        setPlaybackEngine('realtime');
-        setIsPlaying(true);
-        return;
+      await applyPlaybackOutputConfig();
+      audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
+      await audioManager.play(playbackSnapshot, 0, { useProjectMasterVolume: false });
+      applyRealtimeMixSettings(playbackSnapshot, item, realtimeControlOverrides);
+      if (snapshotHasMetronome) {
+        applyLiveMetronomeMix(playbackSnapshot);
       }
-
       realtimePlaybackRef.current = {
         project: playbackSnapshot,
         item,
         durationMs,
       };
-      const rendered = await renderPresetVariant(
-        playbackSnapshot,
-        item.presetId,
-        item.presetVariantKey,
-        audioBuffers,
-        buildPlaybackExportSettings(playbackSnapshot),
-        playbackSnapshot.projectName || item.projectName || item.name || 'mix',
-        'wav'
-      );
-      if (!rendered?.blob) {
-        throw new Error('Failed to build playback mix');
-      }
-      const url = URL.createObjectURL(rendered.blob);
-      objectUrlRef.current = url;
-      playbackEngineRef.current = 'html';
-      setPlaybackEngine('html');
-      audio.src = url;
-      audio.currentTime = 0;
-      await audio.play();
+      setIsPlaying(true);
     } catch (playError) {
       audioManager.stop();
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
-      playbackEngineRef.current = 'html';
-      setPlaybackEngine('html');
       setHasRealtimeMetronome(false);
       setIsRealtimeMetronomeMuted(false);
       setIsPlaying(false);
@@ -1318,7 +1201,7 @@ function PlayerDashboard({
     } finally {
       setIsRendering(false);
     }
-  }, [applyPlaybackOutputConfig, applyRealtimeMixSettings, buildPlaybackExportSettings, ensureSnapshotAudioBuffers, session, volume]);
+  }, [applyPlaybackOutputConfig, applyRealtimeMixSettings, ensureSnapshotAudioBuffers, session, volume]);
 
   const playQueueItem = useCallback(async (index) => {
     if (index < 0 || index >= activeQueueItems.length) return;
@@ -1331,7 +1214,7 @@ function PlayerDashboard({
   }, [playQueueItem]);
 
   useEffect(() => {
-    if (playbackEngine !== 'realtime' || !isPlaying) return undefined;
+    if (!isPlaying) return undefined;
     const interval = setInterval(() => {
       const currentMs = Math.max(0, Number(audioManager.getCurrentTime() || 0));
       setCurrentTimeSec(currentMs / 1000);
@@ -1352,10 +1235,9 @@ function PlayerDashboard({
       });
     }, 50);
     return () => clearInterval(interval);
-  }, [handlePlaybackEnded, isPlaying, playbackEngine]);
+  }, [handlePlaybackEnded, isPlaying]);
 
   useEffect(() => {
-    if (playbackEngine !== 'realtime') return;
     const current = realtimePlaybackRef.current;
     if (!current?.project || !current?.item) return;
     try {
@@ -1363,7 +1245,7 @@ function PlayerDashboard({
     } catch (applyError) {
       setError(applyError.message || 'Failed to apply practice mix settings');
     }
-  }, [applyRealtimeMixSettings, playbackEngine]);
+  }, [applyRealtimeMixSettings]);
 
   const handleSelectCollection = useCallback((type, id = null) => {
     setMainPanelView('library');
@@ -1380,23 +1262,16 @@ function PlayerDashboard({
 
   const handleTogglePlay = useCallback(async () => {
     if (isPlaying) {
-      if (playbackEngineRef.current === 'realtime') {
-        const currentMs = Math.max(0, Math.round((Number(currentTimeSec) || 0) * 1000));
-        await audioManager.pause(currentMs);
-        setIsPlaying(false);
-        return;
-      }
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
+      const currentMs = Math.max(0, Math.round((Number(currentTimeSec) || 0) * 1000));
+      await audioManager.pause(currentMs);
+      setIsPlaying(false);
       return;
     }
 
     if (!activeQueueItems.length) return;
 
     if (
-      playbackEngineRef.current === 'realtime'
-      && realtimePlaybackRef.current?.project
+      realtimePlaybackRef.current?.project
       && realtimePlaybackRef.current?.item
       && currentTimeSec < Math.max(0, durationSec - 0.01)
     ) {
@@ -1407,11 +1282,6 @@ function PlayerDashboard({
       await audioManager.play(current.project, resumeMs, { useProjectMasterVolume: false });
       applyRealtimeMixSettings(current.project, current.item);
       setIsPlaying(true);
-      return;
-    }
-
-    if (audioRef.current?.src && !audioRef.current.ended) {
-      await audioRef.current.play();
       return;
     }
 
@@ -1430,13 +1300,11 @@ function PlayerDashboard({
       const action = resolvePlayerSpaceAction({
         isPlaying,
         canResumeCurrent: canResumePlayerPlayback({
-          playbackEngine: playbackEngineRef.current,
           currentTimeSec,
           durationSec,
           hasRealtimeItem: Boolean(
             realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item
           ),
-          htmlAudio: audioRef.current,
         }),
         highlightedIndex: activeIndex,
       });
@@ -1482,24 +1350,18 @@ function PlayerDashboard({
 
   const handlePrevious = useCallback(async () => {
     if (!activeQueueItems.length) return;
-    if (playbackEngineRef.current === 'realtime') {
-      if (currentTimeSec > 3 && realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item) {
-        const current = realtimePlaybackRef.current;
-        if (isPlaying) {
-          await audioManager.pause(0);
-          await applyPlaybackOutputConfig();
-          audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
-          await audioManager.play(current.project, 0, { useProjectMasterVolume: false });
-          applyRealtimeMixSettings(current.project, current.item);
-          setIsPlaying(true);
-        } else {
-          await audioManager.pause(0);
-        }
-        setCurrentTimeSec(0);
-        return;
+    if (currentTimeSec > 3 && realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item) {
+      const current = realtimePlaybackRef.current;
+      if (isPlaying) {
+        await audioManager.pause(0);
+        await applyPlaybackOutputConfig();
+        audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
+        await audioManager.play(current.project, 0, { useProjectMasterVolume: false });
+        applyRealtimeMixSettings(current.project, current.item);
+        setIsPlaying(true);
+      } else {
+        await audioManager.pause(0);
       }
-    } else if (audioRef.current && audioRef.current.currentTime > 3) {
-      audioRef.current.currentTime = 0;
       setCurrentTimeSec(0);
       return;
     }
@@ -1514,28 +1376,26 @@ function PlayerDashboard({
 
   const handleSeek = useCallback(async (nextTimeSec) => {
     const safe = Math.max(0, Math.min(Number(nextTimeSec || 0), Number(durationSec || 0)));
-    if (playbackEngineRef.current === 'realtime' && realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item) {
-      try {
-        const seekMs = Math.max(0, Math.round(safe * 1000));
-        const current = realtimePlaybackRef.current;
-        if (isPlaying) {
-          await audioManager.pause(seekMs);
-          await applyPlaybackOutputConfig();
-          audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
-          await audioManager.play(current.project, seekMs, { useProjectMasterVolume: false });
-          applyRealtimeMixSettings(current.project, current.item);
-          setIsPlaying(true);
-        } else {
-          await audioManager.pause(seekMs);
-        }
-      } catch (seekError) {
-        setError(seekError.message || 'Seek failed');
-      }
+    if (!realtimePlaybackRef.current?.project || !realtimePlaybackRef.current?.item) {
       setCurrentTimeSec(safe);
       return;
     }
-    if (!audioRef.current) return;
-    audioRef.current.currentTime = safe;
+    try {
+      const seekMs = Math.max(0, Math.round(safe * 1000));
+      const current = realtimePlaybackRef.current;
+      if (isPlaying) {
+        await audioManager.pause(seekMs);
+        await applyPlaybackOutputConfig();
+        audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
+        await audioManager.play(current.project, seekMs, { useProjectMasterVolume: false });
+        applyRealtimeMixSettings(current.project, current.item);
+        setIsPlaying(true);
+      } else {
+        await audioManager.pause(seekMs);
+      }
+    } catch (seekError) {
+      setError(seekError.message || 'Seek failed');
+    }
     setCurrentTimeSec(safe);
   }, [applyPlaybackOutputConfig, applyRealtimeMixSettings, durationSec, isPlaying, volume]);
 
@@ -1563,10 +1423,8 @@ function PlayerDashboard({
     setPreferredMetronomeMuted(nextMuted);
     setIsRealtimeMetronomeMuted(nextMuted);
 
-    if (playbackEngineRef.current === 'realtime') {
-      applyRealtimeMixSettings(nextProject, current.item);
-      applyLiveMetronomeMix(nextProject);
-    }
+    applyRealtimeMixSettings(nextProject, current.item);
+    applyLiveMetronomeMix(nextProject);
   }, [applyRealtimeMixSettings, isRealtimeMetronomeMuted]);
 
   const beginSliderDrag = useCallback((event, config) => {
@@ -2070,9 +1928,7 @@ function PlayerDashboard({
   const metronomeButtonClass = isRealtimeMetronomeMuted ? 'text-gray-400' : 'text-blue-300';
   const isMuted = volume <= 0;
   const VolumeIcon = isMuted ? VolumeX : Volume2;
-  const practiceControlItem = playbackEngine === 'realtime'
-    ? realtimePlaybackRef.current?.item
-    : null;
+  const practiceControlItem = realtimePlaybackRef.current?.item;
   const practiceControlsEnabled = isPracticePresetId(practiceControlItem?.presetId)
     || isAdvancedMixPreset(practiceControlItem?.presetId)
     || isGroupMixPresetId(practiceControlItem?.presetId);

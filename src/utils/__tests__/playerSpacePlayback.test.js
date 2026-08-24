@@ -41,7 +41,6 @@ describe('resolvePlayerSpaceAction', () => {
 describe('canResumePlayerPlayback', () => {
   it('resumes realtime playback that has not reached the end', () => {
     expect(canResumePlayerPlayback({
-      playbackEngine: 'realtime',
       currentTimeSec: 12,
       durationSec: 40,
       hasRealtimeItem: true,
@@ -50,24 +49,17 @@ describe('canResumePlayerPlayback', () => {
 
   it('does not resume realtime playback that has finished', () => {
     expect(canResumePlayerPlayback({
-      playbackEngine: 'realtime',
       currentTimeSec: 40,
       durationSec: 40,
       hasRealtimeItem: true,
     })).toBe(false);
   });
 
-  it('resumes html audio that still has a source and has not ended', () => {
+  it('does not resume when no mix is loaded', () => {
     expect(canResumePlayerPlayback({
-      playbackEngine: 'html',
-      htmlAudio: { src: 'blob:mix', ended: false },
-    })).toBe(true);
-  });
-
-  it('does not resume ended html audio', () => {
-    expect(canResumePlayerPlayback({
-      playbackEngine: 'html',
-      htmlAudio: { src: 'blob:mix', ended: true },
+      currentTimeSec: 12,
+      durationSec: 40,
+      hasRealtimeItem: false,
     })).toBe(false);
   });
 });
