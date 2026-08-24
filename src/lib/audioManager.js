@@ -15,6 +15,7 @@ import {
   shouldRoutePlaybackThroughMediaElement,
 } from '../utils/playbackOutput';
 import { audioBufferToLocalWavBlob } from './mediaEncoding';
+import { logLoadProgress, shortLoadId, withLoadStep } from './loadProgress';
 
 /**
  * Audio Manager
@@ -98,10 +99,11 @@ export class AudioManager {
     // decodeAudioData already matches the live context. If a buffer still
     // disagrees, resample to the hardware rate rather than a fixed 44.1kHz.
     if (audioBuffer.sampleRate !== this.audioContext.sampleRate) {
-      console.log(
-        `Resampling from ${audioBuffer.sampleRate}Hz to ${this.audioContext.sampleRate}Hz`
+      return await withLoadStep(
+        `Resample ${audioBuffer.sampleRate}Hz → ${this.audioContext.sampleRate}Hz`,
+        async () => this.resampleAudioBuffer(audioBuffer, this.audioContext.sampleRate),
+        { depth: 3 }
       );
-      return await this.resampleAudioBuffer(audioBuffer, this.audioContext.sampleRate);
     }
 
     return audioBuffer;
@@ -143,14 +145,27 @@ export class AudioManager {
   async loadAudioBuffer(blobId, blob) {
     // Check cache
     if (this.mediaCache.has(blobId)) {
+      logLoadProgress(`AudioBuffer already in RAM (${shortLoadId(blobId)})`, {
+        depth: 2,
+        level: 'ok',
+      });
       return this.mediaCache.get(blobId);
     }
 
-    // Decode blob
-    const arrayBuffer = await blob.arrayBuffer();
-    const audioBuffer = await this.decodeAudioFile(arrayBuffer);
+    const arrayBuffer = await withLoadStep(
+      `Read blob bytes for AudioBuffer decode (${shortLoadId(blobId)})`,
+      async () => blob.arrayBuffer(),
+      {
+        depth: 2,
+        bytesFrom: (buffer) => buffer?.byteLength,
+      }
+    );
+    const audioBuffer = await withLoadStep(
+      `Decode blob to AudioBuffer (${shortLoadId(blobId)})`,
+      async () => this.decodeAudioFile(arrayBuffer),
+      { depth: 2 }
+    );
 
-    // Cache it
     this.mediaCache.set(blobId, audioBuffer);
 
     return audioBuffer;

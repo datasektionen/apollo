@@ -7,6 +7,7 @@ import HostedDashboard from './components/HostedDashboard';
 import PlayerDashboard from './components/PlayerDashboard';
 import AdminPanel from './components/AdminPanel';
 import ProfileDialog from './components/ProfileDialog';
+import LoadProgressDialog from './components/LoadProgressDialog';
 import { audioManager } from './lib/audioManager';
 import { importFromZIP } from './lib/projectPortability';
 import { deleteProject as deleteCachedProject, getMediaBlob, saveRemoteProjectMeta, storeMediaBlob } from './lib/db';
@@ -39,6 +40,14 @@ import {
   createAdvancedMixSavePayload,
 } from './utils/advancedMix';
 import { createEditableMixSource } from './lib/exportEngine';
+import {
+  finishLoadProgress,
+  logLoadProgress,
+  startLoadProgress,
+  summarizeProjectForLoadLog,
+  updateLoadProgress,
+  withLoadStep,
+} from './lib/loadProgress';
 
 function collectBlobIds(project) {
   const ids = new Set();
@@ -263,14 +272,30 @@ function App() {
   const handleOpenServerProject = async (projectMeta) => {
     setServerError('');
     setServerLoading(true);
+    const progressId = startLoadProgress({
+      kind: 'open',
+      title: projectMeta?.name || 'Project',
+      detail: `DAW open · ${projectMeta?.id || 'unknown id'}`,
+    });
     try {
-      const payload = await bootstrapServerProject(projectMeta.id, serverSession, 0, { purpose: 'daw' });
-      await loadProjectToStore(payload.snapshot);
-      await saveRemoteProjectMeta({
-        projectId: payload.snapshot.projectId,
-        serverProjectId: projectMeta.id,
-        latestSeq: Number(payload.latestSeq || 0),
-      });
+      updateLoadProgress({ phase: 'Snapshot', current: 'Fetching project snapshot…' });
+      const payload = await withLoadStep(
+        'Fetch project snapshot (bootstrap)',
+        async () => bootstrapServerProject(projectMeta.id, serverSession, 0, { purpose: 'daw' })
+      );
+      summarizeProjectForLoadLog(payload?.snapshot, 'Project snapshot');
+      await withLoadStep(
+        'Load snapshot into editor store',
+        async () => loadProjectToStore(payload.snapshot)
+      );
+      await withLoadStep(
+        'Save remote project metadata',
+        async () => saveRemoteProjectMeta({
+          projectId: payload.snapshot.projectId,
+          serverProjectId: projectMeta.id,
+          latestSeq: Number(payload.latestSeq || 0),
+        })
+      );
       setRemoteEditorSession({
         session: serverSession,
         serverProjectId: projectMeta.id,
@@ -282,9 +307,15 @@ function App() {
         projectAccess: payload?.access || null,
       });
       setAdvancedMixSession(null);
+      updateLoadProgress({
+        phase: 'Audio',
+        current: 'Opening editor; loading stem audio…',
+      });
+      logLoadProgress('Editor view opening; stem audio load continues in the editor');
       setView('editor');
     } catch (error) {
       setServerError(error.message || 'Failed to open project');
+      finishLoadProgress(error, progressId);
     } finally {
       setServerLoading(false);
     }
@@ -295,21 +326,38 @@ function App() {
     if (!projectId || !mix?.id) return;
     setServerError('');
     setServerLoading(true);
+    const progressId = startLoadProgress({
+      kind: 'open',
+      title: mix?.name || 'Advanced mix',
+      detail: `Mix editor open · ${mix.id}`,
+    });
     try {
-      const payload = await bootstrapServerProject(projectId, serverSession, 0, { purpose: 'daw' });
+      updateLoadProgress({ phase: 'Snapshot', current: 'Fetching mix source snapshot…' });
+      const payload = await withLoadStep(
+        'Fetch project snapshot (bootstrap)',
+        async () => bootstrapServerProject(projectId, serverSession, 0, { purpose: 'daw' })
+      );
       const baseSnapshot = payload?.snapshot || {};
-      const editableMixSource = createEditableMixSource(baseSnapshot, mix);
-      const mixWithAdvancedState = {
-        ...mix,
-        presetId: ADVANCED_MIX_PRESET_ID,
-        presetVariantKey: null,
-        advancedMix: {
-          snapshot: editableMixSource.snapshot,
-          focus: editableMixSource.focus,
-        },
-      };
-      const editorProject = createAdvancedMixEditorProject(baseSnapshot, mixWithAdvancedState);
-      await loadProjectToStore(editorProject);
+      summarizeProjectForLoadLog(baseSnapshot, 'Source project snapshot');
+      const mixWithAdvancedState = await withLoadStep(
+        'Build editable advanced-mix project',
+        async () => {
+          const editableMixSource = createEditableMixSource(baseSnapshot, mix);
+          const nextMix = {
+            ...mix,
+            presetId: ADVANCED_MIX_PRESET_ID,
+            presetVariantKey: null,
+            advancedMix: {
+              snapshot: editableMixSource.snapshot,
+              focus: editableMixSource.focus,
+            },
+          };
+          const editorProject = createAdvancedMixEditorProject(baseSnapshot, nextMix);
+          await loadProjectToStore(editorProject);
+          return { nextMix, editableMixSource, editorProject };
+        }
+      );
+      summarizeProjectForLoadLog(mixWithAdvancedState.editorProject, 'Mix editor snapshot');
       setRemoteEditorSession({
         session: serverSession,
         serverProjectId: projectId,
@@ -321,14 +369,20 @@ function App() {
         projectAccess: payload?.access || null,
       });
       setAdvancedMixSession({
-        mix: mixWithAdvancedState,
+        mix: mixWithAdvancedState.nextMix,
         baseSnapshot,
         sourceProjectId: projectId,
-        initialControls: editableMixSource.controls || null,
+        initialControls: mixWithAdvancedState.editableMixSource.controls || null,
       });
+      updateLoadProgress({
+        phase: 'Audio',
+        current: 'Opening mix editor; loading stem audio…',
+      });
+      logLoadProgress('Mix editor view opening; stem audio load continues in the editor');
       setView('editor');
     } catch (error) {
       setServerError(error.message || 'Failed to open mix editor');
+      finishLoadProgress(error, progressId);
     } finally {
       setServerLoading(false);
     }
@@ -642,6 +696,7 @@ function App() {
           onSaved={handleProfileSaved}
         />
       ) : null}
+      <LoadProgressDialog />
     </div>
   );
 }

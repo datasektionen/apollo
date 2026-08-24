@@ -48,6 +48,16 @@ import {
 } from '../lib/mediaEncoding';
 import { registerAndUploadMediaBlob } from '../lib/mediaUpload';
 import {
+  finishLoadProgress,
+  isLoadProgressRunning,
+  getLoadProgress,
+  logLoadProgress,
+  shortLoadId,
+  summarizeProjectForLoadLog,
+  updateLoadProgress,
+  withLoadStep,
+} from '../lib/loadProgress';
+import {
   GROUP_ROLE_CHOIRS,
   GROUP_ROLE_NONE,
   isChoirRole,
@@ -317,6 +327,8 @@ function Editor({
   const recordingStartTimeRef = useRef(0);
   const projectRef = useRef(project);
   const isHandlingLoopWrapRef = useRef(false);
+  const audioLoadGenerationRef = useRef(0);
+  const loadProjectAudioRef = useRef(async () => {});
   
   // Refs for scroll synchronization
   const trackListScrollRef = useRef(null);
@@ -816,85 +828,215 @@ function Editor({
     }
   }, [viewProject, selectedTrackId, selectedRowKind, selectedNodeId, selectTrack]);
 
-  const loadProjectAudio = useCallback(async () => {
-    const currentProject = projectRef.current;
-    if (!currentProject) return;
+  const loadProjectAudio = useCallback(async (options = {}) => {
+    const generation = options.generation ?? ++audioLoadGenerationRef.current;
+    const isStale = () => (
+      Boolean(options.isCancelled?.()) || audioLoadGenerationRef.current !== generation
+    );
+    const checkpoint = () => {
+      if (!isStale()) return;
+      const staleError = new Error('stale-audio-load');
+      staleError.name = 'StaleAudioLoad';
+      throw staleError;
+    };
 
-    const blobIds = new Set();
-    for (const track of currentProject.tracks) {
-      for (const clip of track.clips) {
-        blobIds.add(clip.blobId);
+    const currentProject = projectRef.current;
+    const shouldFinish = isLoadProgressRunning();
+    const progressId = shouldFinish ? getLoadProgress()?.id : null;
+    if (!currentProject) {
+      if (shouldFinish && !isStale()) {
+        logLoadProgress('Editor has no project in memory');
+        finishLoadProgress(null, progressId);
+      }
+      return;
+    }
+
+    const blobIds = [];
+    const seenBlobIds = new Set();
+    for (const track of currentProject.tracks || []) {
+      for (const clip of track.clips || []) {
+        if (!clip?.blobId || seenBlobIds.has(clip.blobId)) continue;
+        seenBlobIds.add(clip.blobId);
+        blobIds.push(clip.blobId);
       }
     }
 
     const newMediaMap = new Map();
-    for (const blobId of blobIds) {
-      if (!audioManager.mediaCache.has(blobId)) {
-        try {
-          let media = null;
-          try {
-            media = await getMediaBlob(blobId);
-          } catch (localError) {
-            if (!canUseRemoteMedia) {
-              throw localError;
-            }
-
-            try {
-              const remoteBlob = await downloadMediaBlob(blobId, remoteSession.session, {
-                projectId: remoteSession.serverProjectId,
-              });
-              const cachedRemoteMedia = await cacheRemoteBlobAsLocalWav({
-                blobId,
-                remoteBlob,
-                decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
-                storeMediaBlob,
-                fileName: `${blobId}.wav`,
-              });
-              audioManager.mediaCache.set(blobId, cachedRemoteMedia.audioBuffer);
-              if (cachedRemoteMedia.storedLocally) {
-                media = await getMediaBlob(blobId);
-              } else {
-                media = createEphemeralMediaEntry(
-                  blobId,
-                  cachedRemoteMedia.localCacheFileName,
-                  cachedRemoteMedia.audioBuffer,
-                  cachedRemoteMedia.fallbackBlob
-                );
-                reportUserError(
-                  'Failed to persist downloaded media locally. Using in-memory audio for this session.',
-                  cachedRemoteMedia.storeError,
-                  { onceKey: `editor:cache-remote-media:${blobId}` }
-                );
-              }
-            } catch (remoteError) {
-              throw remoteError;
-            }
-          }
-
-          await audioManager.loadAudioBuffer(blobId, media.blob);
-          newMediaMap.set(blobId, media);
-        } catch (error) {
-          reportUserError(
-            buildBlobReferenceErrorMessage(currentProject, blobId, 'clip audio'),
-            error,
-            { onceKey: `editor:load-audio-buffer:${blobId}` }
-          );
+    let loadError = null;
+    try {
+      checkpoint();
+      if (shouldFinish) {
+        summarizeProjectForLoadLog(currentProject, 'Editor project');
+        updateLoadProgress({
+          phase: 'Audio',
+          stemIndex: 0,
+          stemTotal: blobIds.length,
+          current: blobIds.length ? `Loading ${blobIds.length} stems…` : 'No stems to load',
+        });
+        logLoadProgress(`Editor audio loader starting (${blobIds.length} unique stems)`);
+      }
+      for (let index = 0; index < blobIds.length; index += 1) {
+        checkpoint();
+        const blobId = blobIds[index];
+        const stemLabel = `${index + 1}/${blobIds.length}`;
+        if (shouldFinish) {
+          updateLoadProgress({
+            stemIndex: index + 1,
+            stemTotal: blobIds.length,
+            current: `Stem ${stemLabel} (${shortLoadId(blobId)})`,
+          });
         }
-      } else {
-        try {
-          const media = await getMediaBlob(blobId);
-          newMediaMap.set(blobId, media);
-        } catch (error) {
-          reportUserError(
-            buildBlobReferenceErrorMessage(currentProject, blobId, 'clip media details'),
-            error,
-            { onceKey: `editor:load-media-data:${blobId}` }
-          );
+
+        if (!audioManager.mediaCache.has(blobId)) {
+          try {
+            let media = null;
+            try {
+              media = await withLoadStep(
+                `IndexedDB lookup (${shortLoadId(blobId)})`,
+                async () => getMediaBlob(blobId),
+                {
+                  depth: 1,
+                  bytesFrom: (entry) => entry?.blob?.size,
+                }
+              );
+              checkpoint();
+              logLoadProgress(`IndexedDB hit (${shortLoadId(blobId)})`, { depth: 1, level: 'ok' });
+            } catch (localError) {
+              if (localError?.name === 'StaleAudioLoad') throw localError;
+              checkpoint();
+              logLoadProgress(
+                `IndexedDB miss (${shortLoadId(blobId)}): ${localError?.message || localError}`,
+                { depth: 1 }
+              );
+              if (!canUseRemoteMedia) {
+                throw localError;
+              }
+
+              try {
+                const remoteBlob = await withLoadStep(
+                  `Download compressed file (${shortLoadId(blobId)})`,
+                  async () => downloadMediaBlob(blobId, remoteSession.session, {
+                    projectId: remoteSession.serverProjectId,
+                  }),
+                  {
+                    depth: 1,
+                    bytesFrom: (blob) => blob?.size,
+                  }
+                );
+                checkpoint();
+                const cachedRemoteMedia = await withLoadStep(
+                  `Decode + cache local WAV (${shortLoadId(blobId)})`,
+                  async () => cacheRemoteBlobAsLocalWav({
+                    blobId,
+                    remoteBlob,
+                    decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
+                    storeMediaBlob,
+                    fileName: `${blobId}.wav`,
+                  }),
+                  { depth: 1 }
+                );
+                checkpoint();
+                audioManager.mediaCache.set(blobId, cachedRemoteMedia.audioBuffer);
+                if (cachedRemoteMedia.storedLocally) {
+                  media = await withLoadStep(
+                    `Re-read IndexedDB after cache write (${shortLoadId(blobId)})`,
+                    async () => getMediaBlob(blobId),
+                    {
+                      depth: 1,
+                      bytesFrom: (entry) => entry?.blob?.size,
+                    }
+                  );
+                  checkpoint();
+                } else {
+                  media = createEphemeralMediaEntry(
+                    blobId,
+                    cachedRemoteMedia.localCacheFileName,
+                    cachedRemoteMedia.audioBuffer,
+                    cachedRemoteMedia.fallbackBlob
+                  );
+                  logLoadProgress(
+                    `Using in-memory fallback (${shortLoadId(blobId)}); IndexedDB write failed`,
+                    { level: 'error', depth: 1 }
+                  );
+                  reportUserError(
+                    'Failed to persist downloaded media locally. Using in-memory audio for this session.',
+                    cachedRemoteMedia.storeError,
+                    { onceKey: `editor:cache-remote-media:${blobId}` }
+                  );
+                }
+              } catch (remoteError) {
+                if (remoteError?.name === 'StaleAudioLoad') throw remoteError;
+                throw remoteError;
+              }
+            }
+
+            await withLoadStep(
+              `Ensure AudioBuffer in RAM (${shortLoadId(blobId)})`,
+              async () => audioManager.loadAudioBuffer(blobId, media.blob),
+              { depth: 1 }
+            );
+            checkpoint();
+            newMediaMap.set(blobId, media);
+          } catch (error) {
+            if (error?.name === 'StaleAudioLoad') throw error;
+            logLoadProgress(
+              `Stem failed (${shortLoadId(blobId)}): ${error?.message || error}`,
+              { level: 'error', depth: 1 }
+            );
+            reportUserError(
+              buildBlobReferenceErrorMessage(currentProject, blobId, 'clip audio'),
+              error,
+              { onceKey: `editor:load-audio-buffer:${blobId}` }
+            );
+          }
+        } else {
+          try {
+            logLoadProgress(`RAM AudioBuffer cache hit (${shortLoadId(blobId)})`, {
+              depth: 1,
+              level: 'ok',
+            });
+            const media = await withLoadStep(
+              `IndexedDB metadata for media map (${shortLoadId(blobId)})`,
+              async () => getMediaBlob(blobId),
+              {
+                depth: 1,
+                bytesFrom: (entry) => entry?.blob?.size,
+              }
+            );
+            checkpoint();
+            newMediaMap.set(blobId, media);
+          } catch (error) {
+            if (error?.name === 'StaleAudioLoad') throw error;
+            logLoadProgress(
+              `RAM hit but IndexedDB metadata failed (${shortLoadId(blobId)}): ${error?.message || error}`,
+              { level: 'error', depth: 1 }
+            );
+            reportUserError(
+              buildBlobReferenceErrorMessage(currentProject, blobId, 'clip media details'),
+              error,
+              { onceKey: `editor:load-media-data:${blobId}` }
+            );
+          }
         }
       }
+      checkpoint();
+      updateLoadProgress({ current: 'Publishing media map to editor' });
+      setMediaMap(newMediaMap);
+      if (shouldFinish) {
+        logLoadProgress('Editor audio buffers ready; waveforms may still draw after Close');
+      }
+    } catch (error) {
+      if (error?.name === 'StaleAudioLoad') {
+        return;
+      }
+      loadError = error;
+      throw error;
+    } finally {
+      if (shouldFinish && !isStale()) finishLoadProgress(loadError, progressId);
     }
-    setMediaMap(newMediaMap);
-  }, [canUseRemoteMedia, createEphemeralMediaEntry, remoteSession?.session]);
+  }, [canUseRemoteMedia, createEphemeralMediaEntry, remoteSession?.session, remoteSession?.serverProjectId]);
+
+  loadProjectAudioRef.current = loadProjectAudio;
 
   // Initialize audio context on mount
   useEffect(() => {
@@ -918,15 +1060,33 @@ function Editor({
   }, [project?.tracks]);
 
   useEffect(() => {
-    if (!project || !project.tracks) return;
-    loadProjectAudio().catch((error) => {
-      reportUserError(
-        'Failed to load project audio.',
-        error,
-        { onceKey: `editor:load-project-audio:${project.projectId}` }
-      );
-    });
-  }, [project?.projectId, mediaLoadSignature, loadProjectAudio]);
+    if (!project) return undefined;
+
+    let cancelled = false;
+    const generation = ++audioLoadGenerationRef.current;
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      loadProjectAudioRef.current({
+        generation,
+        isCancelled: () => cancelled,
+      }).catch((error) => {
+        if (error?.name === 'StaleAudioLoad') return;
+        reportUserError(
+          'Failed to load project audio.',
+          error,
+          { onceKey: `editor:load-project-audio:${project.projectId}` }
+        );
+      });
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      if (audioLoadGenerationRef.current === generation) {
+        audioLoadGenerationRef.current += 1;
+      }
+    };
+  }, [project?.projectId, mediaLoadSignature, canUseRemoteMedia]);
 
   useEffect(() => {
     audioManager.setMasterVolume(masterVolume);

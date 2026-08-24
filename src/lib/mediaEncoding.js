@@ -1,4 +1,5 @@
 import Flac from 'libflacjs/dist/libflac.js';
+import { logAudioBufferStats, logLoadProgress, shortLoadId, withLoadStep } from './loadProgress';
 
 export const SUPPORTED_IMPORT_EXTENSIONS = new Set(['wav', 'mp3', 'flac', 'ogg']);
 export const SUPPORTED_IMPORT_ACCEPT = [
@@ -336,19 +337,49 @@ export async function cacheRemoteBlobAsLocalWav({
   storeMediaBlob,
   fileName = null,
 }) {
-  const arrayBuffer = await remoteBlob.arrayBuffer();
-  const audioBuffer = await decodeAudioFile(arrayBuffer);
+  const arrayBuffer = await withLoadStep(
+    `Read downloaded bytes into memory (${shortLoadId(blobId)})`,
+    async () => remoteBlob.arrayBuffer(),
+    {
+      depth: 2,
+      bytesFrom: (buffer) => buffer?.byteLength,
+    }
+  );
+  const audioBuffer = await withLoadStep(
+    `Decode compressed audio (${shortLoadId(blobId)})`,
+    async () => decodeAudioFile(arrayBuffer),
+    { depth: 2 }
+  );
+  logAudioBufferStats(audioBuffer, {
+    depth: 2,
+    label: `Decoded buffer (${shortLoadId(blobId)})`,
+  });
   const localCacheFileName = fileName || `${blobId}.wav`;
   let localCacheBlob = null;
   let storedLocally = false;
   let storeError = null;
 
   try {
-    localCacheBlob = audioBufferToLocalWavBlob(audioBuffer);
-    await storeMediaBlob(localCacheFileName, audioBuffer, localCacheBlob, blobId);
+    localCacheBlob = await withLoadStep(
+      `Encode float32 WAV (${shortLoadId(blobId)})`,
+      async () => audioBufferToLocalWavBlob(audioBuffer),
+      {
+        depth: 2,
+        bytesFrom: (blob) => blob?.size,
+      }
+    );
+    await withLoadStep(
+      `Write WAV to IndexedDB (${shortLoadId(blobId)})`,
+      async () => storeMediaBlob(localCacheFileName, audioBuffer, localCacheBlob, blobId),
+      { depth: 2 }
+    );
     storedLocally = true;
   } catch (error) {
     storeError = error;
+    logLoadProgress(
+      `IndexedDB write failed (${shortLoadId(blobId)}): ${error?.message || error}`,
+      { level: 'error', depth: 2 }
+    );
   }
 
   return {

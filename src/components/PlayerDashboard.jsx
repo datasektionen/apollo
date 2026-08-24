@@ -70,6 +70,15 @@ import {
 import { TRACK_ROLE_METRONOME } from '../utils/trackRoles';
 import { usePlaybackDeviceSettings } from '../hooks/usePlaybackDeviceSettings';
 import { cacheRemoteBlobAsLocalWav } from '../lib/mediaEncoding';
+import {
+  finishLoadProgress,
+  logLoadProgress,
+  shortLoadId,
+  startLoadProgress,
+  summarizeProjectForLoadLog,
+  updateLoadProgress,
+  withLoadStep,
+} from '../lib/loadProgress';
 import { reportUserError } from '../utils/errorReporter';
 import { isTextEntryTarget } from '../utils/keyboard';
 import {
@@ -1094,41 +1103,105 @@ function PlayerDashboard({
   }, [activeQueueItems, activeIndex]);
 
   const ensureSnapshotAudioBuffers = useCallback(async (snapshot) => {
-    const blobIds = new Set();
+    const blobIds = [];
+    const seenBlobIds = new Set();
     (snapshot?.tracks || []).forEach((track) => {
       (track?.clips || []).forEach((clip) => {
-        if (clip?.blobId) blobIds.add(clip.blobId);
+        if (!clip?.blobId || seenBlobIds.has(clip.blobId)) return;
+        seenBlobIds.add(clip.blobId);
+        blobIds.push(clip.blobId);
       });
     });
 
+    updateLoadProgress({
+      phase: 'Audio',
+      stemIndex: 0,
+      stemTotal: blobIds.length,
+      current: blobIds.length ? `Loading ${blobIds.length} stems…` : 'No stems to load',
+    });
+    logLoadProgress(`Player audio loader starting (${blobIds.length} unique stems)`);
+
     const audioBuffers = new Map();
-    for (const blobId of blobIds) {
+    for (let index = 0; index < blobIds.length; index += 1) {
+      const blobId = blobIds[index];
+      const stemLabel = `${index + 1}/${blobIds.length}`;
+      updateLoadProgress({
+        stemIndex: index + 1,
+        stemTotal: blobIds.length,
+        current: `Stem ${stemLabel} (${shortLoadId(blobId)})`,
+      });
+
       if (!audioManager.mediaCache.has(blobId)) {
         let media = null;
         try {
-          media = await getMediaBlob(blobId);
-        } catch {
-          const remoteBlob = await downloadMediaBlob(blobId, session, {
-            projectId: snapshot?.projectId || realtimePlaybackRef.current?.item?.projectId || null,
-          });
-          const cachedRemoteMedia = await cacheRemoteBlobAsLocalWav({
-            blobId,
-            remoteBlob,
-            decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
-            storeMediaBlob,
-            fileName: `${blobId}.wav`,
-          });
+          media = await withLoadStep(
+            `IndexedDB lookup (${shortLoadId(blobId)})`,
+            async () => getMediaBlob(blobId),
+            {
+              depth: 1,
+              bytesFrom: (entry) => entry?.blob?.size,
+            }
+          );
+          logLoadProgress(`IndexedDB hit (${shortLoadId(blobId)})`, { depth: 1, level: 'ok' });
+        } catch (localError) {
+          logLoadProgress(
+            `IndexedDB miss (${shortLoadId(blobId)}): ${localError?.message || localError}`,
+            { depth: 1 }
+          );
+          const remoteBlob = await withLoadStep(
+            `Download compressed file (${shortLoadId(blobId)})`,
+            async () => downloadMediaBlob(blobId, session, {
+              projectId: snapshot?.projectId || realtimePlaybackRef.current?.item?.projectId || null,
+            }),
+            {
+              depth: 1,
+              bytesFrom: (blob) => blob?.size,
+            }
+          );
+          const cachedRemoteMedia = await withLoadStep(
+            `Decode + cache local WAV (${shortLoadId(blobId)})`,
+            async () => cacheRemoteBlobAsLocalWav({
+              blobId,
+              remoteBlob,
+              decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
+              storeMediaBlob,
+              fileName: `${blobId}.wav`,
+            }),
+            { depth: 1 }
+          );
           audioManager.mediaCache.set(blobId, cachedRemoteMedia.audioBuffer);
-          media = cachedRemoteMedia.storedLocally
-            ? await getMediaBlob(blobId)
-            : createEphemeralMediaEntry(
+          if (cachedRemoteMedia.storedLocally) {
+            media = await withLoadStep(
+              `Re-read IndexedDB after cache write (${shortLoadId(blobId)})`,
+              async () => getMediaBlob(blobId),
+              {
+                depth: 1,
+                bytesFrom: (entry) => entry?.blob?.size,
+              }
+            );
+          } else {
+            logLoadProgress(
+              `Using in-memory fallback (${shortLoadId(blobId)}); IndexedDB write failed`,
+              { level: 'error', depth: 1 }
+            );
+            media = createEphemeralMediaEntry(
               blobId,
               cachedRemoteMedia.localCacheFileName,
               cachedRemoteMedia.audioBuffer,
               cachedRemoteMedia.fallbackBlob
             );
+          }
         }
-        await audioManager.loadAudioBuffer(blobId, media.blob);
+        await withLoadStep(
+          `Ensure AudioBuffer in RAM (${shortLoadId(blobId)})`,
+          async () => audioManager.loadAudioBuffer(blobId, media.blob),
+          { depth: 1 }
+        );
+      } else {
+        logLoadProgress(`RAM AudioBuffer cache hit (${shortLoadId(blobId)})`, {
+          depth: 1,
+          level: 'ok',
+        });
       }
       const cached = audioManager.mediaCache.get(blobId);
       if (cached) {
@@ -1144,13 +1217,26 @@ function PlayerDashboard({
 
     setIsRendering(true);
     setError('');
+    const progressId = startLoadProgress({
+      kind: 'play',
+      title: item.name || item.projectName || 'Mix',
+      detail: [item.presetId, item.projectId].filter(Boolean).join(' · '),
+    });
+    let playError = null;
     try {
-      const payload = await bootstrapServerProject(item.projectId, session, 0, { purpose: 'player' });
+      updateLoadProgress({ phase: 'Snapshot', current: 'Fetching project snapshot…' });
+      const payload = await withLoadStep(
+        'Fetch project snapshot (bootstrap)',
+        async () => bootstrapServerProject(item.projectId, session, 0, { purpose: 'player' })
+      );
       const snapshot = payload?.snapshot;
       if (!snapshot || typeof snapshot !== 'object') {
         throw new Error('Project snapshot missing');
       }
-      audioManager.stop();
+      summarizeProjectForLoadLog(snapshot, 'Project snapshot');
+      await withLoadStep('Stop current playback', async () => {
+        audioManager.stop();
+      });
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
       realtimeEndInFlightRef.current = false;
 
@@ -1161,12 +1247,20 @@ function PlayerDashboard({
       }
       setNowPlayingLabel(item.name || item.projectName || 'Mix');
 
-      const mixSnapshot = buildAdvancedPlaybackSnapshot(snapshot, item);
+      const mixSnapshot = await withLoadStep(
+        'Build playback mix snapshot',
+        async () => buildAdvancedPlaybackSnapshot(snapshot, item)
+      );
+      summarizeProjectForLoadLog(mixSnapshot, 'Playback mix snapshot');
       const snapshotHasMetronome = hasSnapshotMetronome(mixSnapshot);
       const metronomeMuted = snapshotHasMetronome ? preferredMetronomeMutedRef.current : false;
       const playbackSnapshot = withSnapshotMetronomeMuted(mixSnapshot, metronomeMuted);
       const durationMs = computeSnapshotDurationMs(playbackSnapshot);
       setDurationSec(Math.max(0, durationMs / 1000));
+      const metronomeNote = snapshotHasMetronome
+        ? (metronomeMuted ? ' · metronome muted' : ' · metronome on')
+        : '';
+      logLoadProgress(`Playback duration ${formatDurationMs(durationMs)}${metronomeNote}`);
       await ensureSnapshotAudioBuffers(playbackSnapshot);
       setHasRealtimeMetronome(snapshotHasMetronome);
       setIsRealtimeMetronomeMuted(snapshotHasMetronome ? metronomeMuted : false);
@@ -1178,9 +1272,15 @@ function PlayerDashboard({
         setPracticeFocusControl(realtimeControlOverrides.practiceFocusControl);
       }
 
-      await applyPlaybackOutputConfig();
+      await withLoadStep(
+        'Configure playback output',
+        async () => applyPlaybackOutputConfig()
+      );
       audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
-      await audioManager.play(playbackSnapshot, 0, { useProjectMasterVolume: false });
+      await withLoadStep(
+        'Start Web Audio graph',
+        async () => audioManager.play(playbackSnapshot, 0, { useProjectMasterVolume: false })
+      );
       applyRealtimeMixSettings(playbackSnapshot, item, realtimeControlOverrides);
       if (snapshotHasMetronome) {
         applyLiveMetronomeMix(playbackSnapshot);
@@ -1191,14 +1291,16 @@ function PlayerDashboard({
         durationMs,
       };
       setIsPlaying(true);
-    } catch (playError) {
+    } catch (error) {
+      playError = error;
       audioManager.stop();
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
       setHasRealtimeMetronome(false);
       setIsRealtimeMetronomeMuted(false);
       setIsPlaying(false);
-      setError(playError.message || 'Playback failed');
+      setError(error.message || 'Playback failed');
     } finally {
+      finishLoadProgress(playError, progressId);
       setIsRendering(false);
     }
   }, [applyPlaybackOutputConfig, applyRealtimeMixSettings, ensureSnapshotAudioBuffers, session, volume]);
