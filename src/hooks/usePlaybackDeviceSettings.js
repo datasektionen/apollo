@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { audioManager } from '../lib/audioManager';
 import { reportUserError } from '../utils/errorReporter';
 import {
   DEFAULT_PLAYBACK_DEVICE_SETTINGS,
   detectOutputChannelCount,
+  isDefaultAudioOutputDeviceId,
   isMonoOutputActive,
   normalizePlaybackDeviceSettings,
   resolvePlaybackPanLawDisplayDb,
 } from '../utils/playbackOutput';
+
+export function useAudioDeviceAutoPause(onAutoPause) {
+  const onAutoPauseRef = useRef(onAutoPause);
+  onAutoPauseRef.current = onAutoPause;
+
+  useEffect(() => audioManager.subscribePlaybackInterrupted((event) => {
+    onAutoPauseRef.current?.(event?.timeMs, event?.reason);
+  }), []);
+}
 
 export function usePlaybackDeviceSettings(options = {}) {
   const {
@@ -66,12 +77,30 @@ export function usePlaybackDeviceSettings(options = {}) {
     }
   }, [audioSettings, errorPrefix, onRecordingOffsetChange]);
 
-  const refreshAudioDevices = useCallback(async () => {
+  const applyEnumeratedDevices = useCallback((devices) => {
+    const inputs = devices.filter((device) => device.kind === 'audioinput');
+    const outputs = devices.filter((device) => device.kind === 'audiooutput');
+    setAudioInputs(inputs);
+    setAudioOutputs(outputs);
+
+    setAudioSettings((prev) => {
+      const selectedOutputId = String(prev.outputDeviceId || '');
+      if (isDefaultAudioOutputDeviceId(selectedOutputId)) return prev;
+      const hasRealOutputIds = outputs.some((device) => device.deviceId);
+      if (!hasRealOutputIds) return prev;
+      if (outputs.some((device) => device.deviceId === selectedOutputId)) return prev;
+      // Don't reroute to the OS default while audio is still playing.
+      if (audioManager.isPlaying) return prev;
+      return { ...prev, outputDeviceId: '' };
+    });
+  }, []);
+
+  const listAudioDevices = useCallback(async ({ requestPermissionIfNeeded = false } = {}) => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
 
     let devices = await navigator.mediaDevices.enumerateDevices();
     const hasLabels = devices.some((device) => device.label);
-    if (!hasLabels) {
+    if (requestPermissionIfNeeded && !hasLabels) {
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         devices = await navigator.mediaDevices.enumerateDevices();
@@ -84,9 +113,33 @@ export function usePlaybackDeviceSettings(options = {}) {
       }
     }
 
-    setAudioInputs(devices.filter((device) => device.kind === 'audioinput'));
-    setAudioOutputs(devices.filter((device) => device.kind === 'audiooutput'));
-  }, [errorPrefix]);
+    applyEnumeratedDevices(devices);
+  }, [applyEnumeratedDevices, errorPrefix]);
+
+  const refreshAudioDevices = useCallback(async () => {
+    await listAudioDevices({ requestPermissionIfNeeded: true });
+  }, [listAudioDevices]);
+
+  useEffect(() => {
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices) return undefined;
+
+    const handleDeviceChange = () => {
+      void listAudioDevices({ requestPermissionIfNeeded: false });
+    };
+
+    if (typeof mediaDevices.addEventListener === 'function') {
+      mediaDevices.addEventListener('devicechange', handleDeviceChange);
+      return () => mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+    }
+
+    mediaDevices.ondevicechange = handleDeviceChange;
+    return () => {
+      if (mediaDevices.ondevicechange === handleDeviceChange) {
+        mediaDevices.ondevicechange = null;
+      }
+    };
+  }, [listAudioDevices]);
 
   useEffect(() => {
     let ignore = false;

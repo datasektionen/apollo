@@ -72,7 +72,7 @@ import {
   PLAYER_LOOP_MODES,
 } from '../types/player';
 import { TRACK_ROLE_METRONOME } from '../utils/trackRoles';
-import { usePlaybackDeviceSettings } from '../hooks/usePlaybackDeviceSettings';
+import { usePlaybackDeviceSettings, useAudioDeviceAutoPause } from '../hooks/usePlaybackDeviceSettings';
 import {
   finishLoadProgress,
   logLoadProgress,
@@ -596,6 +596,10 @@ function PlayerDashboard({
     setAudioSettings,
   } = usePlaybackDeviceSettings({
     errorPrefix: 'player-dashboard',
+  });
+  useAudioDeviceAutoPause((timeMs) => {
+    setCurrentTimeSec((Number(timeMs) || 0) / 1000);
+    setIsPlaying(false);
   });
 
   const monoOutputActive = audioSettings.forceMonoOutput === true || outputChannelCount <= 1;

@@ -86,9 +86,62 @@ export async function applySinkIdToAudioContext(audioContext, outputDeviceId = '
   try {
     await audioContext.setSinkId(String(outputDeviceId || ''));
     return true;
-  } catch {
+  } catch (error) {
+    console.warn('Failed to route audio to sink:', error);
     return false;
   }
+}
+
+export const setAudioContextOutput = applySinkIdToAudioContext;
+
+export function isDefaultAudioOutputDeviceId(deviceId = '') {
+  const id = String(deviceId || '').trim().toLowerCase();
+  return id === '' || id === 'default' || id === 'communications';
+}
+
+export function collectAudioOutputDeviceIds(devices = []) {
+  return new Set(
+    (Array.isArray(devices) ? devices : [])
+      .filter((device) => device?.kind === 'audiooutput')
+      .map((device) => String(device.deviceId || ''))
+  );
+}
+
+function toDeviceIdSet(deviceIds) {
+  if (deviceIds instanceof Set) return deviceIds;
+  return new Set(Array.isArray(deviceIds) ? deviceIds.map((id) => String(id || '')) : []);
+}
+
+/**
+ * Spotify-style "becoming noisy" / device-loss detection.
+ * Pause when a selected non-default sink disappears, or when any output is
+ * removed while playing through the OS default (headphones unplugged).
+ */
+export function shouldAutoPauseForOutputDeviceChange({
+  isPlaying = false,
+  selectedDeviceId = '',
+  previousDeviceIds,
+  currentDeviceIds,
+} = {}) {
+  if (!isPlaying) return false;
+
+  const previousIds = toDeviceIdSet(previousDeviceIds);
+  const currentIds = toDeviceIdSet(currentDeviceIds);
+  const selected = String(selectedDeviceId || '');
+
+  if (selected && !isDefaultAudioOutputDeviceId(selected) && !currentIds.has(selected)) {
+    return true;
+  }
+
+  if (
+    isDefaultAudioOutputDeviceId(selected)
+    && previousIds.size > 0
+    && previousIds.size > currentIds.size
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**

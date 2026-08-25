@@ -70,6 +70,9 @@ describe('AudioManager playback requests', () => {
   let createdAudioElements;
   let audioContextOptions;
   let audioContextSetSinkId;
+  let outputDevices;
+  let deviceChangeListeners;
+  let originalMediaDevices;
 
   beforeEach(() => {
     vi.resetModules();
@@ -78,6 +81,25 @@ describe('AudioManager playback requests', () => {
     createdAudioElements = [];
     audioContextOptions = [];
     audioContextSetSinkId = null;
+    outputDevices = [
+      { kind: 'audiooutput', deviceId: 'headphones', label: 'Headphones' },
+      { kind: 'audiooutput', deviceId: 'speakers', label: 'Speakers' },
+    ];
+    deviceChangeListeners = [];
+    originalMediaDevices = navigator.mediaDevices;
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      writable: true,
+      value: {
+        addEventListener: (type, handler) => {
+          if (type === 'devicechange') deviceChangeListeners.push(handler);
+        },
+        removeEventListener: (type, handler) => {
+          deviceChangeListeners = deviceChangeListeners.filter((item) => item !== handler);
+        },
+        enumerateDevices: vi.fn(async () => outputDevices.slice()),
+      },
+    });
 
     class MockAudioNode {
       constructor() {
@@ -102,10 +124,35 @@ describe('AudioManager playback requests', () => {
         this.currentTime = 10;
         this.state = 'running';
         this.sampleRate = options?.sampleRate || 48000;
+        this.sinkId = '';
         this.destination = new MockAudioNode();
         this.destination.maxChannelCount = 2;
+        this.eventListeners = {
+          statechange: [],
+          sinkchange: [],
+        };
         if (audioContextSetSinkId) {
-          this.setSinkId = audioContextSetSinkId;
+          this.setSinkId = async (deviceId) => {
+            const result = await audioContextSetSinkId(deviceId);
+            this.sinkId = String(deviceId || '');
+            return result;
+          };
+        }
+      }
+
+      addEventListener(type, handler) {
+        if (!this.eventListeners[type]) this.eventListeners[type] = [];
+        this.eventListeners[type].push(handler);
+      }
+
+      removeEventListener(type, handler) {
+        if (!this.eventListeners[type]) return;
+        this.eventListeners[type] = this.eventListeners[type].filter((item) => item !== handler);
+      }
+
+      dispatchEvent(type) {
+        for (const handler of this.eventListeners[type] || []) {
+          handler();
         }
       }
 
@@ -173,6 +220,11 @@ describe('AudioManager playback requests', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      writable: true,
+      value: originalMediaDevices,
+    });
   });
 
   it('only starts the latest play request when initialization overlaps', async () => {
@@ -401,5 +453,95 @@ describe('AudioManager playback requests', () => {
     expect(manager.pauseTime).toBe(900);
     expect(startedSources).toHaveLength(startedCount);
     expect(manager.activeSources.size).toBe(0);
+  });
+
+  it('pauses playback when AudioContext is interrupted or suspended', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+    const interrupted = vi.fn();
+    manager.subscribePlaybackInterrupted(interrupted);
+
+    await manager.play(makeProject(), 250);
+    expect(manager.isPlaying).toBe(true);
+
+    manager.audioContext.state = 'interrupted';
+    manager.audioContext.dispatchEvent('statechange');
+
+    expect(manager.isPlaying).toBe(false);
+    expect(manager.pauseTime).toBe(250);
+    expect(interrupted).toHaveBeenCalledWith({
+      reason: 'context-interrupted',
+      timeMs: 250,
+    });
+  });
+
+  it('pauses when the selected output device is unplugged', async () => {
+    audioContextSetSinkId = vi.fn().mockResolvedValue(undefined);
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+    manager.currentOutputDeviceId = 'headphones';
+
+    await manager.play(makeProject(), 0);
+    expect(manager.isPlaying).toBe(true);
+    expect(deviceChangeListeners).toHaveLength(1);
+
+    outputDevices = [{ kind: 'audiooutput', deviceId: 'speakers', label: 'Speakers' }];
+    deviceChangeListeners[0]();
+    await vi.waitFor(() => {
+      expect(manager.isPlaying).toBe(false);
+    });
+  });
+
+  it('pauses default-output playback when an output route is removed', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    await manager.play(makeProject(), 0);
+    expect(manager.isPlaying).toBe(true);
+
+    outputDevices = [{ kind: 'audiooutput', deviceId: 'speakers', label: 'Speakers' }];
+    deviceChangeListeners[0]();
+    await vi.waitFor(() => {
+      expect(manager.isPlaying).toBe(false);
+    });
+  });
+
+  it('does not pause when a new output is connected', async () => {
+    outputDevices = [{ kind: 'audiooutput', deviceId: 'speakers', label: 'Speakers' }];
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    await manager.play(makeProject(), 0);
+    outputDevices = [
+      { kind: 'audiooutput', deviceId: 'speakers', label: 'Speakers' },
+      { kind: 'audiooutput', deviceId: 'headphones', label: 'Headphones' },
+    ];
+    deviceChangeListeners[0]();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(manager.isPlaying).toBe(true);
+  });
+
+  it('pauses when a custom sink cannot be applied during playback', async () => {
+    audioContextSetSinkId = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('disconnected'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    await manager.play(makeProject(), 0);
+    await manager.setPlaybackOutputConfig({ outputDeviceId: 'headphones' });
+
+    expect(manager.isPlaying).toBe(false);
+    warnSpy.mockRestore();
+    infoSpy.mockRestore();
   });
 });

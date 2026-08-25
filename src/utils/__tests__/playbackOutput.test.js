@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  applySinkIdToAudioContext,
+  collectAudioOutputDeviceIds,
+  isDefaultAudioOutputDeviceId,
   isMonoOutputActive,
   normalizePlaybackDeviceSettings,
   resolvePlaybackPanLawDisplayDb,
+  setAudioContextOutput,
+  shouldAutoPauseForOutputDeviceChange,
   shouldRoutePlaybackThroughMediaElement,
 } from '../playbackOutput';
 
@@ -41,5 +46,72 @@ describe('playbackOutput', () => {
       outputDeviceId: 'headphones',
       audioContextSinkApplied: false,
     })).toBe(true);
+  });
+
+  it('treats empty, default, and communications sink ids as the OS default', () => {
+    expect(isDefaultAudioOutputDeviceId('')).toBe(true);
+    expect(isDefaultAudioOutputDeviceId('default')).toBe(true);
+    expect(isDefaultAudioOutputDeviceId('communications')).toBe(true);
+    expect(isDefaultAudioOutputDeviceId('headphones')).toBe(false);
+  });
+
+  it('collects audio output device ids', () => {
+    expect(collectAudioOutputDeviceIds([
+      { kind: 'audiooutput', deviceId: 'headphones' },
+      { kind: 'audioinput', deviceId: 'mic' },
+      { kind: 'audiooutput', deviceId: 'speakers' },
+    ])).toEqual(new Set(['headphones', 'speakers']));
+  });
+
+  it('pauses when a selected non-default output is unplugged', () => {
+    expect(shouldAutoPauseForOutputDeviceChange({
+      isPlaying: true,
+      selectedDeviceId: 'headphones',
+      previousDeviceIds: new Set(['headphones', 'speakers']),
+      currentDeviceIds: new Set(['speakers']),
+    })).toBe(true);
+  });
+
+  it('pauses default-output playback when any output disappears', () => {
+    expect(shouldAutoPauseForOutputDeviceChange({
+      isPlaying: true,
+      selectedDeviceId: '',
+      previousDeviceIds: new Set(['headphones', 'speakers']),
+      currentDeviceIds: new Set(['speakers']),
+    })).toBe(true);
+  });
+
+  it('does not pause when a new output is connected or playback is already stopped', () => {
+    expect(shouldAutoPauseForOutputDeviceChange({
+      isPlaying: true,
+      selectedDeviceId: '',
+      previousDeviceIds: new Set(['speakers']),
+      currentDeviceIds: new Set(['headphones', 'speakers']),
+    })).toBe(false);
+    expect(shouldAutoPauseForOutputDeviceChange({
+      isPlaying: false,
+      selectedDeviceId: 'headphones',
+      previousDeviceIds: new Set(['headphones', 'speakers']),
+      currentDeviceIds: new Set(['speakers']),
+    })).toBe(false);
+    expect(shouldAutoPauseForOutputDeviceChange({
+      isPlaying: true,
+      selectedDeviceId: 'headphones',
+      previousDeviceIds: new Set(['headphones', 'speakers']),
+      currentDeviceIds: new Set(['headphones']),
+    })).toBe(false);
+  });
+
+  it('routes AudioContext output with setSinkId and reports unsupported/failed sinks', async () => {
+    const audioContext = { setSinkId: vi.fn().mockResolvedValue(undefined) };
+    await expect(setAudioContextOutput(audioContext, 'headphones')).resolves.toBe(true);
+    expect(audioContext.setSinkId).toHaveBeenCalledWith('headphones');
+
+    await expect(applySinkIdToAudioContext({}, 'headphones')).resolves.toBe(false);
+
+    const failingContext = { setSinkId: vi.fn().mockRejectedValue(new Error('disconnected')) };
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(applySinkIdToAudioContext(failingContext, 'headphones')).resolves.toBe(false);
+    warnSpy.mockRestore();
   });
 });

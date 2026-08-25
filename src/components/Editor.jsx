@@ -81,7 +81,7 @@ import {
   TRACK_NODE_TYPE_AUDIO,
   TRACK_NODE_TYPE_GROUP,
 } from '../utils/trackTree';
-import { usePlaybackDeviceSettings } from '../hooks/usePlaybackDeviceSettings';
+import { usePlaybackDeviceSettings, useAudioDeviceAutoPause } from '../hooks/usePlaybackDeviceSettings';
 import useLocalProjectViewState from '../hooks/useLocalProjectViewState';
 import {
   ADVANCED_MIX_PRACTICE_FOCUS_NUMERIC_STEPS,
@@ -322,6 +322,7 @@ function Editor({
   const isNormalizingMasterRef = useRef(false);
   const recordingOriginalClipsRef = useRef(null);
   const previousTimeRef = useRef(0);
+  const finalizeRecordingRef = useRef(null);
   const recordingStartTimeRef = useRef(0);
   const projectRef = useRef(project);
   const isHandlingLoopWrapRef = useRef(false);
@@ -376,6 +377,15 @@ function Editor({
   } = usePlaybackDeviceSettings({
     errorPrefix: 'editor',
     onRecordingOffsetChange: setRecordingOffsetMs,
+  });
+  useAudioDeviceAutoPause((timeMs) => {
+    if (Number.isFinite(Number(timeMs))) {
+      setCurrentTime(Number(timeMs));
+    }
+    pause();
+    if (isRecording && typeof finalizeRecordingRef.current === 'function') {
+      void finalizeRecordingRef.current();
+    }
   });
   const applyEditorPlaybackOutputConfig = useCallback(async () => {
     await audioManager.setPlaybackOutputConfig({
@@ -1995,6 +2005,8 @@ function Editor({
       releaseRecordingLock();
     }
   };
+
+  finalizeRecordingRef.current = finalizeRecording;
 
   const handleRecord = async () => {
     if (recordButtonStartsLocalSession) {

@@ -11,6 +11,9 @@ import { reportUserError } from '../utils/errorReporter';
 import {
   applySinkIdToAudioContext,
   applySinkIdToMediaElement,
+  collectAudioOutputDeviceIds,
+  isDefaultAudioOutputDeviceId,
+  shouldAutoPauseForOutputDeviceChange,
   shouldRoutePlaybackThroughMediaElement,
 } from '../utils/playbackOutput';
 import {
@@ -47,6 +50,13 @@ export class AudioManager {
     this.outputRoutingElement = null;
     this.outputTargetNode = null;
     this.outputClockPrimed = false;
+    this.previousOutputDeviceIds = new Set();
+    this.playbackInterruptedListeners = new Set();
+    this.hardwareLifecycleAttached = false;
+    this.isConfiguringOutput = false;
+    this.boundContextStateChange = null;
+    this.boundContextSinkChange = null;
+    this.boundDeviceChange = null;
   }
 
   /**
@@ -69,7 +79,9 @@ export class AudioManager {
     this.masterGainNode.channelCount = this.getTargetOutputChannelCount();
     this.masterGainNode.gain.value = this.getMasterOutputGain();
     await this.configureOutputRouting();
-    
+    this.attachHardwareLifecycleListeners();
+    await this.handleOutputDeviceChange({ primeOnly: true });
+
     console.log('AudioManager initialized', {
       sampleRate: this.audioContext.sampleRate,
       state: this.audioContext.state,
@@ -571,6 +583,7 @@ export class AudioManager {
    */
   dispose() {
     this.stop();
+    this.detachHardwareLifecycleListeners();
 
     if (this.outputRoutingElement) {
       try {
@@ -654,16 +667,155 @@ export class AudioManager {
     );
   }
 
+  subscribePlaybackInterrupted(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.playbackInterruptedListeners.add(listener);
+    return () => this.playbackInterruptedListeners.delete(listener);
+  }
+
+  attachHardwareLifecycleListeners() {
+    if (!this.audioContext || this.hardwareLifecycleAttached) return;
+    this.hardwareLifecycleAttached = true;
+    this.boundContextStateChange = () => this.handleAudioContextStateChange();
+    this.boundContextSinkChange = () => this.handleAudioContextSinkChange();
+    this.boundDeviceChange = () => {
+      void this.handleOutputDeviceChange();
+    };
+
+    if (typeof this.audioContext.addEventListener === 'function') {
+      this.addAudioContextEventListener('statechange', this.boundContextStateChange);
+      this.addAudioContextEventListener('sinkchange', this.boundContextSinkChange);
+    } else {
+      this.audioContext.onstatechange = this.boundContextStateChange;
+    }
+
+    const mediaDevices = globalThis.navigator?.mediaDevices;
+    if (mediaDevices) {
+      if (typeof mediaDevices.addEventListener === 'function') {
+        mediaDevices.addEventListener('devicechange', this.boundDeviceChange);
+      } else {
+        mediaDevices.ondevicechange = this.boundDeviceChange;
+      }
+    }
+  }
+
+  addAudioContextEventListener(type, handler) {
+    if (typeof this.audioContext?.addEventListener === 'function') {
+      this.audioContext.addEventListener(type, handler);
+    }
+  }
+
+  removeAudioContextEventListener(type, handler) {
+    if (typeof this.audioContext?.removeEventListener === 'function') {
+      this.audioContext.removeEventListener(type, handler);
+    }
+  }
+
+  detachHardwareLifecycleListeners() {
+    if (!this.hardwareLifecycleAttached) return;
+
+    this.removeAudioContextEventListener('statechange', this.boundContextStateChange);
+    this.removeAudioContextEventListener('sinkchange', this.boundContextSinkChange);
+    if (this.audioContext && this.audioContext.onstatechange === this.boundContextStateChange) {
+      this.audioContext.onstatechange = null;
+    }
+
+    const mediaDevices = globalThis.navigator?.mediaDevices;
+    if (mediaDevices?.removeEventListener && this.boundDeviceChange) {
+      mediaDevices.removeEventListener('devicechange', this.boundDeviceChange);
+    } else if (mediaDevices && mediaDevices.ondevicechange === this.boundDeviceChange) {
+      mediaDevices.ondevicechange = null;
+    }
+
+    this.hardwareLifecycleAttached = false;
+    this.boundContextStateChange = null;
+    this.boundContextSinkChange = null;
+    this.boundDeviceChange = null;
+  }
+
+  handleAudioContextStateChange() {
+    const state = this.audioContext?.state;
+    if (state === 'suspended' || state === 'interrupted') {
+      this.handlePlaybackInterrupted(`context-${state}`);
+    }
+  }
+
+  handleAudioContextSinkChange() {
+    if (this.isConfiguringOutput || !this.isPlaying) return;
+    const selected = String(this.currentOutputDeviceId || '');
+    if (isDefaultAudioOutputDeviceId(selected)) return;
+    const sinkId = String(this.audioContext?.sinkId || '');
+    if (sinkId !== selected) {
+      this.handlePlaybackInterrupted('sink-changed');
+    }
+  }
+
+  async handleOutputDeviceChange({ primeOnly = false } = {}) {
+    const mediaDevices = globalThis.navigator?.mediaDevices;
+    if (!mediaDevices?.enumerateDevices) return;
+
+    try {
+      const devices = await mediaDevices.enumerateDevices();
+      const currentIds = collectAudioOutputDeviceIds(devices);
+      if (
+        !primeOnly
+        && shouldAutoPauseForOutputDeviceChange({
+          isPlaying: this.isPlaying,
+          selectedDeviceId: this.currentOutputDeviceId,
+          previousDeviceIds: this.previousOutputDeviceIds,
+          currentDeviceIds: currentIds,
+        })
+      ) {
+        this.handlePlaybackInterrupted('output-device-removed');
+      }
+      this.previousOutputDeviceIds = currentIds;
+    } catch (error) {
+      console.warn('Failed to enumerate audio devices:', error);
+    }
+  }
+
+  handlePlaybackInterrupted(reason = 'interrupted') {
+    if (!this.isPlaying) return;
+    const timeMs = this.getCurrentTime();
+    const safeTimeMs = Number.isFinite(Number(timeMs)) ? Number(timeMs) : (Number(this.pauseTime) || 0);
+    void this.pause(safeTimeMs);
+    console.info('Playback paused after audio output interruption.', reason);
+    for (const listener of this.playbackInterruptedListeners) {
+      try {
+        listener({ reason, timeMs: safeTimeMs });
+      } catch (error) {
+        console.warn('Playback interruption listener failed:', error);
+      }
+    }
+  }
+
   async configureOutputRouting() {
     if (!this.audioContext || !this.masterGainNode) return;
 
     this.disconnectMasterOutput();
 
-    const contextSinkApplied = await applySinkIdToAudioContext(
-      this.audioContext,
-      this.currentOutputDeviceId
+    this.isConfiguringOutput = true;
+    let contextSinkApplied = false;
+    try {
+      contextSinkApplied = await applySinkIdToAudioContext(
+        this.audioContext,
+        this.currentOutputDeviceId
+      );
+    } finally {
+      this.isConfiguringOutput = false;
+    }
+
+    const sinkFailedWhilePlaying = (
+      this.isPlaying
+      && !isDefaultAudioOutputDeviceId(this.currentOutputDeviceId)
+      && typeof this.audioContext.setSinkId === 'function'
+      && !contextSinkApplied
     );
-    const useMediaElementRoute = shouldRoutePlaybackThroughMediaElement({
+    if (sinkFailedWhilePlaying) {
+      this.handlePlaybackInterrupted('sink-unavailable');
+    }
+
+    const useMediaElementRoute = !sinkFailedWhilePlaying && shouldRoutePlaybackThroughMediaElement({
       outputDeviceId: this.currentOutputDeviceId,
       audioContextSinkApplied: contextSinkApplied,
     });
