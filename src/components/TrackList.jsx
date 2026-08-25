@@ -5,8 +5,8 @@ import {
   FileMusic,
   Guitar,
   Headphones,
+  Metronome,
   Mic,
-  Music,
   User,
   Users,
   Volume2,
@@ -22,8 +22,11 @@ import {
   GROUP_ROLE_CHOIRS,
   GROUP_ROLE_INSTRUMENTS,
   GROUP_ROLE_LEADS,
-  GROUP_ROLE_OTHERS,
   getDefaultIconByRole,
+  getNextStemIcon,
+  getNextTrackType,
+  getRoleColorClass,
+  getStemIcon,
   isChoirRole,
   isGroupParentRole,
   mapGroupParentRoleToTrackRole,
@@ -109,6 +112,8 @@ function TrackList({
   const [isGroupTypeMenuHover, setIsGroupTypeMenuHover] = useState(false);
   const animatedValueByKeyRef = useRef({});
   const valueAnimationFrameRef = useRef(null);
+  const pendingIconStateRef = useRef(new Map());
+  const [pendingIconStateVersion, setPendingIconStateVersion] = useState(0);
 
   const trackMap = useMemo(() => new Map((tracks || []).map((track) => [track.id, track])), [tracks]);
   const visibleRows = useMemo(() => {
@@ -174,11 +179,11 @@ function TrackList({
   const iconOptions = useMemo(() => [
     { key: 'guitar', Icon: Guitar },
     { key: 'user', Icon: User },
-    { key: 'file-music', Icon: FileMusic },
-    { key: 'mic', Icon: Mic },
-    { key: 'music', Icon: Music },
     { key: 'users', Icon: Users },
+    { key: 'metronome', Icon: Metronome },
     { key: 'wave', Icon: Waves },
+    { key: 'mic', Icon: Mic },
+    { key: 'file-music', Icon: FileMusic },
   ], []);
 
   const menuItemClass = 'w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-200 hover:bg-gray-700 whitespace-nowrap';
@@ -186,7 +191,7 @@ function TrackList({
     { value: TRACK_ROLES.INSTRUMENT, label: 'Instrument', groupRole: GROUP_ROLE_INSTRUMENTS },
     { value: TRACK_ROLES.LEAD, label: 'Lead', groupRole: GROUP_ROLE_LEADS },
     { value: TRACK_ROLES.CHOIR, label: 'Choir', groupRole: GROUP_ROLE_CHOIRS },
-    { value: TRACK_ROLES.METRONOME, label: 'Metronome', groupRole: null },
+    { value: TRACK_ROLES.METRONOME, label: 'Metronome', groupRole: TRACK_ROLES.METRONOME },
     { value: TRACK_ROLES.OTHER, label: 'Other', groupRole: GROUP_ROLE_NONE },
   ];
 
@@ -542,8 +547,29 @@ function TrackList({
     setIsGroupTypeTriggerHover(true);
   };
 
-  const getDefaultIconKey = (role) => {
-    return getDefaultIconByRole(role);
+  const getPendingIconState = (key) => pendingIconStateRef.current.get(key) || null;
+
+  const setPendingIconState = (key, value) => {
+    pendingIconStateRef.current.set(key, value);
+    setPendingIconStateVersion((version) => version + 1);
+  };
+
+  const getIconOption = (iconKey) => (
+    iconOptions.find((opt) => opt.key === iconKey)
+    || iconOptions.find((opt) => opt.key === 'wave')
+    || iconOptions[0]
+  );
+
+  const getIconForRole = (role) => getIconOption(getDefaultIconByRole(role));
+
+  const isSubTrackRow = (row) => row?.kind === 'track' && Boolean(row.parentId);
+
+  const getIconForTrack = (track, row) => {
+    const pending = getPendingIconState(`track:${track.id}`);
+    if (isSubTrackRow(row)) {
+      return getIconOption(getStemIcon(pending?.icon ?? track?.icon));
+    }
+    return getIconForRole(pending?.role || trackEffectiveRoleById[track.id] || track.role);
   };
 
   const hasPartTrackAncestor = (row) => {
@@ -559,29 +585,31 @@ function TrackList({
     return false;
   };
 
-  const getIconForTrack = (track, row) => {
-    const effectiveRole = trackEffectiveRoleById[track.id] || track.role;
-    const limitedToPartIcons = hasPartTrackAncestor(row);
-    const allowedIconKeys = limitedToPartIcons ? ['mic', 'file-music'] : null;
-    const defaultIconKey = limitedToPartIcons ? 'mic' : getDefaultIconKey(effectiveRole);
-    const iconKey = allowedIconKeys
-      ? (allowedIconKeys.includes(track.icon) ? track.icon : defaultIconKey)
-      : (track.icon || defaultIconKey);
-    const option = iconOptions.find((opt) => opt.key === iconKey);
-    return option || iconOptions[0];
+  const cycleStemIcon = (track) => {
+    if (metadataLocked) return;
+    if (!track?.id) return;
+    const pendingKey = `track:${track.id}`;
+    const currentIcon = getPendingIconState(pendingKey)?.icon ?? track.icon;
+    const nextIcon = getNextStemIcon(currentIcon);
+    setPendingIconState(pendingKey, { icon: nextIcon });
+    onUpdateTrack?.(track.id, () => ({ icon: nextIcon }));
   };
 
-  const cycleIcon = (track, row) => {
+  const cycleTrackType = (track, row) => {
     if (metadataLocked) return;
-    const limitedToPartIcons = hasPartTrackAncestor(row);
-    const options = limitedToPartIcons
-      ? iconOptions.filter((opt) => opt.key === 'mic' || opt.key === 'file-music')
-      : iconOptions;
-    const defaultIconKey = limitedToPartIcons ? 'mic' : getDefaultIconKey(track.role);
-    const iconKey = options.some((opt) => opt.key === track.icon) ? track.icon : defaultIconKey;
-    const currentIndex = options.findIndex((opt) => opt.key === iconKey);
-    const nextIndex = (currentIndex + 1) % options.length;
-    onUpdateTrack(track.id, { icon: options[nextIndex].key });
+    if (hasDirectParentTypeLock(row)) return;
+    if (!track?.id) return;
+    const pendingKey = `track:${track.id}`;
+    const currentRole = getPendingIconState(pendingKey)?.role
+      ?? trackEffectiveRoleById[track.id]
+      ?? track.role;
+    const nextType = getNextTrackType(currentRole);
+    const nextPatch = {
+      role: nextType,
+      icon: getDefaultIconByRole(nextType),
+    };
+    setPendingIconState(pendingKey, nextPatch);
+    onUpdateTrack?.(track.id, () => nextPatch);
   };
 
   const commitGroupRoleChange = (source, groupRow, nextRole, nextPart = null) => {
@@ -635,7 +663,6 @@ function TrackList({
   const applyGroupType = (groupRow, nextType) => {
     if (metadataLocked) return;
     if (!groupRow?.nodeId) return;
-    if (nextType === TRACK_ROLES.METRONOME) return;
     const option = trackTypeOptions.find((candidate) => candidate.value === nextType);
     const nextPart = Boolean(groupRow.part);
     const nextRole = nextPart ? nextType : (option?.groupRole || GROUP_ROLE_NONE);
@@ -656,7 +683,6 @@ function TrackList({
     const nextPart = !Boolean(groupRow.part);
     const currentType = getGroupTypeValue(groupRow);
     const option = trackTypeOptions.find((candidate) => candidate.value === currentType);
-    if (currentType === TRACK_ROLES.METRONOME) return;
     commitGroupRoleChange(
       'context-menu/toggle-part',
       groupRow,
@@ -665,41 +691,53 @@ function TrackList({
     );
   };
 
-  const isGroupTrackModeGroup = (rowOrRole) => {
-    if (rowOrRole && typeof rowOrRole === 'object') {
-      if (rowOrRole.part !== undefined) return !Boolean(rowOrRole.part);
-      return !isLegacyPartTrackRow(rowOrRole);
-    }
-    return (
-      rowOrRole === GROUP_ROLE_NONE
-      || rowOrRole === GROUP_ROLE_OTHERS
-      || isGroupParentRole(rowOrRole)
-    );
-  };
-
   const cycleGroupRole = (groupRow) => {
     if (metadataLocked) return;
     if (hasDirectParentTypeLock(groupRow)) return;
-    const isGroupMode = isGroupTrackModeGroup(groupRow);
-    const groupRoles = [
-      GROUP_ROLE_INSTRUMENTS,
-      GROUP_ROLE_LEADS,
-      GROUP_ROLE_CHOIRS,
-      GROUP_ROLE_NONE,
-    ];
-    const partRoles = [
-      TRACK_ROLES.INSTRUMENT,
-      TRACK_ROLES.LEAD,
-      TRACK_ROLES.CHOIR,
-      TRACK_ROLES.OTHER,
-    ];
-    const options = isGroupMode ? groupRoles : partRoles;
-    const currentIndex = options.findIndex((role) => role === groupRow.role);
-    const nextRole = currentIndex >= 0
-      ? options[(currentIndex + 1) % options.length]
-      : options[0];
-    commitGroupRoleChange('icon-cycle', groupRow, nextRole, !isGroupMode);
+    const pendingKey = `group:${groupRow.nodeId}`;
+    const currentType = getPendingIconState(pendingKey)?.role ?? getGroupTypeValue(groupRow);
+    const nextType = getNextTrackType(currentType);
+    setPendingIconState(pendingKey, { role: nextType });
+    applyGroupType(groupRow, nextType);
   };
+
+  useLayoutEffect(() => {
+    const pending = pendingIconStateRef.current;
+    if (!pending.size) return;
+    let changed = false;
+    pending.forEach((value, key) => {
+      if (key.startsWith('track:')) {
+        const track = trackMap.get(key.slice('track:'.length));
+        if (!track) {
+          pending.delete(key);
+          changed = true;
+          return;
+        }
+        const roleMatches = !value.role || getTrackTypeValue(track.role) === value.role;
+        const iconMatches = !value.icon || getStemIcon(track.icon) === value.icon;
+        if (roleMatches && iconMatches) {
+          pending.delete(key);
+          changed = true;
+        }
+        return;
+      }
+      if (key.startsWith('group:')) {
+        const groupRow = rowByNodeId.get(key.slice('group:'.length));
+        if (!groupRow) {
+          pending.delete(key);
+          changed = true;
+          return;
+        }
+        if (!value.role || getGroupTypeValue(groupRow) === value.role) {
+          pending.delete(key);
+          changed = true;
+        }
+      }
+    });
+    if (changed) {
+      setPendingIconStateVersion((version) => version + 1);
+    }
+  }, [rowByNodeId, trackMap, pendingIconStateVersion]);
 
   const handleVolumeChange = (trackId, value) => {
     const next = parseFloat(value);
@@ -1083,26 +1121,7 @@ function TrackList({
     setEditingName(null);
   };
 
-  const getRoleColor = (role) => {
-    const colors = {
-      instrument: 'bg-purple-600',
-      lead: 'bg-blue-600',
-      choir: 'bg-green-600',
-      metronome: 'bg-orange-600',
-      'choir-part-1': 'bg-green-600',
-      'choir-part-2': 'bg-green-500',
-      'choir-part-3': 'bg-green-400',
-      'choir-part-4': 'bg-teal-500',
-      'choir-part-5': 'bg-teal-400',
-      instruments: 'bg-purple-700',
-      leads: 'bg-blue-700',
-      choirs: 'bg-green-700',
-      others: 'bg-gray-700',
-      other: 'bg-gray-600',
-      group: 'bg-gray-600',
-    };
-    return colors[role] || 'bg-gray-600';
-  };
+  const getRoleColor = (role) => getRoleColorClass(role);
 
   if (!visibleRows.length) {
     return (
@@ -1157,9 +1176,9 @@ function TrackList({
         if (row.kind === 'group') {
           const groupCollapsed = Boolean(row.collapsed);
           const directParentForcedRole = getDirectParentForcedRole(row);
-          const displayGroupRole = directParentForcedRole || row.role;
-          const groupIconKey = getDefaultIconKey(displayGroupRole);
-          const GroupIcon = iconOptions.find((opt) => opt.key === groupIconKey)?.Icon || Waves;
+          const pendingGroupState = getPendingIconState(`group:${row.nodeId}`);
+          const displayGroupRole = pendingGroupState?.role || directParentForcedRole || row.role;
+          const { Icon: GroupIcon, key: groupIconKey } = getIconForRole(displayGroupRole);
           const isSelectedRow = selectedNodeId === row.nodeId;
           const groupFocusState = getGroupFocusState(row.nodeId);
           const isGroupHighlightedInAdvancedMix = groupFocusState === 'all' || groupFocusState === 'partial';
@@ -1218,16 +1237,17 @@ function TrackList({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       if (metadataLocked) return;
                       if (hasDirectParentTypeLock(row)) return;
                       cycleGroupRole(row);
                     }}
-                    className={`w-14 h-14 rounded-lg ${getRoleColor(displayGroupRole)} text-white flex items-center justify-center ${hasDirectParentTypeLock(row) || metadataLocked ? 'opacity-80 cursor-not-allowed' : ''}`}
-                    title={metadataLocked ? 'Group category locked in this session' : 'Click to cycle group category'}
+                    className={`w-14 h-14 rounded-lg ${getRoleColor(displayGroupRole)} text-white flex items-center justify-center overflow-hidden transition-none ${hasDirectParentTypeLock(row) || metadataLocked ? 'opacity-80 cursor-not-allowed' : ''}`}
+                    title={metadataLocked ? 'Group category locked in this session' : 'Click to change type'}
                   >
-                    <GroupIcon size={32} />
+                    <GroupIcon key={groupIconKey} size={32} className="shrink-0" />
                   </button>
                 </div>
 
@@ -1479,9 +1499,11 @@ function TrackList({
 
         const track = row.track || trackMap.get(row.trackId);
         if (!track) return null;
-        const displayTrackRole = trackEffectiveRoleById[track.id] || track.role;
-        const isInPartTrackChain = hasPartTrackAncestor(row);
-        const canEditTrackIcon = isInPartTrackChain || !hasDirectParentTypeLock(row);
+        const pendingTrackState = getPendingIconState(`track:${track.id}`);
+        const displayTrackRole = pendingTrackState?.role || trackEffectiveRoleById[track.id] || track.role;
+        const isSubTrack = isSubTrackRow(row);
+        const canEditTrackType = !isSubTrack && !hasDirectParentTypeLock(row);
+        const canEditStemIcon = isSubTrack && !metadataLocked;
         const trackVolumeValue = getDraggedValue(
           track.id,
           'volume',
@@ -1494,7 +1516,7 @@ function TrackList({
         );
 
         const trackHeight = row.height || TRACK_HEIGHT;
-        const { Icon: TrackIcon } = getIconForTrack(track, row);
+        const { Icon: TrackIcon, key: trackIconKey } = getIconForTrack(track, row);
 	        const isSelectedRow = selectedNodeId
 	          ? selectedNodeId === row.nodeId
 	          : selectedTrackId === track.id;
@@ -1546,16 +1568,27 @@ function TrackList({
                   onClick={() => selectRow(row)}
                 >
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (metadataLocked) return;
-                    if (!canEditTrackIcon) return;
-                    cycleIcon(track, row);
+                    if (isSubTrack) {
+                      cycleStemIcon(track);
+                      return;
+                    }
+                    if (!canEditTrackType) return;
+                    cycleTrackType(track, row);
                   }}
-                  className={`w-14 h-14 rounded-lg ${getRoleColor(displayTrackRole)} text-white flex items-center justify-center ${canEditTrackIcon && !metadataLocked ? '' : 'opacity-80 cursor-not-allowed'}`}
-                  title={metadataLocked ? 'Track icon locked in this session' : 'Click to change icon'}
+                  className={`w-14 h-14 rounded-lg ${getRoleColor(displayTrackRole)} text-white flex items-center justify-center overflow-hidden transition-none ${
+                    (canEditStemIcon || canEditTrackType) ? '' : 'opacity-80 cursor-not-allowed'
+                  }`}
+                  title={
+                    metadataLocked
+                      ? 'Track icon locked in this session'
+                      : (isSubTrack ? 'Click to switch recording / file' : 'Click to change type')
+                  }
                 >
-                  <TrackIcon size={32} />
+                  <TrackIcon key={trackIconKey} size={32} className="shrink-0" />
                 </button>
               </div>
 
@@ -1922,12 +1955,9 @@ function TrackList({
                   <button
                     className={menuItemClass}
                     onClick={() => {
-                      if (contextMenu.track.role === TRACK_ROLES.METRONOME) return;
                       onCreateSubtrack?.(contextMenu.track.id);
                       setContextMenu(null);
                     }}
-                    disabled={contextMenu.track.role === TRACK_ROLES.METRONOME}
-                    title={contextMenu.track.role === TRACK_ROLES.METRONOME ? 'Metronome tracks cannot have children' : undefined}
                   >
                     Create subtrack
                   </button>
@@ -2122,7 +2152,7 @@ function TrackList({
             e.stopPropagation();
           }}
         >
-          {trackTypeOptions.filter((option) => option.value !== TRACK_ROLES.METRONOME).map((option) => {
+          {trackTypeOptions.map((option) => {
             const isCurrent = getRowTypeValue(contextMenu.group) === option.value;
             return (
               <button

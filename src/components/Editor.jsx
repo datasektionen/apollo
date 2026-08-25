@@ -60,7 +60,6 @@ import {
   GROUP_ROLE_NONE,
   isChoirRole,
   isGroupParentRole,
-  isMetronomeRole,
   groupRoleToTrackRole,
 } from '../utils/trackRoles';
 import {
@@ -2395,18 +2394,35 @@ function Editor({
   };
 
   const handleUpdateTrack = (trackId, updates) => {
-    const safeUpdates = isAdvancedMixSession
-      ? pickAllowedUpdates(updates, ADVANCED_MIX_ALLOWED_TRACK_UPDATE_KEYS)
-      : updates;
-    if (!safeUpdates || !Object.keys(safeUpdates).length) return;
-    if (!canSoloTracksInProject && Object.prototype.hasOwnProperty.call(safeUpdates, 'soloed')) {
-      window.alert('Solo requires permission to edit every track in the project.');
-      return;
+    if (!trackId || updates == null) return;
+
+    const resolveUpdates = (currentTrack) => {
+      const rawUpdates = typeof updates === 'function' ? updates(currentTrack) : updates;
+      return isAdvancedMixSession
+        ? pickAllowedUpdates(rawUpdates, ADVANCED_MIX_ALLOWED_TRACK_UPDATE_KEYS)
+        : rawUpdates;
+    };
+
+    if (typeof updates !== 'function') {
+      const safeUpdates = resolveUpdates();
+      if (!safeUpdates || !Object.keys(safeUpdates).length) return;
+      if (!canSoloTracksInProject && Object.prototype.hasOwnProperty.call(safeUpdates, 'soloed')) {
+        window.alert('Solo requires permission to edit every track in the project.');
+        return;
+      }
     }
 
     let nextProjectAfter = null;
     updateProject((proj) => {
       const previousTrack = proj.tracks.find((track) => track.id === trackId);
+      if (!previousTrack) return proj;
+
+      const safeUpdates = resolveUpdates(previousTrack);
+      if (!safeUpdates || !Object.keys(safeUpdates).length) return proj;
+      if (!canSoloTracksInProject && Object.prototype.hasOwnProperty.call(safeUpdates, 'soloed')) {
+        return proj;
+      }
+
       const wasChoirTrack = isChoirRole(previousTrack?.role);
       const previousMix = getEffectiveTrackMix(proj);
       const previousState = previousMix.statesByTrackId.get(trackId);
@@ -2439,10 +2455,6 @@ function Editor({
 
       if (safeUpdates.role !== undefined) {
         nextProject = normalizeTrackTree(nextProject);
-        if (isMetronomeRole(nextTracks.find((track) => track.id === trackId)?.role)) {
-          nextProject = collapseEmptyGroupsToTracks(nextProject);
-          nextProject = reorderTracksByTree(nextProject);
-        }
       }
 
       if (!isAdvancedMixSession && safeUpdates.pan !== undefined && wasChoirTrack && proj.autoPan?.enabled && isDirectChoirPartTrack) {
@@ -2801,7 +2813,6 @@ function Editor({
       const sourceTrack = (normalized.tracks || []).find((track) => track.id === sourceTrackId);
 
       if (!sourceNode || !movingNode || !sourceTrack) return normalized;
-      if (isMetronomeRole(sourceTrack.role)) return normalized;
       if ((sourceTrack.clips?.length || 0) > 0) return normalized;
       if (sourceNode.id === movingNode.id) return normalized;
 
@@ -3453,10 +3464,6 @@ function Editor({
     if (!trackId) return;
     const sourceTrack = project.tracks.find((t) => t.id === trackId);
     if (!sourceTrack) return;
-    if (isMetronomeRole(sourceTrack.role)) {
-      alert('Metronome tracks must stay at the root level and cannot have children.');
-      return;
-    }
     if ((sourceTrack.clips?.length || 0) > 0) {
       alert('Create new subtrack only works from an empty track.');
       return;

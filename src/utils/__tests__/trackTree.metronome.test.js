@@ -12,31 +12,26 @@ import {
 } from '../trackTree';
 
 describe('metronome track tree rules', () => {
-  it('normalizes nested metronome tracks back to the root level', () => {
+  it('keeps nested metronome tracks under their parent group', () => {
     const metronome = createTrack('Click', TRACK_ROLES.METRONOME);
     let project = createEmptyProject('Metronome Test');
-    project = { ...project, tracks: [metronome] };
-    project = createGroupNode(project, 'Band');
+    project = createGroupNode({ ...project, tracks: [metronome] }, 'Band');
     const groupNode = project.trackTree.find((node) => node.kind === 'group');
+    const existingMetronomeNode = getTrackNodeByTrackId(project, metronome.id);
 
     const normalized = normalizeTrackTree({
       ...project,
-      trackTree: [
-        ...project.trackTree,
-        {
-          id: 'invalid-metronome-node',
-          kind: 'track',
-          parentId: groupNode.id,
-          order: 0,
-          trackId: metronome.id,
-        },
-      ],
+      trackTree: (project.trackTree || []).map((node) => (
+        node.id === existingMetronomeNode?.id
+          ? { ...node, parentId: groupNode.id, order: 0 }
+          : node
+      )),
     });
 
-    expect(getTrackNodeByTrackId(normalized, metronome.id)?.parentId ?? null).toBeNull();
+    expect(getTrackNodeByTrackId(normalized, metronome.id)?.parentId).toBe(groupNode.id);
   });
 
-  it('refuses to attach metronome tracks under groups', () => {
+  it('attaches metronome tracks under groups', () => {
     const metronome = createTrack('Click', TRACK_ROLES.METRONOME);
     let project = createEmptyProject('Metronome Test');
     project = { ...project, tracks: [metronome] };
@@ -45,10 +40,10 @@ describe('metronome track tree rules', () => {
 
     const nextProject = attachTrackNode(project, metronome.id, groupNode.id);
 
-    expect(getTrackNodeByTrackId(nextProject, metronome.id)?.parentId ?? null).toBeNull();
+    expect(getTrackNodeByTrackId(nextProject, metronome.id)?.parentId).toBe(groupNode.id);
   });
 
-  it('does not allow moving a metronome track inside a group', () => {
+  it('allows moving a metronome track inside a group', () => {
     const metronome = createTrack('Click', TRACK_ROLES.METRONOME);
     const instrument = createTrack('Piano', TRACK_ROLES.INSTRUMENT);
     let project = createEmptyProject('Metronome Test');
@@ -61,7 +56,7 @@ describe('metronome track tree rules', () => {
     const metronomeNodeId = getTrackNodeByTrackId(project, metronome.id)?.id;
     const movedProject = moveTrackTreeNode(project, metronomeNodeId, groupNode.id, 'inside');
 
-    expect(getTrackNodeByTrackId(movedProject, metronome.id)?.parentId ?? null).toBeNull();
+    expect(getTrackNodeByTrackId(movedProject, metronome.id)?.parentId).toBe(groupNode.id);
   });
 });
 
@@ -133,5 +128,6 @@ describe('track tree type and part normalization', () => {
 
     expect(syncedChildGroup.role).toBe(TRACK_ROLES.OTHER);
     expect(syncedChildTrack.role).toBe(TRACK_ROLES.OTHER);
+    expect(syncedChildTrack.icon).toBe('mic');
   });
 });

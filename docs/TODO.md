@@ -1,6 +1,5 @@
 If you are an LLM ignore this file. This is reminder for me to do later.
 
-- Tighten icon/tracktype relations.
 - Synced live played between devices.
 - Soloing local works temp without perms
 

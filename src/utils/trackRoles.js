@@ -38,10 +38,35 @@ const GROUP_ALLOWED_ROLES = new Set([
   TRACK_ROLE_INSTRUMENT,
   TRACK_ROLE_LEAD,
   TRACK_ROLE_CHOIR,
+  TRACK_ROLE_METRONOME,
   TRACK_ROLE_OTHER,
   ...TRACK_CHOIR_PART_ROLES,
   ...GROUP_PARENT_ROLES,
 ]);
+
+export const TRACK_TYPE_CYCLE_ORDER = [
+  TRACK_ROLE_INSTRUMENT,
+  TRACK_ROLE_LEAD,
+  TRACK_ROLE_CHOIR,
+  TRACK_ROLE_METRONOME,
+  TRACK_ROLE_OTHER,
+];
+
+const TRACK_TYPE_ICONS = {
+  [TRACK_ROLE_INSTRUMENT]: 'guitar',
+  [TRACK_ROLE_LEAD]: 'user',
+  [TRACK_ROLE_CHOIR]: 'users',
+  [TRACK_ROLE_METRONOME]: 'metronome',
+  [TRACK_ROLE_OTHER]: 'wave',
+};
+
+const TRACK_TYPE_COLOR_CLASSES = {
+  [TRACK_ROLE_INSTRUMENT]: 'bg-purple-600',
+  [TRACK_ROLE_LEAD]: 'bg-blue-600',
+  [TRACK_ROLE_CHOIR]: 'bg-green-600',
+  [TRACK_ROLE_METRONOME]: 'bg-orange-600',
+  [TRACK_ROLE_OTHER]: 'bg-gray-600',
+};
 
 export function isChoirPartRole(role) {
   return typeof role === 'string' && role.startsWith('choir-part-');
@@ -96,22 +121,45 @@ export function groupRoleToTrackRole(role) {
   return toCategoryRole(normalized);
 }
 
+export function getTrackTypeCategory(role) {
+  const mappedParent = mapGroupParentRoleToTrackRole(role);
+  if (mappedParent) return mappedParent;
+  return toCategoryRole(role);
+}
+
 export function getDefaultIconByRole(role) {
-  const normalizedGroupRole = normalizeGroupRole(role);
-  const normalizedTrackRole = toCategoryRole(role);
+  return TRACK_TYPE_ICONS[getTrackTypeCategory(role)] || TRACK_TYPE_ICONS[TRACK_ROLE_OTHER];
+}
 
-  if (isGroupParentRole(normalizedGroupRole)) {
-    const mapped = mapGroupParentRoleToTrackRole(normalizedGroupRole);
-    if (mapped === TRACK_ROLE_INSTRUMENT) return 'guitar';
-    if (mapped === TRACK_ROLE_LEAD) return 'user';
-    if (mapped === TRACK_ROLE_CHOIR) return 'users';
-  }
+export function getRoleColorClass(role) {
+  return TRACK_TYPE_COLOR_CLASSES[getTrackTypeCategory(role)] || TRACK_TYPE_COLOR_CLASSES[TRACK_ROLE_OTHER];
+}
 
-  if (normalizedTrackRole === TRACK_ROLE_INSTRUMENT) return 'guitar';
-  if (normalizedTrackRole === TRACK_ROLE_LEAD) return 'user';
-  if (normalizedTrackRole === TRACK_ROLE_CHOIR) return 'users';
-  if (normalizedTrackRole === TRACK_ROLE_METRONOME) return 'music';
-  return 'wave';
+export const STEM_ICON_RECORDING = 'mic';
+export const STEM_ICON_FILE = 'file-music';
+export const STEM_ICON_CYCLE_ORDER = [STEM_ICON_RECORDING, STEM_ICON_FILE];
+export const DEFAULT_STEM_ICON = STEM_ICON_RECORDING;
+
+export function isStemSourceIcon(icon) {
+  return icon === STEM_ICON_RECORDING || icon === STEM_ICON_FILE;
+}
+
+export function getStemIcon(icon) {
+  return isStemSourceIcon(icon) ? icon : DEFAULT_STEM_ICON;
+}
+
+export function getNextStemIcon(icon) {
+  const current = getStemIcon(icon);
+  const currentIndex = STEM_ICON_CYCLE_ORDER.indexOf(current);
+  const index = currentIndex >= 0 ? currentIndex : 0;
+  return STEM_ICON_CYCLE_ORDER[(index + 1) % STEM_ICON_CYCLE_ORDER.length];
+}
+
+export function getNextTrackType(role) {
+  const current = getTrackTypeCategory(role);
+  const currentIndex = TRACK_TYPE_CYCLE_ORDER.indexOf(current);
+  const index = currentIndex >= 0 ? currentIndex : TRACK_TYPE_CYCLE_ORDER.length - 1;
+  return TRACK_TYPE_CYCLE_ORDER[(index + 1) % TRACK_TYPE_CYCLE_ORDER.length];
 }
 
 export function isTrackCategoryRole(role, categoryRole) {

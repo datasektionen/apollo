@@ -131,6 +131,7 @@ const GROUP_ALLOWED_ROLES = new Set([
   TRACK_ROLE_INSTRUMENT,
   TRACK_ROLE_LEAD,
   TRACK_ROLE_CHOIR,
+  TRACK_ROLE_METRONOME,
   TRACK_ROLE_OTHER,
   ...Array.from({ length: 5 }, (_unused, idx) => `choir-part-${idx + 1}`),
   ...GROUP_PARENT_ROLES,

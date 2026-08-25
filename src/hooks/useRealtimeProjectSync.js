@@ -227,6 +227,7 @@ export default function useRealtimeProjectSync({
   const projectRef = useRef(project);
   const applyingRemoteRef = useRef(false);
   const lastSyncedSnapshotRef = useRef('');
+  const localEditSeqRef = useRef(0);
   const uploadedBlobIdsRef = useRef(new Set());
   const localClientOpIdsRef = useRef(new Set());
   const acknowledgedClientOpIdsRef = useRef(new Set());
@@ -308,8 +309,29 @@ export default function useRealtimeProjectSync({
     setLockByTrackId({});
     setJoined(false);
 
+    const rememberServerSeq = async (seq) => {
+      const nextSeq = Number(seq || 0);
+      if (nextSeq > 0) {
+        setLatestSeq(nextSeq);
+        await saveRemoteProjectMeta({
+          projectId,
+          serverProjectId,
+          latestSeq: nextSeq,
+        });
+      }
+    };
+
     const applyRemoteSnapshot = async (snapshot, seq, options = {}) => {
       if (!snapshot || typeof snapshot !== 'object') return;
+
+      // Own/stale snapshots must never rewind a newer local click.
+      if (options.own === true || options.localEditSeq != null) {
+        const incomingEditSeq = Number(options.localEditSeq || 0);
+        if (incomingEditSeq < localEditSeqRef.current) {
+          await rememberServerSeq(seq);
+          return;
+        }
+      }
 
       const shouldAnimate = Boolean(options?.animateFromOtherClient && projectRef.current);
       let animationPayload = null;
@@ -347,12 +369,7 @@ export default function useRealtimeProjectSync({
       updateProject(snapshot, 'Apply remote sync update', {
         skipUndo: true,
       });
-      setLatestSeq(seq || 0);
-      await saveRemoteProjectMeta({
-        projectId,
-        serverProjectId,
-        latestSeq: seq || 0,
-      });
+      await rememberServerSeq(seq);
       setTimeout(() => {
         applyingRemoteRef.current = false;
       }, 0);
@@ -438,12 +455,16 @@ export default function useRealtimeProjectSync({
                 || acknowledgedClientOpIdsRef.current.has(broadcastClientOpId)
               )
             );
-            if (isOwnClientOp && broadcastClientOpId) {
-              localClientOpIdsRef.current.delete(broadcastClientOpId);
-              acknowledgedClientOpIdsRef.current.delete(broadcastClientOpId);
+            if (isOwnClientOp) {
+              if (broadcastClientOpId) {
+                localClientOpIdsRef.current.delete(broadcastClientOpId);
+                acknowledgedClientOpIdsRef.current.delete(broadcastClientOpId);
+              }
+              await rememberServerSeq(seq);
+              return;
             }
             await applyRemoteSnapshot(message.op.project, seq, {
-              animateFromOtherClient: !isOwnClientOp,
+              animateFromOtherClient: true,
             });
           } else {
             setLatestSeq(seq);
@@ -465,22 +486,10 @@ export default function useRealtimeProjectSync({
           const pending = await getPendingSyncOp(projectId);
 
           if (pending?.payload?.clientOpId && pending.payload.clientOpId === message.clientOpId) {
-            if (pending?.payload?.op?.type === 'project.replace' && pending.payload.op.project) {
-              await applyRemoteSnapshot(pending.payload.op.project, seq || latestSeqRef.current, {
-                animateFromOtherClient: false,
-              });
-            }
             await clearPendingSyncOp(projectId);
           }
 
-          if (seq > 0) {
-            setLatestSeq(seq);
-            await saveRemoteProjectMeta({
-              projectId,
-              serverProjectId,
-              latestSeq: seq,
-            });
-          }
+          await rememberServerSeq(seq);
         },
         onLockState: (message) => {
           if (disposed) return;
@@ -531,21 +540,29 @@ export default function useRealtimeProjectSync({
     const snapshot = JSON.stringify(project);
     if (snapshot === lastSyncedSnapshotRef.current) return;
     lastSyncedSnapshotRef.current = snapshot;
+    localEditSeqRef.current += 1;
+    const localEditSeq = localEditSeqRef.current;
 
     const send = async () => {
+      if (localEditSeqRef.current !== localEditSeq) return;
       const op = {
         type: 'project.replace',
         project,
       };
       const clientOpId = createId();
+      localClientOpIdsRef.current.add(clientOpId);
       if (!clientRef.current?.connected) {
-        await upsertPendingSyncOp(projectId, { op, clientOpId, project });
+        if (localEditSeqRef.current !== localEditSeq) return;
+        await upsertPendingSyncOp(projectId, { op, clientOpId, project, localEditSeq });
         return;
       }
 
       try {
-        await upsertPendingSyncOp(projectId, { op, clientOpId, project });
+        if (localEditSeqRef.current !== localEditSeq) return;
+        await upsertPendingSyncOp(projectId, { op, clientOpId, project, localEditSeq });
+        if (localEditSeqRef.current !== localEditSeq) return;
         const uploadReadyProject = await ensureMediaUploaded(project);
+        if (localEditSeqRef.current !== localEditSeq) return;
         const opToSend = uploadReadyProject === project
           ? op
           : {
@@ -553,15 +570,21 @@ export default function useRealtimeProjectSync({
             project: uploadReadyProject,
           };
         if (opToSend !== op) {
-          await upsertPendingSyncOp(projectId, { op: opToSend, clientOpId, project: uploadReadyProject });
+          await upsertPendingSyncOp(projectId, {
+            op: opToSend,
+            clientOpId,
+            project: uploadReadyProject,
+            localEditSeq,
+          });
         }
+        if (localEditSeqRef.current !== localEditSeq) return;
 
-        localClientOpIdsRef.current.add(clientOpId);
         const sent = clientRef.current.submitOp(opToSend, clientOpId);
         if (!sent) return;
       } catch (error) {
+        if (localEditSeqRef.current !== localEditSeq) return;
         setSyncError(error.message || 'Failed to sync project update');
-        await upsertPendingSyncOp(projectId, { op, clientOpId, project });
+        await upsertPendingSyncOp(projectId, { op, clientOpId, project, localEditSeq });
         lastSyncedSnapshotRef.current = '';
         setTimeout(() => {
           setRetryTick((value) => value + 1);
