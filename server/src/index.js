@@ -2525,6 +2525,7 @@ app.get('/api/projects', requireAuth, async (req, res) => {
             p.created_by AS "createdByUserId",
             ph.latest_seq AS "latestSeq",
             COALESCE(jsonb_array_length(ph.latest_snapshot_json -> 'tracks'), 0) AS "trackCount",
+            ${PROJECT_SNAPSHOT_DURATION_MS_SQL} AS "durationMs",
             ph.updated_at AS "updatedAt"
      FROM projects p
      LEFT JOIN shows s
@@ -2534,7 +2535,10 @@ app.get('/api/projects', requireAuth, async (req, res) => {
   );
   const permissionMap = await buildProjectPermissionMapForRows(req.user.id, result.rows);
   const sortedProjects = result.rows
-    .map((row) => attachProjectAccess(row, permissionMap))
+    .map((row) => attachProjectAccess({
+      ...row,
+      durationMs: Number(row.durationMs) || 0,
+    }, permissionMap))
     .filter((row) => canAccessProjectInDaw(row.access))
     .sort(compareProjectsByMusicalOrder);
   res.json({ projects: sortedProjects });

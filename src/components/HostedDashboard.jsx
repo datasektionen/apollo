@@ -6,6 +6,7 @@ import { usePlaybackDeviceSettings } from '../hooks/usePlaybackDeviceSettings';
 import { BrandWordmark } from './BrandLogo';
 import CreditsEditorDialog from './CreditsEditorDialog';
 import { getProjectCredits, getShowMetadata, saveProjectCredits, saveShowMetadata } from '../lib/serverApi';
+import { formatDurationMs } from '../utils/playerTime';
 
 function HostedDashboard({
   session,
@@ -514,10 +515,11 @@ function HostedDashboard({
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-gray-700">
-              <div className="min-w-[500px]">
-                <div className="grid grid-cols-[68px_minmax(150px,1fr)_70px_106px] bg-gray-800 border-b border-gray-700 px-2 py-3 text-base font-semibold tracking-normal text-gray-200">
+              <div className="min-w-[600px]">
+                <div className="grid grid-cols-[68px_minmax(150px,1fr)_96px_70px_106px] bg-gray-800 border-b border-gray-700 px-2 py-3 text-base font-semibold tracking-normal text-gray-200">
                   <div>No.</div>
                   <div>Original Title</div>
+                  <div>Length</div>
                   <div>Tracks</div>
                   <div>Last Modified</div>
                 </div>
@@ -540,7 +542,7 @@ function HostedDashboard({
                           project,
                         });
                       }}
-                      className={`grid grid-cols-[68px_minmax(150px,1fr)_70px_106px] items-center px-2 py-2.5 transition-colors ${
+                      className={`grid grid-cols-[68px_minmax(150px,1fr)_96px_70px_106px] items-center px-2 py-2.5 transition-colors ${
                         project?.canOpenProject
                           ? 'bg-gray-900 hover:bg-gray-800 cursor-pointer'
                           : 'bg-gray-900/70 text-gray-500 cursor-default'
@@ -573,6 +575,9 @@ function HostedDashboard({
                             {!project?.canOpenProject ? <span className="shrink-0 text-xs font-medium text-gray-500">Read only in dashboard</span> : null}
                           </h3>
                         )}
+                      </div>
+                      <div className="text-lg text-gray-400 tabular-nums">
+                        {formatDurationMs(project.durationMs)}
                       </div>
                       <div className="text-lg text-gray-300">
                         {project.trackCount ?? 0}
