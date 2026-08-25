@@ -4,6 +4,7 @@ import {
   finishLoadProgress,
   formatLoadBytes,
   formatLoadDuration,
+  formatLoadProgressText,
   getLoadProgress,
   isLoadProgressRunning,
   logLoadProgress,
@@ -35,7 +36,7 @@ describe('loadProgress tracker', () => {
     await withLoadStep(
       'Decode compressed audio',
       async () => {
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise((resolve) => setTimeout(resolve, 20));
         return 'ok';
       },
       { depth: 2 }
@@ -81,5 +82,17 @@ describe('loadProgress tracker', () => {
     expect(formatLoadBytes(500)).toBe('500 B');
     expect(formatLoadBytes(2048)).toBe('2.0 KB');
     expect(formatLoadBytes(2 * 1024 * 1024)).toBe('2.0 MB');
+  });
+
+  it('formats a session as copyable text', () => {
+    startLoadProgress({ kind: 'play', title: 'Tutti', detail: 'mix-1' });
+    logLoadProgress('IndexedDB miss (stem-1)', { depth: 1 });
+    finishLoadProgress();
+    const text = formatLoadProgressText(getLoadProgress());
+    expect(text).toContain('Play request: Tutti');
+    expect(text).toContain('Detail: mix-1');
+    expect(text).toContain('Status: done');
+    expect(text).toContain('IndexedDB miss (stem-1)');
+    expect(text).toContain('Finished in');
   });
 });

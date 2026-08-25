@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { exportProjectJSON, getMediaBlob } from './db';
+import { audioBufferToPlanarPcmBlob, localCacheBlobToWavBlob } from './mediaEncoding';
 import { normalizeProjectName } from '../utils/naming';
 
 /**
@@ -72,7 +73,8 @@ export async function exportAsZIP(project, mediaMap, exportBaseName = null, onPr
     }
 
     if (media?.blob) {
-      mediaFolder.file(`${blobId}.wav`, media.blob);
+      const wavBlob = await localCacheBlobToWavBlob(media.blob);
+      mediaFolder.file(`${blobId}.wav`, wavBlob);
     } else {
       missingBlobIds.push(blobId);
     }
@@ -155,15 +157,16 @@ export async function importFromZIP(file, storeMediaBlob, decodeAudioFile, onPro
   
   // Store each media file
   for (const { relativePath, file } of mediaFiles) {
-    const blobId = relativePath.replace('.wav', '');
+    const blobId = relativePath.replace(/\.(wav|apcm)$/i, '');
     const blob = await file.async('blob');
     
     // Decode audio
     const arrayBuffer = await blob.arrayBuffer();
     const audioBuffer = await decodeAudioFile(arrayBuffer);
     
-    // Store in IndexedDB
-    await storeMediaBlob(relativePath, audioBuffer, blob, blobId);
+    // Store planar PCM in IndexedDB for fast warm loads
+    const localCacheBlob = audioBufferToPlanarPcmBlob(audioBuffer);
+    await storeMediaBlob(`${blobId}.apcm`, audioBuffer, localCacheBlob, blobId);
     
     console.log(`Imported media: ${blobId}`);
   }

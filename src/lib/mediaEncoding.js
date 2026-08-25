@@ -21,6 +21,11 @@ export const SUPPORTED_IMPORT_ACCEPT = [
 
 const FLAC_BITS_PER_SAMPLE = 24;
 const FLAC_COMPRESSION_LEVEL = 5;
+export const PLANAR_PCM_MIME_TYPE = 'application/x-apollo-planar-pcm';
+export const PLANAR_PCM_EXTENSION = 'apcm';
+const PLANAR_PCM_MAGIC = 'APCM';
+const PLANAR_PCM_HEADER_BYTES = 20;
+const PLANAR_PCM_VERSION = 1;
 
 let flacModulePromise = null;
 
@@ -91,6 +96,107 @@ function writeAscii(view, offset, value) {
   for (let i = 0; i < value.length; i += 1) {
     view.setUint8(offset + i, value.charCodeAt(i));
   }
+}
+
+function readAscii(view, offset, length) {
+  let value = '';
+  for (let i = 0; i < length; i += 1) {
+    value += String.fromCharCode(view.getUint8(offset + i));
+  }
+  return value;
+}
+
+export function isPlanarPcmArrayBuffer(arrayBuffer) {
+  if (!arrayBuffer || arrayBuffer.byteLength < PLANAR_PCM_HEADER_BYTES) return false;
+  const view = new DataView(arrayBuffer);
+  return readAscii(view, 0, 4) === PLANAR_PCM_MAGIC
+    && view.getUint32(4, true) === PLANAR_PCM_VERSION;
+}
+
+export function isWavArrayBuffer(arrayBuffer) {
+  if (!arrayBuffer || arrayBuffer.byteLength < 12) return false;
+  const view = new DataView(arrayBuffer);
+  return readAscii(view, 0, 4) === 'RIFF' && readAscii(view, 8, 4) === 'WAVE';
+}
+
+export function parsePlanarPcmArrayBuffer(arrayBuffer) {
+  if (!isPlanarPcmArrayBuffer(arrayBuffer)) {
+    throw new Error('Not an Apollo planar PCM buffer');
+  }
+  const view = new DataView(arrayBuffer);
+  const channels = view.getUint32(8, true);
+  const sampleRate = view.getUint32(12, true);
+  const frames = view.getUint32(16, true);
+  const expectedBytes = PLANAR_PCM_HEADER_BYTES + (channels * frames * 4);
+  if (channels < 1 || frames < 0 || sampleRate < 1 || arrayBuffer.byteLength < expectedBytes) {
+    throw new Error('Corrupt Apollo planar PCM buffer');
+  }
+  const planar = new Float32Array(arrayBuffer, PLANAR_PCM_HEADER_BYTES, channels * frames);
+  const channelData = [];
+  for (let channel = 0; channel < channels; channel += 1) {
+    channelData.push(planar.subarray(channel * frames, (channel + 1) * frames));
+  }
+  return { channels, sampleRate, frames, channelData };
+}
+
+export function audioBufferToPlanarPcmBlob(audioBuffer) {
+  const channels = Math.max(1, Number(audioBuffer?.numberOfChannels) || 1);
+  const frames = Math.max(0, Number(audioBuffer?.length) || 0);
+  const sampleRate = Math.max(1, Math.round(Number(audioBuffer?.sampleRate) || 44100));
+  const buffer = new ArrayBuffer(PLANAR_PCM_HEADER_BYTES + (channels * frames * 4));
+  const view = new DataView(buffer);
+  writeAscii(view, 0, PLANAR_PCM_MAGIC);
+  view.setUint32(4, PLANAR_PCM_VERSION, true);
+  view.setUint32(8, channels, true);
+  view.setUint32(12, sampleRate, true);
+  view.setUint32(16, frames, true);
+  const planar = new Float32Array(buffer, PLANAR_PCM_HEADER_BYTES);
+  for (let channel = 0; channel < channels; channel += 1) {
+    planar.set(audioBuffer.getChannelData(channel), channel * frames);
+  }
+  return new Blob([buffer], { type: PLANAR_PCM_MIME_TYPE });
+}
+
+export function copyPlanarPcmIntoAudioBuffer(arrayBuffer, audioBuffer) {
+  const parsed = typeof arrayBuffer?.channelData === 'object'
+    ? arrayBuffer
+    : parsePlanarPcmArrayBuffer(arrayBuffer);
+  for (let channel = 0; channel < parsed.channels; channel += 1) {
+    audioBuffer.getChannelData(channel).set(parsed.channelData[channel]);
+  }
+  return audioBuffer;
+}
+
+export function audioBufferFromPlanarPcm(arrayBuffer, createBuffer) {
+  const parsed = parsePlanarPcmArrayBuffer(arrayBuffer);
+  if (typeof createBuffer !== 'function') {
+    throw new Error('AudioBuffer factory missing');
+  }
+  const audioBuffer = createBuffer(parsed.channels, parsed.frames, parsed.sampleRate);
+  return copyPlanarPcmIntoAudioBuffer(parsed, audioBuffer);
+}
+
+export function planarPcmArrayBufferToWavBlob(arrayBuffer) {
+  const parsed = parsePlanarPcmArrayBuffer(arrayBuffer);
+  return audioBufferToLocalWavBlob({
+    numberOfChannels: parsed.channels,
+    length: parsed.frames,
+    sampleRate: parsed.sampleRate,
+    getChannelData: (channel) => parsed.channelData[channel],
+  });
+}
+
+export async function localCacheBlobToWavBlob(blob) {
+  if (!blob) return blob;
+  const mimeType = String(blob.type || '').toLowerCase();
+  if (mimeType.includes('audio/wav') || mimeType.includes('audio/x-wav') || mimeType.includes('audio/wave')) {
+    return blob;
+  }
+  const arrayBuffer = await blob.arrayBuffer();
+  if (isPlanarPcmArrayBuffer(arrayBuffer)) {
+    return planarPcmArrayBufferToWavBlob(arrayBuffer);
+  }
+  return blob;
 }
 
 function audioBufferToInterleavedInt32(audioBuffer, bitsPerSample = FLAC_BITS_PER_SAMPLE) {
@@ -299,8 +405,8 @@ export async function prepareMediaForImportSource({
     sourceFileName,
     sourceMimeType,
   });
-  const localCacheBlob = audioBufferToLocalWavBlob(audioBuffer);
-  const localCacheFileName = replaceFileExtension(sourceFileName || 'audio.wav', 'wav');
+  const localCacheBlob = audioBufferToPlanarPcmBlob(audioBuffer);
+  const localCacheFileName = replaceFileExtension(sourceFileName || 'audio.wav', PLANAR_PCM_EXTENSION);
   const serverUploadBlob = descriptor.shouldTranscode
     ? await audioBufferToFlacBlob(audioBuffer)
     : sourceBlob;
@@ -324,18 +430,16 @@ export async function prepareRecordedMedia({
 
   return {
     ...descriptor,
-    localCacheBlob: audioBufferToLocalWavBlob(audioBuffer),
-    localCacheFileName: replaceFileExtension(fileNameBase || 'recording', 'wav'),
+    localCacheBlob: audioBufferToPlanarPcmBlob(audioBuffer),
+    localCacheFileName: replaceFileExtension(fileNameBase || 'recording', PLANAR_PCM_EXTENSION),
     serverUploadBlob: await audioBufferToFlacBlob(audioBuffer),
   };
 }
 
-export async function cacheRemoteBlobAsLocalWav({
+export async function decodeRemoteBlobToAudioBuffer({
   blobId,
   remoteBlob,
   decodeAudioFile,
-  storeMediaBlob,
-  fileName = null,
 }) {
   const arrayBuffer = await withLoadStep(
     `Read downloaded bytes into memory (${shortLoadId(blobId)})`,
@@ -354,40 +458,78 @@ export async function cacheRemoteBlobAsLocalWav({
     depth: 2,
     label: `Decoded buffer (${shortLoadId(blobId)})`,
   });
-  const localCacheFileName = fileName || `${blobId}.wav`;
-  let localCacheBlob = null;
-  let storedLocally = false;
-  let storeError = null;
+  return audioBuffer;
+}
 
+export async function persistAudioBufferAsLocalPcm({
+  blobId,
+  audioBuffer,
+  storeMediaBlob,
+  fileName = null,
+}) {
+  const localCacheFileName = fileName || `${blobId}.${PLANAR_PCM_EXTENSION}`;
+  let localCacheBlob = null;
   try {
     localCacheBlob = await withLoadStep(
-      `Encode float32 WAV (${shortLoadId(blobId)})`,
-      async () => audioBufferToLocalWavBlob(audioBuffer),
+      `Encode planar PCM (${shortLoadId(blobId)})`,
+      async () => audioBufferToPlanarPcmBlob(audioBuffer),
       {
         depth: 2,
         bytesFrom: (blob) => blob?.size,
       }
     );
     await withLoadStep(
-      `Write WAV to IndexedDB (${shortLoadId(blobId)})`,
+      `Write PCM to IndexedDB (${shortLoadId(blobId)})`,
       async () => storeMediaBlob(localCacheFileName, audioBuffer, localCacheBlob, blobId),
       { depth: 2 }
     );
-    storedLocally = true;
+    return {
+      storedLocally: true,
+      localCacheBlob,
+      localCacheFileName,
+      storeError: null,
+    };
   } catch (error) {
-    storeError = error;
     logLoadProgress(
       `IndexedDB write failed (${shortLoadId(blobId)}): ${error?.message || error}`,
       { level: 'error', depth: 2 }
     );
+    return {
+      storedLocally: false,
+      localCacheBlob,
+      localCacheFileName,
+      storeError: error,
+    };
   }
+}
+
+export const persistAudioBufferAsLocalWav = persistAudioBufferAsLocalPcm;
+
+export async function cacheRemoteBlobAsLocalWav({
+  blobId,
+  remoteBlob,
+  decodeAudioFile,
+  storeMediaBlob,
+  fileName = null,
+}) {
+  const audioBuffer = await decodeRemoteBlobToAudioBuffer({
+    blobId,
+    remoteBlob,
+    decodeAudioFile,
+  });
+  const persistResult = await persistAudioBufferAsLocalPcm({
+    blobId,
+    audioBuffer,
+    storeMediaBlob,
+    fileName,
+  });
 
   return {
     audioBuffer,
-    localCacheBlob,
-    localCacheFileName,
-    fallbackBlob: localCacheBlob || remoteBlob,
-    storedLocally,
-    storeError,
+    localCacheBlob: persistResult.localCacheBlob,
+    localCacheFileName: persistResult.localCacheFileName,
+    fallbackBlob: persistResult.localCacheBlob || remoteBlob,
+    storedLocally: persistResult.storedLocally,
+    storeError: persistResult.storeError,
   };
 }

@@ -457,12 +457,11 @@ function App() {
       const canonicalIdMap = new Map();
       for (const blobId of blobIds) {
         const media = await getMediaBlob(blobId);
-        const arrayBuffer = await media.blob.arrayBuffer();
-        const audioBuffer = await audioManager.decodeAudioFile(arrayBuffer);
+        const audioBuffer = await audioManager.loadAudioBuffer(blobId, media.blob);
         const prepared = await prepareMediaForImportSource({
           sourceBlob: media.blob,
-          sourceFileName: media.fileName || `${blobId}.wav`,
-          sourceMimeType: media.blob.type || 'audio/wav',
+          sourceFileName: `${blobId}.wav`,
+          sourceMimeType: 'audio/wav',
           audioBuffer,
         });
         const uploaded = await registerAndUploadMediaBlob({

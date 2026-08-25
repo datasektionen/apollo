@@ -41,21 +41,19 @@ import useRealtimeProjectSync from '../hooks/useRealtimeProjectSync';
 import { commitLocalProjectSession, downloadMediaBlob, forceCheckpoint } from '../lib/serverApi';
 import { createId } from '../utils/id';
 import {
-  cacheRemoteBlobAsLocalWav,
   prepareMediaForImportSource,
   prepareRecordedMedia,
   SUPPORTED_IMPORT_EXTENSIONS,
 } from '../lib/mediaEncoding';
+import { loadStemsIntoMediaCache } from '../lib/loadStemAudio';
 import { registerAndUploadMediaBlob } from '../lib/mediaUpload';
 import {
   finishLoadProgress,
   isLoadProgressRunning,
   getLoadProgress,
   logLoadProgress,
-  shortLoadId,
   summarizeProjectForLoadLog,
   updateLoadProgress,
-  withLoadStep,
 } from '../lib/loadProgress';
 import {
   GROUP_ROLE_CHOIRS,
@@ -524,16 +522,6 @@ function Editor({
     }), action === 'add' ? 'Add clip' : action === 'delete' ? 'Delete clip' : action === 'split' ? 'Split clip' : 'Update clip');
   }, [isAdvancedMixSession, updateProject]);
 
-  const createEphemeralMediaEntry = useCallback((blobId, fileName, audioBuffer, blob) => ({
-    blobId,
-    fileName,
-    sampleRate: audioBuffer.sampleRate,
-    durationMs: audioBuffer.duration * 1000,
-    channels: audioBuffer.numberOfChannels,
-    blob,
-    createdAt: Date.now(),
-  }), []);
-
   const persistImportedMedia = useCallback(async (file, audioBuffer) => {
     const prepared = await prepareMediaForImportSource({
       sourceBlob: file,
@@ -867,159 +855,44 @@ function Editor({
       checkpoint();
       if (shouldFinish) {
         summarizeProjectForLoadLog(currentProject, 'Editor project');
-        updateLoadProgress({
-          phase: 'Audio',
-          stemIndex: 0,
-          stemTotal: blobIds.length,
-          current: blobIds.length ? `Loading ${blobIds.length} stems…` : 'No stems to load',
-        });
         logLoadProgress(`Editor audio loader starting (${blobIds.length} unique stems)`);
       }
-      for (let index = 0; index < blobIds.length; index += 1) {
-        checkpoint();
-        const blobId = blobIds[index];
-        const stemLabel = `${index + 1}/${blobIds.length}`;
-        if (shouldFinish) {
-          updateLoadProgress({
-            stemIndex: index + 1,
-            stemTotal: blobIds.length,
-            current: `Stem ${stemLabel} (${shortLoadId(blobId)})`,
-          });
-        }
-
-        if (!audioManager.mediaCache.has(blobId)) {
-          try {
-            let media = null;
-            try {
-              media = await withLoadStep(
-                `IndexedDB lookup (${shortLoadId(blobId)})`,
-                async () => getMediaBlob(blobId),
-                {
-                  depth: 1,
-                  bytesFrom: (entry) => entry?.blob?.size,
-                }
-              );
-              checkpoint();
-              logLoadProgress(`IndexedDB hit (${shortLoadId(blobId)})`, { depth: 1, level: 'ok' });
-            } catch (localError) {
-              if (localError?.name === 'StaleAudioLoad') throw localError;
-              checkpoint();
-              logLoadProgress(
-                `IndexedDB miss (${shortLoadId(blobId)}): ${localError?.message || localError}`,
-                { depth: 1 }
-              );
-              if (!canUseRemoteMedia) {
-                throw localError;
-              }
-
-              try {
-                const remoteBlob = await withLoadStep(
-                  `Download compressed file (${shortLoadId(blobId)})`,
-                  async () => downloadMediaBlob(blobId, remoteSession.session, {
-                    projectId: remoteSession.serverProjectId,
-                  }),
-                  {
-                    depth: 1,
-                    bytesFrom: (blob) => blob?.size,
-                  }
-                );
-                checkpoint();
-                const cachedRemoteMedia = await withLoadStep(
-                  `Decode + cache local WAV (${shortLoadId(blobId)})`,
-                  async () => cacheRemoteBlobAsLocalWav({
-                    blobId,
-                    remoteBlob,
-                    decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
-                    storeMediaBlob,
-                    fileName: `${blobId}.wav`,
-                  }),
-                  { depth: 1 }
-                );
-                checkpoint();
-                audioManager.mediaCache.set(blobId, cachedRemoteMedia.audioBuffer);
-                if (cachedRemoteMedia.storedLocally) {
-                  media = await withLoadStep(
-                    `Re-read IndexedDB after cache write (${shortLoadId(blobId)})`,
-                    async () => getMediaBlob(blobId),
-                    {
-                      depth: 1,
-                      bytesFrom: (entry) => entry?.blob?.size,
-                    }
-                  );
-                  checkpoint();
-                } else {
-                  media = createEphemeralMediaEntry(
-                    blobId,
-                    cachedRemoteMedia.localCacheFileName,
-                    cachedRemoteMedia.audioBuffer,
-                    cachedRemoteMedia.fallbackBlob
-                  );
-                  logLoadProgress(
-                    `Using in-memory fallback (${shortLoadId(blobId)}); IndexedDB write failed`,
-                    { level: 'error', depth: 1 }
-                  );
-                  reportUserError(
-                    'Failed to persist downloaded media locally. Using in-memory audio for this session.',
-                    cachedRemoteMedia.storeError,
-                    { onceKey: `editor:cache-remote-media:${blobId}` }
-                  );
-                }
-              } catch (remoteError) {
-                if (remoteError?.name === 'StaleAudioLoad') throw remoteError;
-                throw remoteError;
-              }
-            }
-
-            await withLoadStep(
-              `Ensure AudioBuffer in RAM (${shortLoadId(blobId)})`,
-              async () => audioManager.loadAudioBuffer(blobId, media.blob),
-              { depth: 1 }
-            );
-            checkpoint();
-            newMediaMap.set(blobId, media);
-          } catch (error) {
-            if (error?.name === 'StaleAudioLoad') throw error;
-            logLoadProgress(
-              `Stem failed (${shortLoadId(blobId)}): ${error?.message || error}`,
-              { level: 'error', depth: 1 }
-            );
-            reportUserError(
-              buildBlobReferenceErrorMessage(currentProject, blobId, 'clip audio'),
-              error,
-              { onceKey: `editor:load-audio-buffer:${blobId}` }
-            );
-          }
-        } else {
-          try {
-            logLoadProgress(`RAM AudioBuffer cache hit (${shortLoadId(blobId)})`, {
-              depth: 1,
-              level: 'ok',
-            });
-            const media = await withLoadStep(
-              `IndexedDB metadata for media map (${shortLoadId(blobId)})`,
-              async () => getMediaBlob(blobId),
-              {
-                depth: 1,
-                bytesFrom: (entry) => entry?.blob?.size,
-              }
-            );
-            checkpoint();
-            newMediaMap.set(blobId, media);
-          } catch (error) {
-            if (error?.name === 'StaleAudioLoad') throw error;
-            logLoadProgress(
-              `RAM hit but IndexedDB metadata failed (${shortLoadId(blobId)}): ${error?.message || error}`,
-              { level: 'error', depth: 1 }
-            );
-            reportUserError(
-              buildBlobReferenceErrorMessage(currentProject, blobId, 'clip media details'),
-              error,
-              { onceKey: `editor:load-media-data:${blobId}` }
-            );
-          }
-        }
-      }
+      const { mediaEntries } = await loadStemsIntoMediaCache(blobIds, {
+        mediaCache: audioManager.mediaCache,
+        getMediaBlob,
+        loadAudioBuffer: audioManager.loadAudioBuffer.bind(audioManager),
+        decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
+        storeMediaBlob,
+        download: canUseRemoteMedia
+          ? (blobId) => downloadMediaBlob(blobId, remoteSession.session, {
+            projectId: remoteSession.serverProjectId,
+          })
+          : null,
+        isCancelled: isStale,
+        needMediaEntry: true,
+        onPersistFailed: (error, blobId) => {
+          reportUserError(
+            'Failed to persist downloaded media locally. Using in-memory audio for this session.',
+            error,
+            { onceKey: `editor:cache-remote-media:${blobId}` }
+          );
+        },
+        onStemError: (error, blobId) => {
+          logLoadProgress(
+            `Stem failed (${blobId}): ${error?.message || error}`,
+            { level: 'error', depth: 1 }
+          );
+          reportUserError(
+            buildBlobReferenceErrorMessage(currentProject, blobId, 'clip audio'),
+            error,
+            { onceKey: `editor:load-audio-buffer:${blobId}` }
+          );
+        },
+      });
       checkpoint();
+      mediaEntries.forEach((media, blobId) => {
+        newMediaMap.set(blobId, media);
+      });
       updateLoadProgress({ current: 'Publishing media map to editor' });
       setMediaMap(newMediaMap);
       if (shouldFinish) {
@@ -1034,7 +907,7 @@ function Editor({
     } finally {
       if (shouldFinish && !isStale()) finishLoadProgress(loadError, progressId);
     }
-  }, [canUseRemoteMedia, createEphemeralMediaEntry, remoteSession?.session, remoteSession?.serverProjectId]);
+  }, [canUseRemoteMedia, remoteSession?.session, remoteSession?.serverProjectId]);
 
   loadProjectAudioRef.current = loadProjectAudio;
 
@@ -1204,6 +1077,22 @@ function Editor({
     return true;
   }, [advancedMixControls, advancedMixFocus, isAdvancedMixSession]);
 
+  const applyProjectLiveMix = useCallback((snapshot = projectRef.current) => {
+    if (!snapshot) return;
+    if (isAdvancedMixSession) {
+      applyAdvancedMixRealtimeSettings(snapshot);
+      return;
+    }
+    const mix = getEffectiveTrackMix(snapshot);
+    mix.statesByTrackId.forEach((state, id) => {
+      audioManager.updateTrackMix(
+        id,
+        state.audible ? state.effectiveGain : 0,
+        state.effectivePan
+      );
+    });
+  }, [applyAdvancedMixRealtimeSettings, isAdvancedMixSession]);
+
   useEffect(() => {
     if (!isPlaying) return;
     applyAdvancedMixRealtimeSettings();
@@ -1212,7 +1101,6 @@ function Editor({
   useEffect(() => {
     let interval = null;
     let isCancelled = false;
-    let loopRestartTimeout = null;
     const getPlaybackEndMs = (currentProject) => {
       if (!currentProject?.tracks?.length) return 0;
       const mix = getEffectiveTrackMix(currentProject);
@@ -1292,23 +1180,14 @@ function Editor({
             }
             
             // Seamlessly restart playback at loop start
-            audioManager.stop();
             setCurrentTime(currentProject.loop.startMs);
-            
-            // Wait one audio processing frame for sources to stop
-            loopRestartTimeout = setTimeout(() => {
-              applyEditorPlaybackOutputConfig()
-                .then(() => audioManager.play(currentProject, currentProject.loop.startMs))
-                .then(() => applyAdvancedMixRealtimeSettings(currentProject))
-                .then(() => {
-                // Set previousTime above loop end to prevent edge re-detection
-                previousTimeRef.current = currentProject.loop.endMs + 1000;
-                // Wait 100ms before resetting flag
-                setTimeout(() => {
-                  isHandlingLoopWrapRef.current = false;
-                }, 100);
-                });
-            }, 5);
+            void audioManager.seek(currentProject, currentProject.loop.startMs).then(() => {
+              applyProjectLiveMix(currentProject);
+              previousTimeRef.current = currentProject.loop.endMs + 1000;
+              setTimeout(() => {
+                isHandlingLoopWrapRef.current = false;
+              }, 100);
+            });
           } else {
             setCurrentTime(newTime);
             previousTimeRef.current = newTime;
@@ -1323,17 +1202,11 @@ function Editor({
     
     return () => {
       isCancelled = true;
-      
-      // Clear loop restart timeout if pending
-      if (loopRestartTimeout) {
-        clearTimeout(loopRestartTimeout);
-      }
-      
       if (interval) {
         clearInterval(interval);
       }
     };
-  }, [applyAdvancedMixRealtimeSettings, applyEditorPlaybackOutputConfig, isPlaying, project.projectId, isRecording, recordingSegments.length]);
+  }, [applyAdvancedMixRealtimeSettings, applyEditorPlaybackOutputConfig, applyProjectLiveMix, isPlaying, project.projectId, isRecording, recordingSegments.length]);
 
   // Separate effect for handling recording overwrite
   useEffect(() => {
@@ -2497,19 +2370,15 @@ function Editor({
   };
 
   const handleSeek = (timeMs) => {
-    const wasPlaying = isPlaying;
-    
-    if (wasPlaying) {
-      pause();
-      audioManager.stop();
-    }
-    
-    setCurrentTime(timeMs);
-    
-    if (wasPlaying) {
-      setTimeout(() => {
-        play();
-      }, 10);
+    const safeTimeMs = Math.max(0, Number(timeMs) || 0);
+    setCurrentTime(safeTimeMs);
+    previousTimeRef.current = safeTimeMs;
+    if (isPlaying) {
+      void audioManager.seek(projectRef.current || project, safeTimeMs).then(() => {
+        applyProjectLiveMix(projectRef.current || project);
+      }).catch((error) => {
+        reportUserError('Seek failed.', error, { onceKey: 'editor:seek' });
+      });
     }
   };
 
@@ -2582,24 +2451,7 @@ function Editor({
     }, `Update track`);
 
     if (isPlaying && nextProjectAfter) {
-      if (isAdvancedMixSession) {
-        applyAdvancedMixRealtimeSettings(nextProjectAfter);
-        return;
-      }
-      const shouldRestart = safeUpdates.muted !== undefined || safeUpdates.soloed !== undefined;
-      if (shouldRestart) {
-        audioManager.stop();
-        void applyEditorPlaybackOutputConfig().then(() => audioManager.play(nextProjectAfter, currentTimeMs));
-      } else {
-        const mix = getEffectiveTrackMix(nextProjectAfter);
-        mix.statesByTrackId.forEach((state, id) => {
-          audioManager.updateTrackMix(
-            id,
-            state.audible ? state.effectiveGain : 0,
-            state.effectivePan
-          );
-        });
-      }
+      applyProjectLiveMix(nextProjectAfter);
     }
   };
 
@@ -2796,24 +2648,7 @@ function Editor({
     }
 
     if (isPlaying && nextProjectAfter) {
-      if (isAdvancedMixSession) {
-        applyAdvancedMixRealtimeSettings(nextProjectAfter);
-        return;
-      }
-      const shouldRestart = safeUpdates.muted !== undefined || safeUpdates.soloed !== undefined;
-      if (shouldRestart) {
-        audioManager.stop();
-        void applyEditorPlaybackOutputConfig().then(() => audioManager.play(nextProjectAfter, currentTimeMs));
-      } else {
-        const mix = getEffectiveTrackMix(nextProjectAfter);
-        mix.statesByTrackId.forEach((state, id) => {
-          audioManager.updateTrackMix(
-            id,
-            state.audible ? state.effectiveGain : 0,
-            state.effectivePan
-          );
-        });
-      }
+      applyProjectLiveMix(nextProjectAfter);
     }
   };
 

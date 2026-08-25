@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { Check, Copy, Loader2, X } from 'lucide-react';
 import {
   dismissLoadProgress,
   formatLoadBytes,
   formatLoadDuration,
+  formatLoadProgressText,
   subscribeLoadProgress,
 } from '../lib/loadProgress';
 
@@ -26,6 +27,7 @@ export default function LoadProgressDialog() {
   const [now, setNow] = useState(() => (
     typeof performance !== 'undefined' ? performance.now() : Date.now()
   ));
+  const [copied, setCopied] = useState(false);
   const logEndRef = useRef(null);
 
   useEffect(() => subscribeLoadProgress(setState), []);
@@ -41,6 +43,34 @@ export default function LoadProgressDialog() {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: 'end' });
   }, [state?.logs?.length, state?.id]);
+
+  useEffect(() => {
+    setCopied(false);
+  }, [state?.id]);
+
+  async function copyLog() {
+    const text = formatLoadProgressText(state, now);
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   if (!state?.visible) return null;
 
@@ -101,7 +131,7 @@ export default function LoadProgressDialog() {
           ) : null}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto bg-gray-950 px-4 py-3 font-mono text-xs leading-5">
+        <div className="min-h-0 flex-1 select-text overflow-auto bg-gray-950 px-4 py-3 font-mono text-xs leading-5">
           {state.logs.map((entry) => (
             <div
               key={entry.id}
@@ -124,7 +154,15 @@ export default function LoadProgressDialog() {
           <div ref={logEndRef} />
         </div>
 
-        <div className="flex justify-end border-t border-gray-800 px-5 py-3">
+        <div className="flex justify-end gap-2 border-t border-gray-800 px-5 py-3">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
+            onClick={copyLog}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? 'Copied' : 'Copy log'}
+          </button>
           <button
             type="button"
             className="rounded bg-gray-700 px-4 py-2 text-sm hover:bg-gray-600 disabled:opacity-40"

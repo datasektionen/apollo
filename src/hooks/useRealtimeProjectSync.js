@@ -12,6 +12,7 @@ import {
 import { createId } from '../utils/id';
 import { bootstrapServerProject, resolveMedia } from '../lib/serverApi';
 import { registerAndUploadMediaBlob } from '../lib/mediaUpload';
+import { localCacheBlobToWavBlob } from '../lib/mediaEncoding';
 
 function collectBlobIds(project) {
   const ids = new Set();
@@ -275,9 +276,9 @@ export default function useRealtimeProjectSync({
       }
       const uploaded = await registerAndUploadMediaBlob({
         mediaId: blobId,
-        blob: media.blob,
-        fileName: media.fileName || blobId,
-        mimeType: media.blob.type || 'application/octet-stream',
+        blob: await localCacheBlobToWavBlob(media.blob),
+        fileName: media.fileName?.replace(/\.apcm$/i, '.wav') || `${blobId}.wav`,
+        mimeType: 'audio/wav',
         session,
         projectId: serverProjectId,
       });

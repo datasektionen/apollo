@@ -24,6 +24,7 @@ import {
   normalizeAdvancedMixControls,
   normalizeAdvancedMixFocus,
   normalizeAdvancedMixState,
+  isAdvancedMixPreset,
 } from '../utils/advancedMix';
 import {
   TRACK_ROLE_CHOIR,
@@ -122,6 +123,48 @@ export function isGroupMixPresetId(presetId) {
 
 export function isPracticeOmittedPresetId(presetId) {
   return PRACTICE_OMITTED_PRESETS.has(presetId);
+}
+
+/**
+ * Tracks that live mix controls can still need after Play has started.
+ * DAW and advanced mix keep every track (muted stems stay loaded so unmute works).
+ * Tutti / part / group mixes keep currently audible tracks plus metronome, even if
+ * the click is muted — practice focus, pan range, and metronome cannot unmute a
+ * DAW-muted non-metronome stem.
+ */
+export function getLiveMixableTrackIds(project, options = {}) {
+  const tracks = Array.isArray(project?.tracks) ? project.tracks : [];
+  const presetId = options?.presetId || null;
+  const loadAllTracks = options?.scope === 'daw'
+    || options?.scope === 'advanced-mix'
+    || isAdvancedMixPreset(presetId);
+  if (loadAllTracks) {
+    return new Set(tracks.map((track) => track?.id).filter(Boolean));
+  }
+
+  const context = getExportContext(project);
+  const trackIds = new Set(context.activeTracks.map((track) => track.id));
+  context.allTracks.forEach((track) => {
+    if (track?.id && isMetronomeTrack(track, context.effectiveRole)) {
+      trackIds.add(track.id);
+    }
+  });
+  return trackIds;
+}
+
+export function collectLiveMixBlobIds(project, options = {}) {
+  const trackIds = getLiveMixableTrackIds(project, options);
+  const blobIds = [];
+  const seen = new Set();
+  (project?.tracks || []).forEach((track) => {
+    if (!trackIds.has(track?.id)) return;
+    (track?.clips || []).forEach((clip) => {
+      if (!clip?.blobId || seen.has(clip.blobId)) return;
+      seen.add(clip.blobId);
+      blobIds.push(clip.blobId);
+    });
+  });
+  return blobIds;
 }
 
 function clampPan(pan) {

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clampPlayerSeek,
   computeSnapshotDurationMs,
   formatClock,
   formatDurationMs,
+  seekPreviewFromPointer,
+  shouldCommitPlayingSeek,
 } from '../playerTime';
 
 describe('computeSnapshotDurationMs', () => {
@@ -71,6 +74,44 @@ describe('formatClock', () => {
     expect(formatClock(3661)).toBe('1:01:01');
     expect(formatClock(Number.POSITIVE_INFINITY)).toBe('0:00');
     expect(formatClock(Number.NaN)).toBe('0:00');
+  });
+});
+
+describe('clampPlayerSeek', () => {
+  it('converts a clamped clock time to whole milliseconds', () => {
+    expect(clampPlayerSeek(12.3456, 60)).toEqual({ timeSec: 12.3456, timeMs: 12346 });
+    expect(clampPlayerSeek(-2, 60)).toEqual({ timeSec: 0, timeMs: 0 });
+    expect(clampPlayerSeek(90, 12.5)).toEqual({ timeSec: 12.5, timeMs: 12500 });
+  });
+});
+
+describe('shouldCommitPlayingSeek', () => {
+  it('commits the first seek in a gesture and ignores the mouseup duplicate', () => {
+    expect(shouldCommitPlayingSeek(null, 30_000)).toBe(true);
+    expect(shouldCommitPlayingSeek(30_000, 30_000)).toBe(false);
+    expect(shouldCommitPlayingSeek(30_000, 30_080)).toBe(true);
+  });
+
+  it('treats near-identical mouseup values as the same seek', () => {
+    expect(shouldCommitPlayingSeek(30_000, 30_080, 100)).toBe(false);
+    expect(shouldCommitPlayingSeek(30_000, 30_200, 100)).toBe(true);
+  });
+});
+
+describe('seekPreviewFromPointer', () => {
+  it('maps a click on the slider track to a clamped clock time', () => {
+    expect(seekPreviewFromPointer(50, { left: 0, width: 100 }, 10)).toEqual({
+      timeSec: 5,
+      timeMs: 5000,
+    });
+    expect(seekPreviewFromPointer(-8, { left: 0, width: 100 }, 10)).toEqual({
+      timeSec: 0,
+      timeMs: 0,
+    });
+    expect(seekPreviewFromPointer(140, { left: 20, width: 100 }, 10)).toEqual({
+      timeSec: 10,
+      timeMs: 10000,
+    });
   });
 });
 

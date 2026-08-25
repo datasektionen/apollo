@@ -47,6 +47,29 @@ export function formatClock(seconds) {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
+export function clampPlayerSeek(timeSec, durationSec) {
+  const duration = Math.max(0, toFiniteNumber(durationSec, 0));
+  const next = Math.max(0, Math.min(toFiniteNumber(timeSec, 0), duration));
+  return {
+    timeSec: next,
+    timeMs: Math.max(0, Math.round(next * 1000)),
+  };
+}
+
+export function shouldCommitPlayingSeek(committedMs, nextMs, epsilonMs = 0) {
+  if (!Number.isFinite(nextMs)) return false;
+  if (committedMs == null) return true;
+  const epsilon = Math.max(0, Number(epsilonMs) || 0);
+  return Math.abs(committedMs - nextMs) > epsilon;
+}
+
+export function seekPreviewFromPointer(clientX, trackRect, durationSec) {
+  const width = Math.max(1, Number(trackRect?.width) || 0);
+  const left = Number(trackRect?.left) || 0;
+  const ratio = Math.max(0, Math.min(1, (Number(clientX) - left) / width));
+  return clampPlayerSeek(ratio * (Number(durationSec) || 0), durationSec);
+}
+
 export function formatDurationMs(durationMs, fallbackSec = 0) {
   const mixMs = Number(durationMs);
   if (Number.isFinite(mixMs) && mixMs > 0) {

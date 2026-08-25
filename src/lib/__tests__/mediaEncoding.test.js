@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   SUPPORTED_IMPORT_ACCEPT,
   SUPPORTED_IMPORT_EXTENSIONS,
+  audioBufferFromPlanarPcm,
+  audioBufferToPlanarPcmBlob,
   getAudioFormatFromFile,
   getServerUploadDescriptor,
+  isPlanarPcmArrayBuffer,
   replaceFileExtension,
 } from '../mediaEncoding';
 
@@ -93,5 +96,33 @@ describe('mediaEncoding import policy', () => {
       serverUploadMimeType: 'audio/flac',
       serverUploadFileName: 'recording.flac',
     });
+  });
+
+  it('round-trips planar PCM with memcpy into an AudioBuffer-like object', async () => {
+    const frames = 6;
+    const left = new Float32Array([0.1, -0.2, 0.3, -0.4, 0.5, -0.6]);
+    const right = new Float32Array([0.05, 0.15, 0.25, 0.35, 0.45, 0.55]);
+    const original = {
+      numberOfChannels: 2,
+      length: frames,
+      sampleRate: 44100,
+      getChannelData: (channel) => (channel === 0 ? left : right),
+    };
+    const blob = audioBufferToPlanarPcmBlob(original);
+    const arrayBuffer = await blob.arrayBuffer();
+    expect(isPlanarPcmArrayBuffer(arrayBuffer)).toBe(true);
+
+    const restored = audioBufferFromPlanarPcm(arrayBuffer, (channels, length, sampleRate) => {
+      const data = Array.from({ length: channels }, () => new Float32Array(length));
+      return {
+        numberOfChannels: channels,
+        length,
+        sampleRate,
+        getChannelData: (channel) => data[channel],
+      };
+    });
+    expect(restored.sampleRate).toBe(44100);
+    expect(Array.from(restored.getChannelData(0))).toEqual(Array.from(left));
+    expect(Array.from(restored.getChannelData(1))).toEqual(Array.from(right));
   });
 });

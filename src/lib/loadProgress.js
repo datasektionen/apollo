@@ -32,6 +32,43 @@ export function formatLoadBytes(bytes) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function logLevelPrefix(level) {
+  if (level === 'ok') return 'ok';
+  if (level === 'error') return 'err';
+  if (level === 'start') return '…';
+  return 'i';
+}
+
+export function formatLoadProgressText(session, now = nowMs()) {
+  if (!session) return '';
+  const kindLabel = session.kind === 'play' ? 'Play request' : 'Open request';
+  const elapsedMs = (session.endedAt || now) - session.startedAt;
+  const lines = [
+    `${kindLabel}: ${session.title || 'Loading'}`,
+  ];
+  if (session.detail) lines.push(`Detail: ${session.detail}`);
+  lines.push(`Status: ${session.status || 'unknown'}`);
+  if (session.current) lines.push(`Current: ${session.current}`);
+  if (session.phase) lines.push(`Phase: ${session.phase}`);
+  if (session.stemTotal > 0) {
+    lines.push(`Stem: ${Math.min(session.stemIndex, session.stemTotal)} / ${session.stemTotal}`);
+  }
+  lines.push(`Elapsed: ${formatLoadDuration(elapsedMs)}`);
+  if (session.error) lines.push(`Error: ${session.error}`);
+  lines.push('');
+  (session.logs || []).forEach((entry) => {
+    const indent = '  '.repeat(Math.max(0, Number(entry.depth) || 0));
+    const extras = [];
+    if (entry.durationMs != null) extras.push(formatLoadDuration(entry.durationMs));
+    if (entry.bytes != null) extras.push(formatLoadBytes(entry.bytes));
+    const extraText = extras.length ? `  (${extras.join(', ')})` : '';
+    lines.push(
+      `${indent}+${formatLoadDuration(entry.atMs)}  ${logLevelPrefix(entry.level)}  ${entry.message}${extraText}`
+    );
+  });
+  return lines.join('\n');
+}
+
 export function shortLoadId(id) {
   const value = String(id || '').trim();
   if (!value) return 'unknown';

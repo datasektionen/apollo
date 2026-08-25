@@ -49,8 +49,10 @@ import {
   updateVirtualMix,
 } from '../lib/serverApi';
 import {
+  collectLiveMixBlobIds,
   createEditableMixSource,
   EXPORT_PRESETS,
+  getLiveMixableTrackIds,
   PRACTICE_REALTIME_MODES,
   isGroupMixPresetId,
   isPracticeOmittedPresetId,
@@ -61,6 +63,8 @@ import {
 } from '../lib/exportEngine';
 import { audioManager } from '../lib/audioManager';
 import { getMediaBlob, storeMediaBlob } from '../lib/db';
+import { loadStemsIntoMediaCache, createStaleAudioLoadError } from '../lib/loadStemAudio';
+import { resolvePlayerProjectSnapshot } from '../lib/playerSnapshotCache';
 import { getEffectiveTrackMix } from '../utils/trackTree';
 import {
   createQueueItemFromMix,
@@ -69,11 +73,9 @@ import {
 } from '../types/player';
 import { TRACK_ROLE_METRONOME } from '../utils/trackRoles';
 import { usePlaybackDeviceSettings } from '../hooks/usePlaybackDeviceSettings';
-import { cacheRemoteBlobAsLocalWav } from '../lib/mediaEncoding';
 import {
   finishLoadProgress,
   logLoadProgress,
-  shortLoadId,
   startLoadProgress,
   summarizeProjectForLoadLog,
   updateLoadProgress,
@@ -86,9 +88,12 @@ import {
   resolvePlayerSpaceAction,
 } from '../utils/playerSpacePlayback';
 import {
+  clampPlayerSeek,
   computeSnapshotDurationMs,
   formatClock,
   formatDurationMs,
+  seekPreviewFromPointer,
+  shouldCommitPlayingSeek,
 } from '../utils/playerTime';
 import {
   ADVANCED_MIX_PRESET_ID,
@@ -224,18 +229,6 @@ function selectFromPrompt(label, options) {
   return byValue ? byValue.value : null;
 }
 
-function createEphemeralMediaEntry(blobId, fileName, audioBuffer, blob) {
-  return {
-    blobId,
-    fileName,
-    sampleRate: audioBuffer.sampleRate,
-    durationMs: audioBuffer.duration * 1000,
-    channels: audioBuffer.numberOfChannels,
-    blob,
-    createdAt: Date.now(),
-  };
-}
-
 function buildDefaultMixName(projectLike, mixLabel) {
   return `${projectLike?.musicalNumber ? `${projectLike.musicalNumber} - ` : ''}${projectLike?.name || projectLike?.projectName || 'Mix'}${mixLabel ? ` - ${mixLabel}` : ''}`;
 }
@@ -261,6 +254,14 @@ function buildMixCategoryOptions(snapshot) {
       label: 'Advanced mix',
     },
   ].filter(Boolean);
+}
+
+function getPlayerPlayOptions(playback = {}, extra = {}) {
+  return {
+    useProjectMasterVolume: false,
+    liveMixableTrackIds: playback.liveMixableTrackIds || null,
+    ...extra,
+  };
 }
 
 function buildAdvancedPlaybackSnapshot(baseSnapshot, item) {
@@ -575,6 +576,16 @@ function PlayerDashboard({
   const libraryContextMenuRef = useRef(null);
   const projectContextMenuRef = useRef(null);
   const sliderDragRef = useRef(null);
+  const timelineScrubRef = useRef({
+    active: false,
+    gestureId: 0,
+    lastAudioSeekMs: null,
+    lastUserSec: null,
+  });
+  const isPlayingRef = useRef(false);
+  const durationSecRef = useRef(0);
+  const playGenerationRef = useRef(0);
+  const projectSnapshotCacheRef = useRef(new Map());
   const {
     audioInputs,
     audioOutputs,
@@ -1102,112 +1113,20 @@ function PlayerDashboard({
     }
   }, [activeQueueItems, activeIndex]);
 
-  const ensureSnapshotAudioBuffers = useCallback(async (snapshot) => {
-    const blobIds = [];
-    const seenBlobIds = new Set();
-    (snapshot?.tracks || []).forEach((track) => {
-      (track?.clips || []).forEach((clip) => {
-        if (!clip?.blobId || seenBlobIds.has(clip.blobId)) return;
-        seenBlobIds.add(clip.blobId);
-        blobIds.push(clip.blobId);
-      });
+  const ensureSnapshotAudioBuffers = useCallback(async (snapshot, blobIds = null, isCancelled = null) => {
+    const ids = Array.isArray(blobIds) ? blobIds : collectLiveMixBlobIds(snapshot, { scope: 'daw' });
+    logLoadProgress(`Player audio loader starting (${ids.length} unique stems)`);
+    const { audioBuffers } = await loadStemsIntoMediaCache(ids, {
+      mediaCache: audioManager.mediaCache,
+      getMediaBlob,
+      loadAudioBuffer: audioManager.loadAudioBuffer.bind(audioManager),
+      decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
+      storeMediaBlob,
+      download: (blobId) => downloadMediaBlob(blobId, session, {
+        projectId: snapshot?.projectId || realtimePlaybackRef.current?.item?.projectId || null,
+      }),
+      isCancelled,
     });
-
-    updateLoadProgress({
-      phase: 'Audio',
-      stemIndex: 0,
-      stemTotal: blobIds.length,
-      current: blobIds.length ? `Loading ${blobIds.length} stems…` : 'No stems to load',
-    });
-    logLoadProgress(`Player audio loader starting (${blobIds.length} unique stems)`);
-
-    const audioBuffers = new Map();
-    for (let index = 0; index < blobIds.length; index += 1) {
-      const blobId = blobIds[index];
-      const stemLabel = `${index + 1}/${blobIds.length}`;
-      updateLoadProgress({
-        stemIndex: index + 1,
-        stemTotal: blobIds.length,
-        current: `Stem ${stemLabel} (${shortLoadId(blobId)})`,
-      });
-
-      if (!audioManager.mediaCache.has(blobId)) {
-        let media = null;
-        try {
-          media = await withLoadStep(
-            `IndexedDB lookup (${shortLoadId(blobId)})`,
-            async () => getMediaBlob(blobId),
-            {
-              depth: 1,
-              bytesFrom: (entry) => entry?.blob?.size,
-            }
-          );
-          logLoadProgress(`IndexedDB hit (${shortLoadId(blobId)})`, { depth: 1, level: 'ok' });
-        } catch (localError) {
-          logLoadProgress(
-            `IndexedDB miss (${shortLoadId(blobId)}): ${localError?.message || localError}`,
-            { depth: 1 }
-          );
-          const remoteBlob = await withLoadStep(
-            `Download compressed file (${shortLoadId(blobId)})`,
-            async () => downloadMediaBlob(blobId, session, {
-              projectId: snapshot?.projectId || realtimePlaybackRef.current?.item?.projectId || null,
-            }),
-            {
-              depth: 1,
-              bytesFrom: (blob) => blob?.size,
-            }
-          );
-          const cachedRemoteMedia = await withLoadStep(
-            `Decode + cache local WAV (${shortLoadId(blobId)})`,
-            async () => cacheRemoteBlobAsLocalWav({
-              blobId,
-              remoteBlob,
-              decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
-              storeMediaBlob,
-              fileName: `${blobId}.wav`,
-            }),
-            { depth: 1 }
-          );
-          audioManager.mediaCache.set(blobId, cachedRemoteMedia.audioBuffer);
-          if (cachedRemoteMedia.storedLocally) {
-            media = await withLoadStep(
-              `Re-read IndexedDB after cache write (${shortLoadId(blobId)})`,
-              async () => getMediaBlob(blobId),
-              {
-                depth: 1,
-                bytesFrom: (entry) => entry?.blob?.size,
-              }
-            );
-          } else {
-            logLoadProgress(
-              `Using in-memory fallback (${shortLoadId(blobId)}); IndexedDB write failed`,
-              { level: 'error', depth: 1 }
-            );
-            media = createEphemeralMediaEntry(
-              blobId,
-              cachedRemoteMedia.localCacheFileName,
-              cachedRemoteMedia.audioBuffer,
-              cachedRemoteMedia.fallbackBlob
-            );
-          }
-        }
-        await withLoadStep(
-          `Ensure AudioBuffer in RAM (${shortLoadId(blobId)})`,
-          async () => audioManager.loadAudioBuffer(blobId, media.blob),
-          { depth: 1 }
-        );
-      } else {
-        logLoadProgress(`RAM AudioBuffer cache hit (${shortLoadId(blobId)})`, {
-          depth: 1,
-          level: 'ok',
-        });
-      }
-      const cached = audioManager.mediaCache.get(blobId);
-      if (cached) {
-        audioBuffers.set(blobId, cached);
-      }
-    }
     return audioBuffers;
   }, [session]);
 
@@ -1217,6 +1136,8 @@ function PlayerDashboard({
 
     setIsRendering(true);
     setError('');
+    const generation = ++playGenerationRef.current;
+    const isCancelled = () => playGenerationRef.current !== generation;
     const progressId = startLoadProgress({
       kind: 'play',
       title: item.name || item.projectName || 'Mix',
@@ -1225,14 +1146,27 @@ function PlayerDashboard({
     let playError = null;
     try {
       updateLoadProgress({ phase: 'Snapshot', current: 'Fetching project snapshot…' });
-      const payload = await withLoadStep(
+      const resolved = await withLoadStep(
         'Fetch project snapshot (bootstrap)',
-        async () => bootstrapServerProject(item.projectId, session, 0, { purpose: 'player' })
+        async () => resolvePlayerProjectSnapshot({
+          projectId: item.projectId,
+          cache: projectSnapshotCacheRef.current,
+          fetchBootstrap: (knownSeq) => bootstrapServerProject(
+            item.projectId,
+            session,
+            knownSeq,
+            { purpose: 'player' }
+          ),
+        })
       );
-      const snapshot = payload?.snapshot;
+      if (resolved.reused) {
+        logLoadProgress(`Reusing cached project snapshot (seq ${resolved.latestSeq})`);
+      }
+      const snapshot = resolved?.snapshot;
       if (!snapshot || typeof snapshot !== 'object') {
         throw new Error('Project snapshot missing');
       }
+      if (isCancelled()) throw createStaleAudioLoadError();
       summarizeProjectForLoadLog(snapshot, 'Project snapshot');
       await withLoadStep('Stop current playback', async () => {
         audioManager.stop();
@@ -1261,7 +1195,23 @@ function PlayerDashboard({
         ? (metronomeMuted ? ' · metronome muted' : ' · metronome on')
         : '';
       logLoadProgress(`Playback duration ${formatDurationMs(durationMs)}${metronomeNote}`);
-      await ensureSnapshotAudioBuffers(playbackSnapshot);
+      const liveMixScope = isAdvancedMixPreset(item.presetId) ? 'advanced-mix' : 'player';
+      const liveMixableTrackIds = getLiveMixableTrackIds(playbackSnapshot, {
+        scope: liveMixScope,
+        presetId: item.presetId,
+      });
+      const liveMixBlobIds = collectLiveMixBlobIds(playbackSnapshot, {
+        scope: liveMixScope,
+        presetId: item.presetId,
+      });
+      const allSnapshotBlobIds = collectLiveMixBlobIds(playbackSnapshot, { scope: 'daw' });
+      const skippedStemCount = Math.max(0, allSnapshotBlobIds.length - liveMixBlobIds.length);
+      if (skippedStemCount > 0) {
+        logLoadProgress(
+          `Skipping ${skippedStemCount} stem${skippedStemCount === 1 ? '' : 's'} this mix can never play`
+        );
+      }
+      await ensureSnapshotAudioBuffers(playbackSnapshot, liveMixBlobIds, isCancelled);
       setHasRealtimeMetronome(snapshotHasMetronome);
       setIsRealtimeMetronomeMuted(snapshotHasMetronome ? metronomeMuted : false);
 
@@ -1279,7 +1229,7 @@ function PlayerDashboard({
       audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
       await withLoadStep(
         'Start Web Audio graph',
-        async () => audioManager.play(playbackSnapshot, 0, { useProjectMasterVolume: false })
+        async () => audioManager.play(playbackSnapshot, 0, getPlayerPlayOptions({ liveMixableTrackIds }))
       );
       applyRealtimeMixSettings(playbackSnapshot, item, realtimeControlOverrides);
       if (snapshotHasMetronome) {
@@ -1289,9 +1239,13 @@ function PlayerDashboard({
         project: playbackSnapshot,
         item,
         durationMs,
+        liveMixableTrackIds,
       };
       setIsPlaying(true);
     } catch (error) {
+      if (error?.name === 'StaleAudioLoad' || isCancelled()) {
+        return;
+      }
       playError = error;
       audioManager.stop();
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
@@ -1300,8 +1254,10 @@ function PlayerDashboard({
       setIsPlaying(false);
       setError(error.message || 'Playback failed');
     } finally {
-      finishLoadProgress(playError, progressId);
-      setIsRendering(false);
+      if (!isCancelled()) {
+        finishLoadProgress(playError, progressId);
+        setIsRendering(false);
+      }
     }
   }, [applyPlaybackOutputConfig, applyRealtimeMixSettings, ensureSnapshotAudioBuffers, session, volume]);
 
@@ -1316,8 +1272,17 @@ function PlayerDashboard({
   }, [playQueueItem]);
 
   useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    durationSecRef.current = durationSec;
+  }, [durationSec]);
+
+  useEffect(() => {
     if (!isPlaying) return undefined;
     const interval = setInterval(() => {
+      if (timelineScrubRef.current.active) return;
       const currentMs = Math.max(0, Number(audioManager.getCurrentTime() || 0));
       setCurrentTimeSec(currentMs / 1000);
 
@@ -1381,7 +1346,7 @@ function PlayerDashboard({
       const current = realtimePlaybackRef.current;
       await applyPlaybackOutputConfig();
       audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
-      await audioManager.play(current.project, resumeMs, { useProjectMasterVolume: false });
+      await audioManager.play(current.project, resumeMs, getPlayerPlayOptions(current));
       applyRealtimeMixSettings(current.project, current.item);
       setIsPlaying(true);
       return;
@@ -1455,12 +1420,8 @@ function PlayerDashboard({
     if (currentTimeSec > 3 && realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item) {
       const current = realtimePlaybackRef.current;
       if (isPlaying) {
-        await audioManager.pause(0);
-        await applyPlaybackOutputConfig();
-        audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
-        await audioManager.play(current.project, 0, { useProjectMasterVolume: false });
+        await audioManager.seek(current.project, 0, getPlayerPlayOptions(current));
         applyRealtimeMixSettings(current.project, current.item);
-        setIsPlaying(true);
       } else {
         await audioManager.pause(0);
       }
@@ -1474,32 +1435,89 @@ function PlayerDashboard({
         : 0;
     }
     await playQueueItem(previousIndex);
-  }, [activeIndex, activeQueueItems.length, applyPlaybackOutputConfig, applyRealtimeMixSettings, currentTimeSec, isPlaying, loopMode, playQueueItem, volume]);
+  }, [activeIndex, activeQueueItems.length, applyRealtimeMixSettings, currentTimeSec, isPlaying, loopMode, playQueueItem]);
 
-  const handleSeek = useCallback(async (nextTimeSec) => {
-    const safe = Math.max(0, Math.min(Number(nextTimeSec || 0), Number(durationSec || 0)));
-    if (!realtimePlaybackRef.current?.project || !realtimePlaybackRef.current?.item) {
-      setCurrentTimeSec(safe);
-      return;
-    }
+  const previewTimelineTime = useCallback((nextTimeSec) => {
+    const { timeSec } = clampPlayerSeek(nextTimeSec, durationSecRef.current);
+    timelineScrubRef.current.lastUserSec = timeSec;
+    setCurrentTimeSec(timeSec);
+    return timeSec;
+  }, []);
+
+  const commitTimelineSeek = useCallback(async (nextTimeSec) => {
+    const { timeSec, timeMs } = clampPlayerSeek(nextTimeSec, durationSecRef.current);
+    timelineScrubRef.current.lastUserSec = timeSec;
+    timelineScrubRef.current.lastAudioSeekMs = timeMs;
+    setCurrentTimeSec(timeSec);
+
+    const current = realtimePlaybackRef.current;
+    if (!current?.project || !current?.item) return;
+
     try {
-      const seekMs = Math.max(0, Math.round(safe * 1000));
-      const current = realtimePlaybackRef.current;
-      if (isPlaying) {
-        await audioManager.pause(seekMs);
-        await applyPlaybackOutputConfig();
-        audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
-        await audioManager.play(current.project, seekMs, { useProjectMasterVolume: false });
+      if (isPlayingRef.current) {
+        await audioManager.seek(current.project, timeMs, getPlayerPlayOptions(current));
         applyRealtimeMixSettings(current.project, current.item);
-        setIsPlaying(true);
       } else {
-        await audioManager.pause(seekMs);
+        await audioManager.pause(timeMs);
       }
     } catch (seekError) {
       setError(seekError.message || 'Seek failed');
     }
-    setCurrentTimeSec(safe);
-  }, [applyPlaybackOutputConfig, applyRealtimeMixSettings, durationSec, isPlaying, volume]);
+  }, [applyRealtimeMixSettings]);
+
+  const handleSeek = useCallback((nextTimeSec, event = null) => {
+    const scrub = timelineScrubRef.current;
+    if (event?.buttons) {
+      if (!scrub.active) {
+        scrub.gestureId += 1;
+        scrub.active = true;
+      }
+    }
+    const timeSec = previewTimelineTime(nextTimeSec);
+    if (scrub.active) return;
+    const { timeMs } = clampPlayerSeek(timeSec, durationSecRef.current);
+    if (!shouldCommitPlayingSeek(scrub.lastAudioSeekMs, timeMs)) return;
+    void commitTimelineSeek(timeSec);
+  }, [commitTimelineSeek, previewTimelineTime]);
+
+  const beginTimelineScrub = useCallback((event) => {
+    const scrub = timelineScrubRef.current;
+    scrub.gestureId += 1;
+    scrub.active = true;
+    const preview = seekPreviewFromPointer(
+      event.clientX,
+      event.currentTarget.getBoundingClientRect(),
+      durationSecRef.current
+    );
+    previewTimelineTime(preview.timeSec);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is best-effort; mouseup still ends the gesture.
+    }
+  }, [previewTimelineTime]);
+
+  const endTimelineScrub = useCallback((event) => {
+    const scrub = timelineScrubRef.current;
+    const input = event?.currentTarget;
+    if (input && typeof event?.pointerId === 'number') {
+      try {
+        if (input.hasPointerCapture?.(event.pointerId)) {
+          input.releasePointerCapture(event.pointerId);
+        }
+      } catch {
+        // Capture may already have been released.
+      }
+    }
+
+    const gestureId = scrub.gestureId;
+    const userSec = scrub.lastUserSec ?? (input ? Number(input.value) : 0);
+    void commitTimelineSeek(userSec).finally(() => {
+      if (timelineScrubRef.current.gestureId === gestureId) {
+        timelineScrubRef.current.active = false;
+      }
+    });
+  }, [commitTimelineSeek]);
 
   const handleToggleMute = useCallback(() => {
     setVolume((previous) => {
@@ -3385,7 +3403,10 @@ function PlayerDashboard({
                 max={Math.max(durationSec, 0.001)}
                 step="0.01"
                 value={Math.min(currentTimeSec, durationSec || 0)}
-                onChange={(e) => handleSeek(Number(e.target.value))}
+                onPointerDown={beginTimelineScrub}
+                onPointerUp={endTimelineScrub}
+                onPointerCancel={endTimelineScrub}
+                onChange={(e) => handleSeek(Number(e.target.value), e)}
                 className="flex-1 volume-slider volume-slider-lg cursor-pointer block"
               />
               <span className="text-sm text-gray-300 tabular-nums">{formatClock(durationSec)}</span>

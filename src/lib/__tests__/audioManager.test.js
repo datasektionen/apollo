@@ -121,7 +121,11 @@ describe('AudioManager playback requests', () => {
         const source = {
           buffer: null,
           connect: vi.fn(),
-          start: vi.fn(() => {
+          disconnect: vi.fn(),
+          start: vi.fn((when, offset, duration) => {
+            source.startWhen = when;
+            source.startOffset = offset;
+            source.startDuration = duration;
             startedSources.push(source);
           }),
           stop: vi.fn(),
@@ -238,10 +242,53 @@ describe('AudioManager playback requests', () => {
       { audible: false, effectiveGain: 0.8, effectivePan: 12 }
     );
     expect(mutedState).toEqual({
-      audible: true,
+      schedule: true,
+      audible: false,
       effectiveGain: 0,
       effectivePan: 12,
     });
+  });
+
+  it('keeps muted non-metronome sources scheduled so mute can change without restarting', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    routingPlayback.resolve();
+    const project = makeProject();
+    project.tracks[0].muted = true;
+    await manager.play(project, 500);
+
+    expect(startedSources).toHaveLength(1);
+    expect(manager.activeSources.get('track-1-clip-1').gainNode.gain.value).toBe(0);
+
+    const playbackRequestId = manager.playbackRequestId;
+    const startTime = manager.startTime;
+    startedSources.forEach((source) => source.stop.mockClear());
+
+    manager.updateTrackMix('track-1', 1, 0);
+
+    expect(manager.playbackRequestId).toBe(playbackRequestId);
+    expect(manager.startTime).toBe(startTime);
+    expect(startedSources).toHaveLength(1);
+    expect(startedSources[0].stop).not.toHaveBeenCalled();
+    expect(manager.activeSources.get('track-1-clip-1').gainNode.gain.value).toBeGreaterThan(0);
+  });
+
+  it('does not schedule tracks excluded from the live-mixable set', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+    manager.mediaCache.set('blob-metro', { duration: 2 });
+
+    routingPlayback.resolve();
+    await manager.play(makeProjectWithMetronome(), 0, {
+      liveMixableTrackIds: new Set(['metro-1']),
+    });
+
+    expect(startedSources).toHaveLength(1);
+    expect(manager.activeSources.has('metro-1-metro-clip-1')).toBe(true);
+    expect(manager.activeSources.has('track-1-clip-1')).toBe(false);
   });
 
   it('uses the hardware sample rate and native destination for default output', async () => {
@@ -306,5 +353,53 @@ describe('AudioManager playback requests', () => {
 
     expect(decoded.sampleRate).toBe(48000);
     expect(resampleSpy).not.toHaveBeenCalled();
+  });
+
+  it('reuses mix nodes on seek and starts the new source at the same audio time the old one stops', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    await manager.play(makeProject(), 0);
+    expect(startedSources).toHaveLength(1);
+
+    const nodes = manager.activeSources.get('track-1-clip-1');
+    const previousSource = nodes.source;
+    const gainNode = nodes.gainNode;
+    const panNode = nodes.panNode;
+    const createdAudioCount = createdAudioElements.length;
+
+    await manager.seek(makeProject(), 500);
+
+    expect(manager.isPlaying).toBe(true);
+    expect(manager.startTime).toBeCloseTo(9.5);
+    expect(manager.activeSources.get('track-1-clip-1').gainNode).toBe(gainNode);
+    expect(manager.activeSources.get('track-1-clip-1').panNode).toBe(panNode);
+    expect(createdAudioElements).toHaveLength(createdAudioCount);
+    expect(previousSource.stop).toHaveBeenCalledWith(10);
+    expect(previousSource.disconnect).toHaveBeenCalled();
+    expect(startedSources).toHaveLength(2);
+    const nextSource = manager.activeSources.get('track-1-clip-1').source;
+    expect(nextSource).not.toBe(previousSource);
+    expect(nextSource.startWhen).toBe(10);
+    expect(nextSource.startOffset).toBeCloseTo(0.5);
+    expect(nextSource.startDuration).toBeCloseTo(1.5);
+  });
+
+  it('does not start sources when seeking while paused', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    await manager.play(makeProject(), 0);
+    await manager.pause(250);
+    const startedCount = startedSources.length;
+
+    await manager.seek(makeProject(), 900);
+
+    expect(manager.isPlaying).toBe(false);
+    expect(manager.pauseTime).toBe(900);
+    expect(startedSources).toHaveLength(startedCount);
+    expect(manager.activeSources.size).toBe(0);
   });
 });

@@ -7,14 +7,17 @@ import {
 } from '../utils/audio';
 import { SAMPLE_RATE } from '../types/project';
 import { getEffectiveTrackMix } from '../utils/trackTree';
-import { isMetronomeRole } from '../utils/trackRoles';
 import { reportUserError } from '../utils/errorReporter';
 import {
   applySinkIdToAudioContext,
   applySinkIdToMediaElement,
   shouldRoutePlaybackThroughMediaElement,
 } from '../utils/playbackOutput';
-import { audioBufferToLocalWavBlob } from './mediaEncoding';
+import {
+  audioBufferFromPlanarPcm,
+  audioBufferToLocalWavBlob,
+  isPlanarPcmArrayBuffer,
+} from './mediaEncoding';
 import { logLoadProgress, shortLoadId, withLoadStep } from './loadProgress';
 
 /**
@@ -152,19 +155,43 @@ export class AudioManager {
       return this.mediaCache.get(blobId);
     }
 
+    if (!this.audioContext) {
+      await this.init();
+    }
+
     const arrayBuffer = await withLoadStep(
-      `Read blob bytes for AudioBuffer decode (${shortLoadId(blobId)})`,
+      `Read cached bytes into memory (${shortLoadId(blobId)})`,
       async () => blob.arrayBuffer(),
       {
         depth: 2,
         bytesFrom: (buffer) => buffer?.byteLength,
       }
     );
-    const audioBuffer = await withLoadStep(
-      `Decode blob to AudioBuffer (${shortLoadId(blobId)})`,
-      async () => this.decodeAudioFile(arrayBuffer),
-      { depth: 2 }
-    );
+
+    let audioBuffer;
+    if (isPlanarPcmArrayBuffer(arrayBuffer)) {
+      audioBuffer = await withLoadStep(
+        `Copy planar PCM into AudioBuffer (${shortLoadId(blobId)})`,
+        async () => audioBufferFromPlanarPcm(
+          arrayBuffer,
+          (channels, frames, sampleRate) => this.audioContext.createBuffer(channels, frames, sampleRate)
+        ),
+        { depth: 2 }
+      );
+      if (audioBuffer.sampleRate !== this.audioContext.sampleRate) {
+        audioBuffer = await withLoadStep(
+          `Resample ${audioBuffer.sampleRate}Hz → ${this.audioContext.sampleRate}Hz`,
+          async () => this.resampleAudioBuffer(audioBuffer, this.audioContext.sampleRate),
+          { depth: 3 }
+        );
+      }
+    } else {
+      audioBuffer = await withLoadStep(
+        `Decode cached audio to AudioBuffer (${shortLoadId(blobId)})`,
+        async () => this.decodeAudioFile(arrayBuffer),
+        { depth: 2 }
+      );
+    }
 
     this.mediaCache.set(blobId, audioBuffer);
 
@@ -190,7 +217,8 @@ export class AudioManager {
       if (!this.isPlaybackRequestCurrent(playbackRequestId)) return;
 
       this.isPlaying = true;
-      this.startTime = this.audioContext.currentTime - msToSeconds(currentTimeMs);
+      const at = this.audioContext.currentTime;
+      this.startTime = at - msToSeconds(currentTimeMs);
       const useProjectMasterVolume = options?.useProjectMasterVolume !== false;
       if (useProjectMasterVolume) {
         this.currentMasterVolume = Number.isFinite(Number(project?.masterVolume))
@@ -198,19 +226,7 @@ export class AudioManager {
           : this.currentMasterVolume;
       }
       this.applyMasterGain();
-      const mix = getEffectiveTrackMix(project);
-
-      // Start all tracks. Metronome stays scheduled at gain 0 when muted so mute
-      // can be toggled live without restarting playback.
-      for (const track of project.tracks) {
-        if (!this.isPlaybackRequestCurrent(playbackRequestId)) return;
-        await this.playTrack(
-          track,
-          currentTimeMs,
-          getPlaybackTrackState(track, mix.statesByTrackId.get(track.id)),
-          playbackRequestId
-        );
-      }
+      this.scheduleProjectClips(project, currentTimeMs, options, playbackRequestId, at, false);
     } finally {
       if (this.initializingPlaybackRequestId === playbackRequestId) {
         this.isInitializingPlayback = false;
@@ -220,101 +236,192 @@ export class AudioManager {
   }
 
   /**
-   * Play a single track
+   * Seek while keeping mix nodes and output routing. Buffer sources are
+   * swapped at one audio-clock time so the jumped-to audio does not overlap
+   * itself. Paused seeks only store the new time.
    */
-  async playTrack(track, currentTimeMs, effectiveState, playbackRequestId = this.playbackRequestId) {
-    // Skip if track has no clips
-    if (!track.clips || track.clips.length === 0) return;
-    if (!effectiveState?.audible) return;
+  async seek(project, currentTimeMs, options = {}) {
+    const seekMs = Math.max(0, Number(currentTimeMs) || 0);
+    if (!this.isPlaying || !this.audioContext) {
+      this.pauseTime = seekMs;
+      return;
+    }
 
-    // Play all clips that should be audible at current time or in the future
-    for (const clip of track.clips) {
-      if (!this.isPlaybackRequestCurrent(playbackRequestId)) return;
-      if (clip.muted) continue;
-      const clipStartTimeMs = clip.timelineStartMs;
-      const clipDurationMs = clip.cropEndMs - clip.cropStartMs;
-      const clipEndTimeMs = clipStartTimeMs + clipDurationMs;
+    const playbackRequestId = ++this.playbackRequestId;
+    this.isInitializingPlayback = false;
+    this.initializingPlaybackRequestId = null;
 
-      // Skip clips that have already ended
-      if (clipEndTimeMs < currentTimeMs) continue;
-
-      // Load audio buffer from cache
-      if (!this.mediaCache.has(clip.blobId)) {
-        console.warn(`Audio buffer not loaded for clip ${clip.id}`);
-        continue;
-      }
-
-      const audioBuffer = this.mediaCache.get(clip.blobId);
-
-      // Create source
-      const source = this.audioContext.createBufferSource();
-      source.buffer = audioBuffer;
-
-      // Create gain node
-      const gainNode = this.audioContext.createGain();
-      const baseGain = Number.isFinite(effectiveState.effectiveGain)
-        ? effectiveState.effectiveGain
-        : volumeToGain(track.volume);
-      const clipGain = Math.pow(10, clip.gainDb / 20);
-
-      // Create pan node
-      const panNode = this.audioContext.createStereoPanner();
-      const effectivePan = Number.isFinite(effectiveState.effectivePan) ? effectiveState.effectivePan : track.pan;
-      panNode.pan.value = this.getEffectiveOutputPan(effectivePan) / 100;
-      gainNode.gain.value = this.getClipOutputGain(baseGain, clipGain, effectivePan);
-
-      // Connect: source -> gain -> pan -> master -> destination
-      source.connect(gainNode);
-      gainNode.connect(panNode);
-      panNode.connect(this.masterGainNode);
-
-      // Calculate playback timing
-      const offset = msToSeconds(clip.cropStartMs);
-      const duration = msToSeconds(clipDurationMs);
-
-      if (clipStartTimeMs > currentTimeMs) {
-        // Clip starts in the future
-        const when = this.audioContext.currentTime + msToSeconds(clipStartTimeMs - currentTimeMs);
-        source.start(when, offset, duration);
-      } else {
-        // Clip is currently playing
-        const elapsedInClip = currentTimeMs - clipStartTimeMs;
-        if (elapsedInClip < clipDurationMs) {
-          const remainingDuration = msToSeconds(clipDurationMs - elapsedInClip);
-          source.start(this.audioContext.currentTime, offset + msToSeconds(elapsedInClip), remainingDuration);
-        }
-      }
-
-      // Store active source (use unique key for multiple clips)
-      const sourceKey = `${track.id}-${clip.id}`;
-      if (!this.isPlaybackRequestCurrent(playbackRequestId)) {
-        try {
-          source.stop(0);
-        } catch (e) {
-          if (e?.name !== 'InvalidStateError') {
-            reportUserError('Failed to stop a superseded audio source.', e, { onceKey: 'audio:superseded-source' });
-          }
-        }
+    if (this.audioContext.state !== 'running') {
+      await this.resume();
+      if (!this.isPlaybackRequestCurrent(playbackRequestId) || !this.isPlaying) {
+        this.pauseTime = seekMs;
         return;
       }
-      this.activeSources.set(sourceKey, {
-        source,
-        gainNode,
-        panNode,
-        baseGain,
-        clipGain,
-        effectivePan,
-      });
+    }
 
-      // Auto-cleanup when done
-      source.onended = () => {
-        // Only delete if this is still the current source for this key
-        // (prevents old sources from deleting new ones with the same key)
-        const current = this.activeSources.get(sourceKey);
-        if (current && current.source === source) {
-          this.activeSources.delete(sourceKey);
+    const at = this.audioContext.currentTime;
+    this.pauseTime = seekMs;
+    this.startTime = at - msToSeconds(seekMs);
+
+    this.stopActiveBufferSources(at, 'Failed to pause sources for seek.', 'audio:seek-stop-source');
+    this.scheduleProjectClips(project, seekMs, options, playbackRequestId, at, true);
+  }
+
+  getClipSourceKey(trackId, clipId) {
+    return `${trackId}-${clipId}`;
+  }
+
+  getClipSchedule(clip, timeMs) {
+    if (clip?.muted) return null;
+    const startMs = Number(clip?.timelineStartMs) || 0;
+    const cropStartMs = Number(clip?.cropStartMs) || 0;
+    const durationMs = Math.max(0, (Number(clip?.cropEndMs) || 0) - cropStartMs);
+    if (durationMs <= 0) return null;
+    const endMs = startMs + durationMs;
+    if (endMs < timeMs) return null;
+    const elapsedMs = Math.max(0, timeMs - startMs);
+    const remainingMs = durationMs - elapsedMs;
+    if (remainingMs <= 0) return null;
+    return {
+      whenOffsetSec: msToSeconds(Math.max(0, startMs - timeMs)),
+      offsetSec: msToSeconds(cropStartMs + elapsedMs),
+      durationSec: msToSeconds(remainingMs),
+    };
+  }
+
+  createClipMixNodes(track, clip, effectiveState) {
+    const gainNode = this.audioContext.createGain();
+    const panNode = this.audioContext.createStereoPanner();
+    const nodes = {
+      source: null,
+      gainNode,
+      panNode,
+      baseGain: Number.isFinite(effectiveState?.effectiveGain)
+        ? effectiveState.effectiveGain
+        : volumeToGain(track.volume),
+      clipGain: Math.pow(10, (Number(clip?.gainDb) || 0) / 20),
+      effectivePan: Number.isFinite(effectiveState?.effectivePan)
+        ? effectiveState.effectivePan
+        : track.pan,
+    };
+    this.applyNodeMix(nodes);
+    gainNode.connect(panNode);
+    panNode.connect(this.masterGainNode);
+    return nodes;
+  }
+
+  stopClipSource(nodes, when, errorMessage, onceKey) {
+    const source = nodes?.source;
+    if (!source) return;
+    nodes.source = null;
+    source.onended = null;
+    try {
+      if (Number.isFinite(when)) source.stop(when);
+      else source.stop();
+    } catch (error) {
+      if (error?.name !== 'InvalidStateError') {
+        reportUserError(errorMessage || 'Failed to stop an audio source.', error, {
+          onceKey: onceKey || 'audio:stop-source',
+        });
+      }
+    }
+    try {
+      source.disconnect();
+    } catch {
+      // Source may already be disconnected.
+    }
+  }
+
+  disposeClipNodes(nodes, when, errorMessage, onceKey) {
+    this.stopClipSource(nodes, when, errorMessage, onceKey);
+    try {
+      nodes?.gainNode?.disconnect();
+    } catch {
+      // Mix node may already be disconnected.
+    }
+    try {
+      nodes?.panNode?.disconnect();
+    } catch {
+      // Mix node may already be disconnected.
+    }
+  }
+
+  stopActiveBufferSources(when, errorMessage, onceKey) {
+    for (const nodes of this.activeSources.values()) {
+      this.stopClipSource(nodes, when, errorMessage, onceKey);
+    }
+  }
+
+  startClipSource(sourceKey, nodes, clip, schedule, at, playbackRequestId) {
+    const audioBuffer = this.mediaCache.get(clip.blobId);
+    if (!audioBuffer) {
+      console.warn(`Audio buffer not loaded for clip ${clip.id}`);
+      return false;
+    }
+
+    const source = this.audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(nodes.gainNode);
+    const when = at + schedule.whenOffsetSec;
+    source.start(when, schedule.offsetSec, schedule.durationSec);
+    source.onended = () => {
+      const current = this.activeSources.get(sourceKey);
+      if (current && current.source === source) {
+        current.source = null;
+        this.activeSources.delete(sourceKey);
+      }
+    };
+
+    if (!this.isPlaybackRequestCurrent(playbackRequestId)) {
+      this.stopClipSource({ source }, when, 'Failed to stop a superseded audio source.', 'audio:superseded-source');
+      return false;
+    }
+
+    nodes.source = source;
+    return true;
+  }
+
+  scheduleProjectClips(project, timeMs, options, playbackRequestId, at, reuseMixNodes) {
+    const mix = getEffectiveTrackMix(project);
+    const liveMixableTrackIds = options?.liveMixableTrackIds
+      ? new Set(options.liveMixableTrackIds)
+      : null;
+    const neededKeys = new Set();
+
+    for (const track of project?.tracks || []) {
+      if (!this.isPlaybackRequestCurrent(playbackRequestId)) return;
+      const effectiveState = getPlaybackTrackState(
+        track,
+        mix.statesByTrackId.get(track.id),
+        liveMixableTrackIds
+      );
+      if (effectiveState?.schedule === false) continue;
+
+      for (const clip of track.clips || []) {
+        if (!this.isPlaybackRequestCurrent(playbackRequestId)) return;
+        const schedule = this.getClipSchedule(clip, timeMs);
+        if (!schedule) continue;
+
+        const sourceKey = this.getClipSourceKey(track.id, clip.id);
+        neededKeys.add(sourceKey);
+        let nodes = reuseMixNodes ? this.activeSources.get(sourceKey) : null;
+        if (!nodes?.gainNode || !nodes?.panNode) {
+          nodes = this.createClipMixNodes(track, clip, effectiveState);
         }
-      };
+        this.activeSources.set(sourceKey, nodes);
+        if (!this.startClipSource(sourceKey, nodes, clip, schedule, at, playbackRequestId)) {
+          this.disposeClipNodes(nodes, at, 'Failed to stop a superseded audio source.', 'audio:superseded-source');
+          this.activeSources.delete(sourceKey);
+          neededKeys.delete(sourceKey);
+        }
+      }
+    }
+
+    if (!reuseMixNodes) return;
+    for (const [sourceKey, nodes] of Array.from(this.activeSources.entries())) {
+      if (neededKeys.has(sourceKey)) continue;
+      this.disposeClipNodes(nodes, at, 'Failed to discard an unused audio source.', 'audio:seek-discard-source');
+      this.activeSources.delete(sourceKey);
     }
   }
 
@@ -331,17 +438,10 @@ export class AudioManager {
   }
 
   stopActiveSources(errorMessage, onceKey) {
+    const when = this.audioContext?.currentTime;
     for (const nodes of this.activeSources.values()) {
-      try {
-        // Use stop(0) to immediately stop even sources scheduled for future
-        nodes.source.stop(0);
-      } catch (e) {
-        if (e?.name !== 'InvalidStateError') {
-          reportUserError(errorMessage, e, { onceKey });
-        }
-      }
+      this.disposeClipNodes(nodes, when, errorMessage, onceKey);
     }
-
     this.activeSources.clear();
   }
 
@@ -685,11 +785,22 @@ export class AudioManager {
   }
 }
 
-export function getPlaybackTrackState(track, mixState) {
-  if (!isMetronomeRole(track?.role)) return mixState;
+export function getPlaybackTrackState(track, mixState, liveMixableTrackIds = null) {
+  const mixable = !(liveMixableTrackIds instanceof Set) || liveMixableTrackIds.has(track?.id);
+  if (!mixable) {
+    return {
+      schedule: false,
+      audible: false,
+      effectiveGain: 0,
+      effectivePan: Number.isFinite(mixState?.effectivePan) ? mixState.effectivePan : 0,
+    };
+  }
+
+  const audible = mixState?.audible === true;
   return {
-    audible: true,
-    effectiveGain: mixState?.audible === true && Number.isFinite(mixState.effectiveGain)
+    schedule: true,
+    audible,
+    effectiveGain: audible && Number.isFinite(mixState?.effectiveGain)
       ? mixState.effectiveGain
       : 0,
     effectivePan: Number.isFinite(mixState?.effectivePan) ? mixState.effectivePan : 0,
