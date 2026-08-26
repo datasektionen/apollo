@@ -80,6 +80,7 @@ import {
   TRACK_NODE_TYPE_AUDIO,
   TRACK_NODE_TYPE_GROUP,
 } from '../utils/trackTree';
+import { applyImportAssignments } from '../utils/importTrackMatch';
 import { usePlaybackDeviceSettings, useAudioDeviceAutoPause } from '../hooks/usePlaybackDeviceSettings';
 import useLocalProjectViewState from '../hooks/useLocalProjectViewState';
 import {
@@ -2141,48 +2142,35 @@ function Editor({
   };
 
   const handleFileImport = async (fileData) => {
-    const newTracks = [];
+    const assignments = [];
 
-    for (const { file, role } of fileData) {
+    for (const { file, destination } of fileData) {
       try {
         console.log(`Importing ${file.name}...`);
-        
+
         const arrayBuffer = await file.arrayBuffer();
         const audioBuffer = await audioManager.decodeAudioFile(arrayBuffer);
 
         console.log(`Decoded ${file.name}: ${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.sampleRate}Hz`);
 
         const { blobId, durationMs } = await persistImportedMedia(file, audioBuffer);
+        assignments.push({
+          fileName: file.name,
+          name: file.name.replace(/\.[^/.]+$/, ''),
+          blobId,
+          durationMs,
+          destination,
+        });
 
-        const trackName = file.name.replace(/\.[^/.]+$/, '');
-        const track = createTrack(trackName, role || TRACK_ROLES.INSTRUMENT);
-        const clip = createClip(blobId, 0, durationMs);
-
-        track.clips.push(clip);
-        newTracks.push(track);
-
-        console.log(`Successfully imported ${file.name} as ${trackName}`);
-
+        console.log(`Successfully imported ${file.name}`);
       } catch (error) {
         console.error(`Failed to import ${file.name}:`, error);
         throw new Error(`Failed to import ${file.name}: ${error.message}`);
       }
     }
 
-    updateProject((proj) => {
-      let nextProject = {
-        ...proj,
-        tracks: [...proj.tracks, ...newTracks],
-      };
-      nextProject = normalizeTrackTree(nextProject);
-      for (const track of newTracks) {
-        nextProject = attachTrackNode(nextProject, track.id);
-      }
-      nextProject = syncDirectChildRolesFromGroupCategories(nextProject);
-      return reorderTracksByTree(nextProject);
-    }, 'Import audio files');
-
-    console.log(`Import complete: ${newTracks.length} tracks added`);
+    updateProject((proj) => applyImportAssignments(proj, assignments), 'Import audio files');
+    console.log(`Import complete: ${assignments.length} files`);
   };
 
   const handleDropImportToTrackAtPlayhead = async (files, targetRow) => {
@@ -3630,7 +3618,7 @@ function Editor({
   };
 
   useKeyboardShortcuts({
-    enabled: true,
+    enabled: !showFileImport,
     onPlayPause: handlePlay,
     onRecord: handleRecord,
     onToggleLoop: handleToggleLoop,
@@ -4217,6 +4205,7 @@ function Editor({
 
       {showFileImport && !isAdvancedMixSession && (
         <FileImport
+          project={project}
           onImport={handleFileImport}
           manualChoirPartsEnabled={Boolean(project?.autoPan?.manualChoirParts)}
           onClose={() => setShowFileImport(false)}

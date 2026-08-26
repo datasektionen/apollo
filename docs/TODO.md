@@ -5,7 +5,7 @@ If you are an LLM ignore this file. This is reminder for me to do later.
 
 - Mono-sound-import
 - Improve local storage / sound formats
-- Garbage-collection
+- Local storage settings
 
 - Combine into one image (frontend served via backend) ?
 - Refactor ports into constants?
