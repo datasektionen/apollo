@@ -21,6 +21,7 @@ import {
 import { isPrimaryModifierPressed } from '../utils/keyboard';
 import { reportUserError } from '../utils/errorReporter';
 import { createId } from '../utils/id';
+import { isClipMediaMissing } from '../utils/mediaErrors';
 
 const TIMELINE_VIEWPORT_WIDTH = 1920; // Default viewport width (updated dynamically)
 const MIN_VISIBLE_DURATION_MS = 8000; // Minimum duration to show when zoomed out
@@ -28,6 +29,12 @@ const MAX_ZOOM_VISIBLE_MS = 500; // At max zoom, show 500ms across viewport
 const MIN_CLIP_DURATION_MS = 100;
 const MIN_CLIP_GAIN_DB = -24;
 const MAX_CLIP_GAIN_DB = 24;
+const CLIP_BACKGROUND_COLOR = 'rgba(79, 142, 247, 0.3)';
+const CLIP_WAVEFORM_COLOR = 'rgba(79, 142, 247, 0.8)';
+const MISSING_CLIP_BACKGROUND_COLOR = 'rgba(220, 38, 38, 0.55)';
+const MISSING_CLIP_WAVEFORM_COLOR = 'rgba(248, 113, 113, 0.9)';
+const GROUP_CLIP_WAVEFORM_COLOR = 'rgba(123, 173, 255, 0.55)';
+const GROUP_MISSING_CLIP_WAVEFORM_COLOR = 'rgba(248, 113, 113, 0.55)';
 const REMOTE_CLIP_ANIMATION_MS = 800;
 const RULER_INTERVALS_MS = [
   100, 200, 500,
@@ -82,6 +89,8 @@ function Timeline({
   advancedMixLocked = false,
   canSoloTracks = true,
   sharedVerticalScroll = false,
+  missingMediaBlobIds = null,
+  onReloadMissingMedia = null,
   children,
 }) {
   const timelineRef = useRef(null);
@@ -839,8 +848,9 @@ function Timeline({
     setTimelineSelectionState(nextState);
   };
 
-  const handleClipClick = (e, clipId, trackId) => {
+  const handleClipClick = (e, clip, trackId) => {
     e.stopPropagation();
+    const clipId = clip.id;
     const isToggleSelect = isPrimaryModifierPressed(e) && !e.shiftKey;
     const isRangeSelect = e.shiftKey;
 
@@ -878,6 +888,13 @@ function Timeline({
       selectRow(row);
     } else {
       onSelectTrack(trackId);
+    }
+
+    if (
+      typeof onReloadMissingMedia === 'function'
+      && isClipMediaMissing(clip, missingMediaBlobIds, audioManager.mediaCache)
+    ) {
+      onReloadMissingMedia(clip.blobId);
     }
   };
 
@@ -2523,6 +2540,7 @@ function Timeline({
                         const clipLeftPx = clip.startMs * pixelsPerMs;
                         const clipWidthPx = clip.durationMs * pixelsPerMs;
                         const audioBuffer = audioManager.mediaCache.get(clip.blobId);
+                        const missingMedia = isClipMediaMissing(clip, missingMediaBlobIds, audioManager.mediaCache);
                         return (
                           <div
                             key={`group-clip-${row.nodeId}-${clip.key}`}
@@ -2532,7 +2550,7 @@ function Timeline({
                               top: `${rowPadding}px`,
                               width: `${clipWidthPx}px`,
                               height: `${rowInternalHeight}px`,
-                              backgroundColor: 'transparent',
+                              backgroundColor: missingMedia ? MISSING_CLIP_BACKGROUND_COLOR : 'transparent',
                             }}
                           >
                             {audioBuffer && (
@@ -2543,7 +2561,7 @@ function Timeline({
                                 cropEndMs={clip.cropEndMs}
                                 sourceDurationMs={clip.sourceDurationMs}
                                 height={rowInternalHeight}
-                                color="rgba(123, 173, 255, 0.55)"
+                                color={missingMedia ? GROUP_MISSING_CLIP_WAVEFORM_COLOR : GROUP_CLIP_WAVEFORM_COLOR}
                                 globalPeakAmplitude={globalPeakAmplitude}
                               />
                             )}
@@ -2586,6 +2604,7 @@ function Timeline({
                         ? animatedClipLayout.left
                         : (clip.timelineStartMs * pixelsPerMs);
                       const audioBuffer = audioManager.mediaCache.get(clip.blobId);
+                      const missingMedia = isClipMediaMissing(clip, missingMediaBlobIds, audioManager.mediaCache);
                       const clipPadding = 8;
                       const clipInternalHeight = trackHeight - (clipPadding * 2);
                       const labelPadding = 8;
@@ -2601,21 +2620,22 @@ function Timeline({
                         <div
                           key={clip.id}
                           data-clip-id={clip.id}
+                          title={missingMedia ? 'Missing media — click to reload' : undefined}
                           className={`absolute rounded overflow-hidden ${
                             selectedClipIds.includes(clip.id)
-                              ? 'ring-2 ring-blue-500'
-                              : 'hover:ring-2 hover:ring-gray-500'
+                              ? (missingMedia ? 'ring-2 ring-red-500' : 'ring-2 ring-blue-500')
+                              : (missingMedia ? 'hover:ring-2 hover:ring-red-400' : 'hover:ring-2 hover:ring-gray-500')
                           }`}
                           style={{
                             left: `${clipLeftPx}px`,
                             top: `${clipPadding}px`,
                             width: `${clipWidthPx}px`,
                             height: `${clipInternalHeight}px`,
-                            backgroundColor: 'rgba(79, 142, 247, 0.3)',
+                            backgroundColor: missingMedia ? MISSING_CLIP_BACKGROUND_COLOR : CLIP_BACKGROUND_COLOR,
                             '--clip-left': `${clipLeftPx}px`,
                             '--clip-width': `${clipWidthPx}px`,
                           }}
-                          onClick={(e) => handleClipClick(e, clip.id, track.id)}
+                          onClick={(e) => handleClipClick(e, clip, track.id)}
                           onMouseDown={(e) => handleClipMouseDown(e, clip, track)}
                           onContextMenu={handleClipRightClick}
                         >
@@ -2634,9 +2654,17 @@ function Timeline({
                               cropEndMs={clip.cropEndMs}
                               sourceDurationMs={clip.sourceDurationMs}
                               height={clipInternalHeight}
-                              color="rgba(79, 142, 247, 0.8)"
+                              color={missingMedia ? MISSING_CLIP_WAVEFORM_COLOR : CLIP_WAVEFORM_COLOR}
                               globalPeakAmplitude={globalPeakAmplitude}
                             />
+                          )}
+
+                          {missingMedia && (
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[2]">
+                              <span className="text-[11px] font-semibold uppercase tracking-wide text-red-100/90">
+                                Missing
+                              </span>
+                            </div>
                           )}
 
                           {labelFits && (clip.muted || Math.abs(clip.gainDb) >= 0.1) && (
@@ -2661,7 +2689,7 @@ function Timeline({
                                 zIndex: 10,
                               }}
                             >
-                              <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-400 opacity-0 group-hover:opacity-70 transition-opacity"></div>
+                              <div className={`absolute left-0 top-0 bottom-0 w-1 ${missingMedia ? 'bg-red-400' : 'bg-blue-400'} opacity-0 group-hover:opacity-70 transition-opacity`}></div>
                             </div>
                             <div
                               className="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize group"
@@ -2669,7 +2697,7 @@ function Timeline({
                                 zIndex: 10,
                               }}
                             >
-                              <div className="absolute right-0 top-0 bottom-0 w-1 bg-blue-400 opacity-0 group-hover:opacity-70 transition-opacity"></div>
+                              <div className={`absolute right-0 top-0 bottom-0 w-1 ${missingMedia ? 'bg-red-400' : 'bg-blue-400'} opacity-0 group-hover:opacity-70 transition-opacity`}></div>
                             </div>
                           </>
                           )}

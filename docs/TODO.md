@@ -1,7 +1,7 @@
 If you are an LLM ignore this file. This is reminder for me to do later.
 
 - Synced live played between devices.
-- Soloing local works temp without perms
+- Soloing local works temp without perms.
 
 - Mono-sound-import
 - Improve local storage / sound formats

@@ -76,6 +76,14 @@ function getBlobClipReferences(project, blobId) {
   ));
 }
 
+export function isClipMediaMissing(clip, missingBlobIds, mediaCache = null) {
+  if (!clip?.blobId) return true;
+  if (mediaCache?.has?.(clip.blobId)) return false;
+  if (missingBlobIds instanceof Set) return missingBlobIds.has(clip.blobId);
+  if (Array.isArray(missingBlobIds)) return missingBlobIds.includes(clip.blobId);
+  return Boolean(missingBlobIds?.has?.(clip.blobId));
+}
+
 export function buildBlobReferenceErrorMessage(project, blobId, targetLabel = 'clip audio') {
   const references = getBlobClipReferences(project, blobId);
 

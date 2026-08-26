@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { createClip, createEmptyProject, createTrack } from '../../types/project';
 import { attachTrackNode, createGroupNode } from '../trackTree';
-import { buildBlobReferenceErrorMessage } from '../mediaErrors';
+import { buildBlobReferenceErrorMessage, isClipMediaMissing } from '../mediaErrors';
+
+describe('isClipMediaMissing', () => {
+  it('treats clips without a blob id as missing', () => {
+    expect(isClipMediaMissing({ id: 'clip-1' }, new Set())).toBe(true);
+  });
+
+  it('does not mark a clip missing when its buffer is already in cache', () => {
+    const cache = new Map([['blob-a', {}]]);
+    expect(isClipMediaMissing({ blobId: 'blob-a' }, new Set(['blob-a']), cache)).toBe(false);
+  });
+
+  it('marks a clip missing only after its blob failed to load', () => {
+    expect(isClipMediaMissing({ blobId: 'blob-a' }, new Set(['blob-a']))).toBe(true);
+    expect(isClipMediaMissing({ blobId: 'blob-a' }, new Set(['blob-b']))).toBe(false);
+  });
+});
 
 describe('buildBlobReferenceErrorMessage', () => {
   it('uses the full track hierarchy and clip ordinal for a single clip', () => {

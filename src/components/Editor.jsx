@@ -316,6 +316,8 @@ function Editor({
   const masterVolumeRef = useRef(toFiniteNumber(project?.masterVolume, 100));
   const masterAnimationFrameRef = useRef(null);
   const [mediaMap, setMediaMap] = useState(new Map());
+  const [missingMediaBlobIds, setMissingMediaBlobIds] = useState(() => new Set());
+  const reloadingMediaBlobIdsRef = useRef(new Set());
   const [recordingSegments, setRecordingSegments] = useState([]);
   const [recordingOffsetMs, setRecordingOffsetMs] = useState(0);
   const lastMasterRightClickRef = useRef(0);
@@ -827,9 +829,14 @@ function Editor({
   }, [viewProject, selectedTrackId, selectedRowKind, selectedNodeId, selectTrack]);
 
   const loadProjectAudio = useCallback(async (options = {}) => {
-    const generation = options.generation ?? ++audioLoadGenerationRef.current;
+    const isolated = Boolean(options.isolated);
+    const requestedBlobIds = Array.isArray(options.blobIds) ? options.blobIds.filter(Boolean) : null;
+    const generation = isolated
+      ? audioLoadGenerationRef.current
+      : (options.generation ?? ++audioLoadGenerationRef.current);
     const isStale = () => (
-      Boolean(options.isCancelled?.()) || audioLoadGenerationRef.current !== generation
+      Boolean(options.isCancelled?.())
+      || (!isolated && audioLoadGenerationRef.current !== generation)
     );
     const checkpoint = () => {
       if (!isStale()) return;
@@ -839,7 +846,7 @@ function Editor({
     };
 
     const currentProject = projectRef.current;
-    const shouldFinish = isLoadProgressRunning();
+    const shouldFinish = !isolated && isLoadProgressRunning();
     const progressId = shouldFinish ? getLoadProgress()?.id : null;
     if (!currentProject) {
       if (shouldFinish && !isStale()) {
@@ -849,17 +856,18 @@ function Editor({
       return;
     }
 
-    const blobIds = [];
-    const seenBlobIds = new Set();
-    for (const track of currentProject.tracks || []) {
-      for (const clip of track.clips || []) {
-        if (!clip?.blobId || seenBlobIds.has(clip.blobId)) continue;
-        seenBlobIds.add(clip.blobId);
-        blobIds.push(clip.blobId);
+    const blobIds = requestedBlobIds ? [...requestedBlobIds] : [];
+    if (!requestedBlobIds) {
+      const seenBlobIds = new Set();
+      for (const track of currentProject.tracks || []) {
+        for (const clip of track.clips || []) {
+          if (!clip?.blobId || seenBlobIds.has(clip.blobId)) continue;
+          seenBlobIds.add(clip.blobId);
+          blobIds.push(clip.blobId);
+        }
       }
     }
 
-    const newMediaMap = new Map();
     let loadError = null;
     try {
       checkpoint();
@@ -895,16 +903,32 @@ function Editor({
           reportUserError(
             buildBlobReferenceErrorMessage(currentProject, blobId, 'clip audio'),
             error,
-            { onceKey: `editor:load-audio-buffer:${blobId}` }
+            isolated ? undefined : { onceKey: `editor:load-audio-buffer:${blobId}` }
           );
         },
       });
       checkpoint();
-      mediaEntries.forEach((media, blobId) => {
-        newMediaMap.set(blobId, media);
+      setMediaMap((prev) => {
+        const next = requestedBlobIds ? new Map(prev) : new Map();
+        mediaEntries.forEach((media, blobId) => {
+          next.set(blobId, media);
+        });
+        return next;
       });
-      updateLoadProgress({ current: 'Publishing media map to editor' });
-      setMediaMap(newMediaMap);
+      setMissingMediaBlobIds((prev) => {
+        const next = requestedBlobIds ? new Set(prev) : new Set();
+        for (const blobId of blobIds) {
+          if (audioManager.mediaCache.has(blobId)) {
+            next.delete(blobId);
+          } else {
+            next.add(blobId);
+          }
+        }
+        return next;
+      });
+      if (!isolated) {
+        updateLoadProgress({ current: 'Publishing media map to editor' });
+      }
       if (shouldFinish) {
         logLoadProgress('Editor audio buffers ready; waveforms may still draw after Close');
       }
@@ -920,6 +944,35 @@ function Editor({
   }, [canUseRemoteMedia, remoteSession?.session, remoteSession?.serverProjectId]);
 
   loadProjectAudioRef.current = loadProjectAudio;
+
+  const reloadMissingMedia = useCallback(async (blobId) => {
+    if (!blobId) return;
+    if (audioManager.mediaCache.has(blobId)) {
+      setMissingMediaBlobIds((prev) => {
+        if (!prev.has(blobId)) return prev;
+        const next = new Set(prev);
+        next.delete(blobId);
+        return next;
+      });
+      return;
+    }
+    if (reloadingMediaBlobIdsRef.current.has(blobId)) return;
+    reloadingMediaBlobIdsRef.current.add(blobId);
+    try {
+      await loadProjectAudio({
+        blobIds: [blobId],
+        isolated: true,
+      });
+    } catch (error) {
+      if (error?.name === 'StaleAudioLoad') return;
+      reportUserError(
+        buildBlobReferenceErrorMessage(projectRef.current, blobId, 'clip audio'),
+        error
+      );
+    } finally {
+      reloadingMediaBlobIdsRef.current.delete(blobId);
+    }
+  }, [loadProjectAudio]);
 
   // Initialize audio context on mount
   useEffect(() => {
@@ -4103,6 +4156,8 @@ function Editor({
           canSoloTracks={canSoloTracksInProject}
           sharedVerticalScroll
           scrollContainerRef={timelineScrollRef}
+          missingMediaBlobIds={missingMediaBlobIds}
+          onReloadMissingMedia={reloadMissingMedia}
         >
           {({ header, tracks, zoomOverlay }) => (
             <div className="relative grid grid-cols-[384px_1fr] grid-rows-[24px_minmax(0,1fr)] h-full min-h-0 min-w-0">
