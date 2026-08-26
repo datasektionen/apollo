@@ -7,7 +7,6 @@ import {
   Folder,
   HeadphoneOff,
   Headphones,
-  Home,
   ListMusic,
   Loader2,
   Music,
@@ -2457,15 +2456,39 @@ function PlayerDashboard({
     await playMixItem(queueItem, row.queueIndex);
   }, [playMixItem, selectedPlaylist]);
 
+  const handleGoHome = useCallback(() => {
+    setMainPanelView('library');
+    setLibraryScopeFolderId(null);
+    setSelectedPlaylistId(null);
+    setSelectedFolderId(null);
+    setActiveCollectionType(PLAYER_COLLECTION_TYPES.TUTTI);
+    setActiveCollectionId(defaultTuttiCollectionId);
+    setActiveIndex(-1);
+  }, [defaultTuttiCollectionId]);
+
   return (
     <div className="h-full flex flex-col bg-gray-900 text-white">
-      <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between gap-3">
-        <div>
-          <h1 className="m-0 leading-none">
-            <BrandWordmark className="h-9" />
-          </h1>
+      <div className="relative bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center">
+        <button
+          type="button"
+          onClick={handleGoHome}
+          className="relative z-10 m-0 leading-none rounded-md hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          title="Home"
+          aria-label="Home"
+        >
+          <BrandWordmark className="h-9" />
+        </button>
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-44">
+          <div className="pointer-events-auto relative w-full max-w-md">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+            <input
+              type="search"
+              placeholder="Search"
+              className="w-full h-9 box-border rounded-md bg-gray-900 border border-gray-700 pl-9 pr-3 text-sm leading-none text-gray-100 placeholder:text-gray-500 focus:outline-none focus:border-gray-500"
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="relative z-10 flex items-center gap-3 shrink-0 ml-auto">
           <div className="flex items-center rounded-lg bg-gray-700 p-0.5">
             <button
               type="button"
@@ -2541,33 +2564,6 @@ function PlayerDashboard({
 
       <div className="flex-1 overflow-hidden p-4">
         <div className="h-full flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setMainPanelView('library');
-                setLibraryScopeFolderId(null);
-                setSelectedPlaylistId(null);
-                setSelectedFolderId(null);
-                setActiveCollectionType(PLAYER_COLLECTION_TYPES.TUTTI);
-                setActiveCollectionId(defaultTuttiCollectionId);
-                setActiveIndex(-1);
-              }}
-              className="rounded-md bg-gray-800 border border-gray-700 p-2 text-gray-200 hover:bg-gray-700 transition-colors"
-              title="Home"
-            >
-              <Home size={16} />
-            </button>
-            <div className="relative flex-1">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-              <input
-                type="text"
-                placeholder="Search"
-                className="w-full rounded-md bg-gray-800 border border-gray-700 pl-9 pr-3 py-2 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none focus:border-gray-500"
-              />
-            </div>
-          </div>
-
           {showNoAccessBanner ? (
             <div className="rounded-lg border border-amber-500/30 bg-amber-900/20 px-4 py-3 text-sm text-amber-100">
               {noAccessMessage}
@@ -2575,59 +2571,20 @@ function PlayerDashboard({
           ) : null}
 
           <div className="flex-1 min-h-0 flex gap-3">
-            <div className={`${isLibraryCollapsed ? 'w-14' : 'w-80'} shrink-0 rounded-lg border border-gray-700 bg-gray-800/80 flex flex-col transition-all duration-200`}>
-              {!isLibraryCollapsed ? (
-                <div className="border-b border-gray-700 p-2">
-                  <div className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Show tutti
-                  </div>
-                  <div className="space-y-1">
-                    {tuttiShows.map((show) => {
-                      const collectionId = `show:${show.id}`;
-                      const active = activeCollectionType === PLAYER_COLLECTION_TYPES.TUTTI
-                        && activeCollectionId === collectionId;
-                      return (
-                        <button
-                          key={show.id}
-                          type="button"
-                          onClick={() => {
-                            setMainPanelView('library');
-                            setSelectedPlaylistId(null);
-                            setSelectedFolderId(null);
-                            setActiveCollectionType(PLAYER_COLLECTION_TYPES.TUTTI);
-                            setActiveCollectionId(collectionId);
-                            setActiveIndex(-1);
-                          }}
-                          className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                            active ? 'bg-blue-700/30 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                          }`}
-                        >
-                          <span className="truncate">{show.name}</span>
-                          <span className="ml-2 shrink-0 text-xs text-gray-500">{show.mixes.length}</span>
-                        </button>
-                      );
-                    })}
-                    {!tuttiShows.length ? (
-                      <div className="px-2 py-1.5 text-xs text-gray-500">No tutti playlists.</div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : (
-                <div className="border-b border-gray-700 p-2 text-center text-xs font-semibold text-gray-400">T</div>
-              )}
-              <div className="flex items-center justify-between border-b border-gray-700 px-3 py-2">
+            <div className={`${isLibraryCollapsed ? 'w-14' : 'w-80'} shrink-0 min-h-0 rounded-lg border border-gray-700 bg-gray-800/80 flex flex-col overflow-hidden transition-all duration-200`}>
+              <div className="flex h-9 min-h-9 max-h-9 shrink-0 items-center justify-between overflow-hidden border-b border-gray-700 px-3">
                 {!isLibraryCollapsed ? (
                   libraryScopeFolderId ? (
                     <button
                       onClick={() => setLibraryScopeFolderId(null)}
-                      className="inline-flex items-center gap-1 rounded px-2 py-1 text-sm font-semibold hover:bg-gray-700"
+                      className="inline-flex min-w-0 items-center gap-1 rounded px-1 text-sm font-semibold leading-none hover:bg-gray-700"
                       title="Back to full library"
                     >
-                      <ChevronLeft size={13} />
-                      {currentLibraryFolder?.name || 'My Library'}
+                      <ChevronLeft size={13} className="shrink-0" />
+                      <span className="truncate">{currentLibraryFolder?.name || 'My Library'}</span>
                     </button>
                   ) : (
-                    <h2 className="text-sm font-semibold">My Library</h2>
+                    <h2 className="m-0 text-sm font-semibold leading-none">My Library</h2>
                   )
                 ) : (
                   <span className="text-sm font-semibold">L</span>
@@ -2731,8 +2688,8 @@ function PlayerDashboard({
                           }}
                           className="flex-1 min-w-0 text-left px-2 py-1.5"
                         >
-                          <div className="flex items-center gap-2">
-                            <EntryIcon size={13} className="text-gray-400 shrink-0" />
+                          <div className="flex items-center gap-4">
+                            <EntryIcon size={18} className="text-gray-400 shrink-0" />
                             <div className="min-w-0">
                               <div className="text-sm truncate">{entry.name}</div>
                               <div className="text-[11px] text-gray-500 truncate">{subtitle}</div>
@@ -2780,17 +2737,17 @@ function PlayerDashboard({
                 </>
               ) : (
                 <>
-                  <div className="px-4 py-3 border-b border-gray-700">
-                    <h2 className="text-sm font-semibold">
+                  <div className="flex h-9 min-h-9 max-h-9 shrink-0 items-center overflow-hidden border-b border-gray-700 px-4">
+                    <h2 className="m-0 text-sm font-semibold leading-none truncate">
                       {selectedPlaylist && activeCollectionType === PLAYER_COLLECTION_TYPES.PLAYLIST
                         ? selectedPlaylist.name
-                        : "This Year's Musical Numbers"}
+                        : (activeTuttiShow?.name || 'Show')}
                     </h2>
                   </div>
-                  <div className="grid grid-cols-[56px_minmax(0,1fr)_96px_34px] px-4 py-2 text-xs uppercase tracking-wide text-gray-400 border-b border-gray-700">
+                  <div className="grid grid-cols-[56px_minmax(0,1fr)_96px_34px] px-4 py-2 text-xs text-gray-400 border-b border-gray-700">
                     <div>#</div>
                     <div>Title</div>
-                    <div className="text-right">Total Time</div>
+                    <div className="text-right">Length</div>
                     <div />
                   </div>
                   <div className="flex-1 overflow-auto">
@@ -2961,11 +2918,6 @@ function PlayerDashboard({
                       </>
                     ) : (
                       <>
-                        {activeTuttiShow ? (
-                          <div className="border-b border-gray-800 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                            {activeTuttiShow.name} tutti
-                          </div>
-                        ) : null}
                         {(activeTuttiMixes || []).map((mix, index) => {
                           const collectionId = activeTuttiShow ? `show:${activeTuttiShow.id}` : 'tutti';
                           const isActive = (
