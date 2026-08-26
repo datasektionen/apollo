@@ -2446,13 +2446,8 @@ function Editor({
       }
 
       if (!isAdvancedMixSession && safeUpdates.pan !== undefined && wasChoirTrack && proj.autoPan?.enabled && isDirectChoirPartTrack) {
-        nextProject = {
-          ...nextProject,
-          autoPan: {
-            ...nextProject.autoPan,
-            enabled: false,
-          },
-        };
+        const result = applyChoirAutoPanToProject(nextProject, { enabled: false });
+        nextProject = result.project;
       } else if (!isAdvancedMixSession && safeUpdates.role !== undefined && proj.autoPan?.enabled) {
         const result = applyChoirAutoPanToProject(nextProject);
         nextProject = result.project;
@@ -2629,13 +2624,8 @@ function Editor({
         )
       );
       if (!isAdvancedMixSession && safeUpdates.pan !== undefined && wasChoirGroup && proj.autoPan?.enabled) {
-        nextProject = {
-          ...nextProject,
-          autoPan: {
-            ...nextProject.autoPan,
-            enabled: false,
-          },
-        };
+        const result = applyChoirAutoPanToProject(nextProject, { enabled: false });
+        nextProject = result.project;
       } else if (!isAdvancedMixSession && safeUpdates.role !== undefined && (wasChoirGroup || nextChoirGroup) && proj.autoPan?.enabled) {
         const result = applyChoirAutoPanToProject(nextProject);
         nextProject = result.project;

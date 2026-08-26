@@ -82,6 +82,7 @@ export function normalizeExportSettings(settings = {}) {
  * @property {string} icon - Track icon key
  * @property {number} volume - Volume (0-100, maps to -60dB to 0dB)
  * @property {number} pan - Pan (-100 to +100, maps to -1 to +1)
+ * @property {number} [autoPanStoredPan] - Pan to restore if the track leaves choir while auto-pan is on
  * @property {boolean} muted - Mute state
  * @property {boolean} soloed - Solo state
  * @property {Clip[]} clips - Array of clips on this track

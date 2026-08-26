@@ -1,5 +1,38 @@
-import { TRACK_ROLE_CHOIR, isChoirPartRole } from './trackRoles';
+import { GROUP_ROLE_CHOIRS, TRACK_ROLE_CHOIR, isChoirPartRole, isChoirRole } from './trackRoles';
 import { getEffectiveTrackMix } from './trackTree';
+
+function readStoredPan(entity) {
+  const value = Number(entity?.autoPanStoredPan);
+  return Number.isFinite(value) ? value : null;
+}
+
+function withAutoPanApplied(entity, nextPan) {
+  const stored = readStoredPan(entity);
+  const previousPan = Number.isFinite(entity?.pan) ? entity.pan : 0;
+  return {
+    ...entity,
+    autoPanStoredPan: stored === null ? previousPan : stored,
+    pan: nextPan,
+  };
+}
+
+function restoreAutoPanStoredPan(entity) {
+  const stored = readStoredPan(entity);
+  if (stored === null) return entity;
+  const { autoPanStoredPan: _storedPan, ...rest } = entity;
+  return {
+    ...rest,
+    pan: stored,
+  };
+}
+
+function dropAutoPanStoredPan(entity) {
+  if (!entity || !Object.prototype.hasOwnProperty.call(entity, 'autoPanStoredPan')) {
+    return entity;
+  }
+  const { autoPanStoredPan: _storedPan, ...rest } = entity;
+  return rest;
+}
 
 const STRATEGY_SOLVER_BY_ID = {
   'balanced-highest-middle': 'Balanced Highest Middle',
@@ -359,77 +392,78 @@ export function applyChoirAutoPanToProject(project, settingsOverride = {}) {
 
   if (!nextSettings.enabled) {
     return {
-      project: { ...project, autoPan: nextSettings },
+      project: {
+        ...project,
+        autoPan: nextSettings,
+        tracks: (project.tracks || []).map(dropAutoPanStoredPan),
+        trackTree: (project.trackTree || []).map((node) => (
+          node.kind === 'group' ? dropAutoPanStoredPan(node) : node
+        )),
+      },
       panUpdates: null,
     };
   }
 
   const choirUnits = getChoirUnits(project, nextSettings);
-  if (choirUnits.length === 0) {
-    return {
-      project: { ...project, autoPan: nextSettings },
-      panUpdates: null,
-    };
-  }
-
   const n = nextSettings.manualChoirParts
     ? Array.from(new Set(choirUnits.map((unit) => unit.partIndex))).length
     : choirUnits.length;
 
-  if (n === 0) {
-    return {
-      project: { ...project, autoPan: nextSettings },
-      panUpdates: null,
-    };
-  }
-
-  const order = solveOrder(n, nextSettings.strategy);
-  const pans = getChoirPanPositions(n, nextSettings.rangeLimit, nextSettings.spreadK);
-  const panByPartIndex = {};
-  order.forEach((partIndex, positionIndex) => {
-    panByPartIndex[partIndex] = pans[positionIndex];
-  });
-
   const beforeMix = getEffectiveTrackMix(project);
   const panUpdates = {};
-
-  const panByUnitId = new Map();
-  choirUnits.forEach((unit, idx) => {
-    const partIndex = nextSettings.manualChoirParts ? unit.partIndex : (idx + 1);
-    if (!partIndex) return;
-    const nextPanRaw = panByPartIndex[partIndex];
-    if (!Number.isFinite(nextPanRaw)) return;
-    const nextPan = Math.max(-100, Math.min(100, nextSettings.inverted ? -nextPanRaw : nextPanRaw));
-    panByUnitId.set(unit.unitId, nextPan);
-  });
-
   const panByTrackId = new Map();
   const panByGroupNodeId = new Map();
-  choirUnits.forEach((unit) => {
-    const unitPan = panByUnitId.get(unit.unitId);
-    if (!Number.isFinite(unitPan)) return;
-    if (unit.targetKind === 'group' && unit.targetId) {
-      panByGroupNodeId.set(unit.targetId, unitPan);
-      return;
-    }
-    for (const trackId of unit.trackIds) {
-      panByTrackId.set(trackId, unitPan);
-    }
-  });
 
-  const nextTracks = project.tracks.map((track) => {
-    if (!panByTrackId.has(track.id)) return track;
-    return {
-      ...track,
-      pan: panByTrackId.get(track.id),
-    };
+  if (choirUnits.length > 0 && n > 0) {
+    const order = solveOrder(n, nextSettings.strategy);
+    const pans = getChoirPanPositions(n, nextSettings.rangeLimit, nextSettings.spreadK);
+    const panByPartIndex = {};
+    order.forEach((partIndex, positionIndex) => {
+      panByPartIndex[partIndex] = pans[positionIndex];
+    });
+
+    const panByUnitId = new Map();
+    choirUnits.forEach((unit, idx) => {
+      const partIndex = nextSettings.manualChoirParts ? unit.partIndex : (idx + 1);
+      if (!partIndex) return;
+      const nextPanRaw = panByPartIndex[partIndex];
+      if (!Number.isFinite(nextPanRaw)) return;
+      const nextPan = Math.max(-100, Math.min(100, nextSettings.inverted ? -nextPanRaw : nextPanRaw));
+      panByUnitId.set(unit.unitId, nextPan);
+    });
+
+    choirUnits.forEach((unit) => {
+      const unitPan = panByUnitId.get(unit.unitId);
+      if (!Number.isFinite(unitPan)) return;
+      if (unit.targetKind === 'group' && unit.targetId) {
+        panByGroupNodeId.set(unit.targetId, unitPan);
+        return;
+      }
+      for (const trackId of unit.trackIds) {
+        panByTrackId.set(trackId, unitPan);
+      }
+    });
+  }
+
+  const nextTracks = (project.tracks || []).map((track) => {
+    if (panByTrackId.has(track.id)) {
+      return withAutoPanApplied(track, panByTrackId.get(track.id));
+    }
+    const state = beforeMix.statesByTrackId.get(track.id);
+    if (state?.effectiveRole === TRACK_ROLE_CHOIR) {
+      return track;
+    }
+    return restoreAutoPanStoredPan(track);
   });
   const nextTrackTree = (project.trackTree || []).map((node) => {
-    if (node.kind !== 'group' || !panByGroupNodeId.has(node.id)) return node;
-    return {
-      ...node,
-      pan: panByGroupNodeId.get(node.id),
-    };
+    if (node.kind !== 'group') return node;
+    if (panByGroupNodeId.has(node.id)) {
+      return withAutoPanApplied(node, panByGroupNodeId.get(node.id));
+    }
+    if (isChoirRole(node.role) || node.role === GROUP_ROLE_CHOIRS) {
+      return node;
+    }
+    return restoreAutoPanStoredPan(node);
   });
 
   const nextProject = {
@@ -443,7 +477,7 @@ export function applyChoirAutoPanToProject(project, settingsOverride = {}) {
   for (const trackId of afterMix.orderedTrackIds) {
     const afterState = afterMix.statesByTrackId.get(trackId);
     const beforeState = beforeMix.statesByTrackId.get(trackId);
-    if (!afterState || afterState.effectiveRole !== TRACK_ROLE_CHOIR) continue;
+    if (!afterState) continue;
     if (!beforeState || beforeState.effectivePan !== afterState.effectivePan) {
       panUpdates[trackId] = afterState.effectivePan;
     }

@@ -172,6 +172,9 @@ export function normalizeTrackTree(project) {
       soloed: Boolean(rawNode.soloed),
       volume: Math.max(0, Math.min(100, toNumber(rawNode.volume, 100))),
       pan: clampPan(rawNode.pan),
+      ...(Number.isFinite(Number(rawNode.autoPanStoredPan))
+        ? { autoPanStoredPan: clampPan(rawNode.autoPanStoredPan) }
+        : {}),
       role,
       part: normalizePartFlag(rawNode.part, isLegacyPartGroupRole(role)),
       artistRefs: normalizeArtistRefs(rawNode.artistRefs),
