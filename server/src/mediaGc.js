@@ -685,7 +685,11 @@ export async function getMediaStorageOverview(db, {
     db.query(
       `SELECT pg_database_size(current_database())::bigint AS "databaseBytes",
               current_database() AS "databaseName",
-              current_setting('data_directory') AS "dataDirectory",
+              CASE
+                WHEN current_setting('is_superuser') = 'on'
+                  THEN current_setting('data_directory')
+                ELSE NULL
+              END AS "dataDirectory",
               (
                 SELECT pg_size_bytes(split_part(opt, '=', 2))
                 FROM pg_tablespace ts
