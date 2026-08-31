@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { pool } from './db.js';
+import { getAppSettings, getEffectiveAppSettingsForMode } from './appSettings.js';
 import { matchesOidcBootstrapRule } from './oidcBootstrap.js';
 
 export const ACCESS_LEVEL_READ = 'read';
@@ -3655,7 +3656,10 @@ export async function canCreateProjectsInShow(userId, showId, db = pool) {
 
 export async function getUserAccessSummary(userId, db = pool) {
   await ensureDefaultUserRoleMembership(userId, db);
-  const defaultRole = await getDefaultUserRole(db);
+  const [defaultRole, appSettings] = await Promise.all([
+    getDefaultUserRole(db),
+    getAppSettings(db),
+  ]);
   const defaultRoleGrantCountResult = defaultRole
     ? await db.query(
       `SELECT COUNT(*)::integer AS "count"
@@ -3665,7 +3669,11 @@ export async function getUserAccessSummary(userId, db = pool) {
     )
     : { rows: [{ count: 0 }] };
   const defaultRoleHasGrants = Number(defaultRoleGrantCountResult.rows?.[0]?.count || 0) > 0;
-  const emptyAccessMessage = normalizeText(defaultRole?.emptyAccessMessage) || DEFAULT_EMPTY_ACCESS_MESSAGE;
+  const playerSettings = getEffectiveAppSettingsForMode(appSettings, 'player');
+  const dawSettings = getEffectiveAppSettingsForMode(appSettings, 'daw');
+  const emptyAccessMessage = normalizeText(appSettings.noAccessMessage)
+    || normalizeText(defaultRole?.emptyAccessMessage)
+    || DEFAULT_EMPTY_ACCESS_MESSAGE;
   const isAdmin = await userHasAdminRole(userId, db);
   const grants = await listResolvedGrantsForUser(userId, db);
   const canCreateShows = isAdmin || grants.some((grant) => normalizeGrantShape(grant).permissionKey === PERMISSION_SHOW_CREATOR);
@@ -3709,6 +3717,17 @@ export async function getUserAccessSummary(userId, db = pool) {
     hasAnyAccess,
     showNoAccessMessage: !hasAnyAccess,
     emptyAccessMessage,
+    playerNoAccessMessage: playerSettings.noAccessMessage || emptyAccessMessage,
+    dawNoAccessMessage: dawSettings.noAccessMessage || emptyAccessMessage,
+    showSettings: {
+      defaultShowId: appSettings.defaultShowId,
+      splitPlayerDawDefaults: appSettings.splitPlayerDawDefaults,
+      playerDefaultShowId: appSettings.playerDefaultShowId,
+      dawDefaultShowId: appSettings.dawDefaultShowId,
+      noAccessMessage: emptyAccessMessage,
+      playerNoAccessMessage: playerSettings.noAccessMessage || emptyAccessMessage,
+      dawNoAccessMessage: dawSettings.noAccessMessage || emptyAccessMessage,
+    },
     defaultRoleHasGrants,
     canCreateProjects,
     canCreateShows,

@@ -54,6 +54,7 @@ import {
   setSessionCookies,
 } from './sessionCookies.js';
 import { choosePreferredOrigin, getRequestOrigin } from './requestOrigin.js';
+import { getAppSettings, saveAppSettings } from './appSettings.js';
 import {
   deleteUserAccount,
   findOrCreateOidcUser,
@@ -373,6 +374,29 @@ function canWriteProjectTracks(access) {
     || access?.canManageTracks
     || access?.canManageProject
   );
+}
+
+async function loadAdminShowsConfig() {
+  const [showsResult, settings] = await Promise.all([
+    pool.query(
+      `SELECT s.id,
+              s.name,
+              s.order_index AS "orderIndex",
+              s.created_by AS "createdByUserId",
+              COUNT(p.id)::integer AS "projectCount",
+              (COUNT(p.id) FILTER (WHERE p.published))::integer AS "publishedProjectCount"
+       FROM shows s
+       LEFT JOIN projects p
+         ON p.show_id = s.id
+       GROUP BY s.id, s.name, s.order_index, s.created_by
+       ORDER BY s.order_index ASC, s.name ASC`
+    ),
+    getAppSettings(),
+  ]);
+  return {
+    shows: showsResult.rows,
+    settings,
+  };
 }
 
 async function ensureMediaRoot() {
@@ -3185,6 +3209,127 @@ app.put('/api/projects/:projectId/permissions/:userId', requireAuth, requireAdmi
     }
     console.error(error);
     res.status(500).json({ error: 'Failed to update project permission' });
+  }
+});
+
+app.get('/api/admin/shows/config', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    res.json(await loadAdminShowsConfig());
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to load show configuration' });
+  }
+});
+
+app.patch('/api/admin/shows/config', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const settingKeys = [
+      'defaultShowId',
+      'splitPlayerDawDefaults',
+      'playerDefaultShowId',
+      'dawDefaultShowId',
+      'noAccessMessage',
+      'playerNoAccessMessage',
+      'dawNoAccessMessage',
+    ];
+    const hasSetting = settingKeys.some((key) => Object.prototype.hasOwnProperty.call(body, key));
+    if (!hasSetting) {
+      res.status(400).json({ error: 'At least one show setting is required' });
+      return;
+    }
+
+    const requestedShowIds = [
+      body.defaultShowId,
+      body.playerDefaultShowId,
+      body.dawDefaultShowId,
+    ]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    const uniqueRequestedShowIds = Array.from(new Set(requestedShowIds));
+    if (uniqueRequestedShowIds.length > 0) {
+      const existingShows = await pool.query(
+        `SELECT id
+         FROM shows
+         WHERE id = ANY($1::text[])`,
+        [uniqueRequestedShowIds]
+      );
+      if (existingShows.rowCount !== uniqueRequestedShowIds.length) {
+        res.status(400).json({ error: 'One or more selected shows no longer exist' });
+        return;
+      }
+    }
+
+    const messageKeys = ['noAccessMessage', 'playerNoAccessMessage', 'dawNoAccessMessage'];
+    for (const key of messageKeys) {
+      if (body[key] !== undefined && String(body[key] || '').trim().length > 4000) {
+        res.status(400).json({ error: 'No-access messages must be 4000 characters or fewer' });
+        return;
+      }
+    }
+
+    await saveAppSettings({
+      defaultShowId: body.defaultShowId,
+      splitPlayerDawDefaults: body.splitPlayerDawDefaults,
+      playerDefaultShowId: body.playerDefaultShowId,
+      dawDefaultShowId: body.dawDefaultShowId,
+      noAccessMessage: body.noAccessMessage,
+      playerNoAccessMessage: body.playerNoAccessMessage,
+      dawNoAccessMessage: body.dawNoAccessMessage,
+    }, req.user.id);
+    res.json(await loadAdminShowsConfig());
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to save show configuration' });
+  }
+});
+
+app.patch('/api/admin/shows/order', requireAuth, requireAdmin, async (req, res) => {
+  const showIds = Array.isArray(req.body?.showIds)
+    ? req.body.showIds.map((showId) => String(showId || '').trim())
+    : null;
+  if (!showIds || showIds.some((showId) => !showId) || new Set(showIds).size !== showIds.length) {
+    res.status(400).json({ error: 'showIds must be a unique ordered array' });
+    return;
+  }
+
+  const existingResult = await pool.query('SELECT id FROM shows');
+  const existingIds = new Set(existingResult.rows.map((row) => String(row.id)));
+  if (
+    existingIds.size !== showIds.length
+    || showIds.some((showId) => !existingIds.has(showId))
+  ) {
+    res.status(400).json({ error: 'showIds must include every existing show exactly once' });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const [orderIndex, showId] of showIds.entries()) {
+      await client.query(
+        `UPDATE shows
+         SET order_index = $2,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [showId, orderIndex]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error(error);
+    res.status(500).json({ error: 'Failed to save show order' });
+    return;
+  } finally {
+    client.release();
+  }
+
+  try {
+    res.json(await loadAdminShowsConfig());
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to load show configuration' });
   }
 });
 

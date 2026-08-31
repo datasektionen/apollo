@@ -608,6 +608,13 @@ function App() {
     setServerSession(nextSession);
   };
 
+  const handleSessionRefresh = useCallback(async () => {
+    const nextSession = await getCurrentSession();
+    saveServerSession(nextSession);
+    setServerSession(nextSession);
+    return nextSession;
+  }, []);
+
   if (authBootstrapping) {
     return (
       <div className="h-screen w-screen overflow-hidden bg-gray-900 text-white flex items-center justify-center p-6">
@@ -640,6 +647,7 @@ function App() {
           onClose={handleLeaveAdmin}
           onLogout={handleServerLogout}
           onOpenProfile={handleOpenProfile}
+          onSessionRefresh={handleSessionRefresh}
         />
       ) : view === 'editor' ? (
         <Editor

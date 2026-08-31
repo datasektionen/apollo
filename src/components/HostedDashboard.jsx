@@ -7,6 +7,11 @@ import { BrandWordmark } from './BrandLogo';
 import CreditsEditorDialog from './CreditsEditorDialog';
 import { getProjectCredits, getShowMetadata, saveProjectCredits, saveShowMetadata } from '../lib/serverApi';
 import { formatDurationMs } from '../utils/playerTime';
+import {
+  getConfiguredShowId,
+  getNoAccessMessage,
+  SHOW_SETTINGS_MODES,
+} from '../utils/showSettings';
 
 function HostedDashboard({
   session,
@@ -56,9 +61,13 @@ function HostedDashboard({
     errorPrefix: 'hosted-dashboard',
   });
   const showNoAccessMessage = Boolean(session?.accessSummary?.showNoAccessMessage);
-  const noAccessMessage = String(
-    session?.accessSummary?.emptyAccessMessage
-    || 'You do not currently have any permissions. Please contact an admin if you should.'
+  const noAccessMessage = getNoAccessMessage(
+    session?.accessSummary,
+    SHOW_SETTINGS_MODES.DAW
+  );
+  const defaultDawShowId = getConfiguredShowId(
+    session?.accessSummary,
+    SHOW_SETTINGS_MODES.DAW
   );
   const projectShowIds = new Set((projects || []).map((project) => project.showId).filter(Boolean));
   const selectableShows = (shows || []).filter((show) => (
@@ -80,9 +89,15 @@ function HostedDashboard({
       return;
     }
     setSelectedShowId((current) => (
-      selectableShows.some((show) => show.id === current) ? current : selectableShows[0].id
+      selectableShows.some((show) => show.id === current)
+        ? current
+        : (
+          selectableShows.some((show) => String(show.id) === String(defaultDawShowId))
+            ? defaultDawShowId
+            : selectableShows[0].id
+        )
     ));
-  }, [selectableShowIds]);
+  }, [defaultDawShowId, selectableShowIds]);
 
   const formatRelativeTime = (timestamp) => {
     const numeric = Number(timestamp);
@@ -506,7 +521,7 @@ function HostedDashboard({
           {!selectedShow ? (
             <div className="text-center py-12 text-gray-500">
               <FileAudio size={48} className="mx-auto mb-4 opacity-50" />
-              <p>Select or create a show to begin.</p>
+              <p>{showNoAccessMessage ? noAccessMessage : 'Select or create a show to begin.'}</p>
             </div>
           ) : visibleProjects.length === 0 ? (
             <div className="text-center py-12 text-gray-500">

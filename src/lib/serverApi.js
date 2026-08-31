@@ -161,6 +161,24 @@ export async function listShows(session) {
   return payload.shows || [];
 }
 
+export async function getAdminShowsConfig(session) {
+  return await apiFetch('/api/admin/shows/config', {}, session);
+}
+
+export async function saveAdminShowsConfig(settings, session) {
+  return await apiFetch('/api/admin/shows/config', {
+    method: 'PATCH',
+    body: settings,
+  }, session);
+}
+
+export async function reorderAdminShows(showIds, session) {
+  return await apiFetch('/api/admin/shows/order', {
+    method: 'PATCH',
+    body: { showIds },
+  }, session);
+}
+
 export async function createShow(name, session) {
   const payload = await apiFetch('/api/admin/shows', {
     method: 'POST',

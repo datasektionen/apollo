@@ -88,6 +88,11 @@ import {
 import { reportUserError } from '../utils/errorReporter';
 import { isTextEntryTarget } from '../utils/keyboard';
 import {
+  getConfiguredShowId,
+  getNoAccessMessage,
+  SHOW_SETTINGS_MODES,
+} from '../utils/showSettings';
+import {
   canResumePlayerPlayback,
   resolvePlayerSpaceAction,
 } from '../utils/playerSpacePlayback';
@@ -561,9 +566,9 @@ function PlayerDashboard({
   const [playlistDragState, setPlaylistDragState] = useState(null);
   const [playlistReorderPendingId, setPlaylistReorderPendingId] = useState(null);
   const showNoAccessMessage = Boolean(session?.accessSummary?.showNoAccessMessage);
-  const noAccessMessage = String(
-    session?.accessSummary?.emptyAccessMessage
-    || 'You do not currently have any permissions. Please contact an admin if you should.'
+  const noAccessMessage = getNoAccessMessage(
+    session?.accessSummary,
+    SHOW_SETTINGS_MODES.PLAYER
   );
 
   const activeQueueRef = useRef([]);
@@ -1075,6 +1080,17 @@ function PlayerDashboard({
       ));
   }, [tuttiMixes]);
 
+  const configuredPlayerShowId = getConfiguredShowId(
+    session?.accessSummary,
+    SHOW_SETTINGS_MODES.PLAYER
+  );
+  const defaultTuttiShowId = (
+    configuredPlayerShowId
+    && tuttiShows.some((show) => String(show.id) === String(configuredPlayerShowId))
+  )
+    ? configuredPlayerShowId
+    : (tuttiShows[0]?.id || '');
+
   const searchItems = useMemo(() => {
     const mixById = new Map();
     [...(myMixes || []), ...(globalMixes || [])].forEach((mix) => {
@@ -1098,7 +1114,7 @@ function PlayerDashboard({
   const activeTuttiShowId = activeCollectionType === PLAYER_COLLECTION_TYPES.TUTTI
     && String(activeCollectionId || '').startsWith('show:')
     ? String(activeCollectionId).slice('show:'.length)
-    : (tuttiShows[0]?.id || '');
+    : defaultTuttiShowId;
   const activeTuttiShow = tuttiShows.find((show) => show.id === activeTuttiShowId) || tuttiShows[0] || null;
   const activeTuttiMixes = activeTuttiShow?.mixes || [];
 
@@ -1137,12 +1153,12 @@ function PlayerDashboard({
     if (
       activeCollectionType === PLAYER_COLLECTION_TYPES.TUTTI
       && activeCollectionId === 'tutti'
-      && tuttiShows[0]?.id
+      && defaultTuttiShowId
     ) {
-      setActiveCollectionId(`show:${tuttiShows[0].id}`);
+      setActiveCollectionId(`show:${defaultTuttiShowId}`);
       setActiveIndex(-1);
     }
-  }, [activeCollectionId, activeCollectionType, tuttiShows]);
+  }, [activeCollectionId, activeCollectionType, defaultTuttiShowId]);
 
   useEffect(() => {
     activeIndexRef.current = activeIndex;
@@ -2035,7 +2051,7 @@ function PlayerDashboard({
   }, [refreshPlayerData, session]);
 
   const activeQueueItem = activeQueueItems[activeIndex] || null;
-  const defaultTuttiCollectionId = tuttiShows[0]?.id ? `show:${tuttiShows[0].id}` : 'tutti';
+  const defaultTuttiCollectionId = defaultTuttiShowId ? `show:${defaultTuttiShowId}` : 'tutti';
   const selectedPlaylist = playlists.find((playlist) => playlist.id === selectedPlaylistId) || null;
   const currentLibraryFolder = folders.find((folder) => folder.id === libraryScopeFolderId) || null;
   const libraryVisibleItems = useMemo(() => {

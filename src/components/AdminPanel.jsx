@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CircleUserRound, MoreHorizontal, Plus, Search } from 'lucide-react';
 import { BrandWordmark } from './BrandLogo';
+import AdminShowsPanel from './AdminShowsPanel';
 import AdminStoragePanel from './AdminStoragePanel';
 import {
   addRbacRoleMember,
@@ -695,7 +696,6 @@ export default function AdminPanel({
   const [newlyCreatedRoleId, setNewlyCreatedRoleId] = useState('');
   const [roleDetailTab, setRoleDetailTab] = useState('permissions');
   const [roleNameDraft, setRoleNameDraft] = useState('');
-  const [defaultMessageDraft, setDefaultMessageDraft] = useState('');
   const [parentRoleIdsDraft, setParentRoleIdsDraft] = useState([]);
   const [pendingRoleMemberId, setPendingRoleMemberId] = useState('');
   const [pendingChildRoleId, setPendingChildRoleId] = useState('');
@@ -755,7 +755,6 @@ export default function AdminPanel({
     const role = await getRbacRole(roleId, session);
     setSelectedRole(role);
     setRoleNameDraft(role?.name || '');
-    setDefaultMessageDraft(role?.emptyAccessMessage || '');
     setParentRoleIdsDraft((role?.parents || []).map((parent) => parent.id));
   };
 
@@ -788,7 +787,6 @@ export default function AdminPanel({
     if (!selectedRoleId) {
       setSelectedRole(null);
       setRoleNameDraft('');
-      setDefaultMessageDraft('');
       setParentRoleIdsDraft([]);
       return;
     }
@@ -961,11 +959,7 @@ export default function AdminPanel({
   const handleSaveRole = async () => {
     if (!selectedRole) return;
     await runAction(async () => {
-      if (selectedRole.systemKey === 'default_user') {
-        await updateRbacRole(selectedRole.id, {
-          emptyAccessMessage: defaultMessageDraft,
-        }, session);
-      } else if (!selectedRole.isSystem) {
+      if (!selectedRole.isSystem) {
         await updateRbacRole(selectedRole.id, {
           name: roleNameDraft.trim(),
           parentRoleIds: parentRoleIdsDraft,
@@ -1224,11 +1218,6 @@ export default function AdminPanel({
   const canEditRoleChildren = selectedRole && !selectedRole.isSystem;
   const canEditRoleParents = selectedRole && !selectedRole.isSystem;
   const canShowMembers = selectedRole && selectedRole.systemKey !== 'default_user';
-  const canEditDefaultMessage = (
-    selectedRole?.systemKey === 'default_user'
-    && (selectedRole.grants?.length || 0) === 0
-    && (selectedRole.inheritedGrants?.length || 0) === 0
-  );
   const userActionModalUser = userActionModal
     ? users.find((user) => user.id === userActionModal.userId)
     : null;
@@ -1376,6 +1365,26 @@ export default function AdminPanel({
                   type="button"
                   onClick={() => {
                     setSelectedRoleId('');
+                    setTab('shows');
+                  }}
+                  className={`relative flex min-w-36 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition md:w-full ${
+                    tab === 'shows'
+                      ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
+                      : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
+                  }`}
+                >
+                  {tab === 'shows' ? (
+                    <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-500" />
+                  ) : null}
+                  <span className="pl-2 font-medium">Shows</span>
+                  <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
+                    {catalog.shows?.length || 0}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRoleId('');
                     setTab('roles');
                   }}
                   className={`relative flex min-w-36 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition md:w-full ${
@@ -1460,6 +1469,11 @@ export default function AdminPanel({
                     ) : null}
                   </div>
                 </div>
+              ) : tab === 'shows' ? (
+                <AdminShowsPanel
+                  session={session}
+                  onSessionRefresh={onSessionRefresh}
+                />
               ) : tab === 'roles' ? (
                 selectedRole ? (
                   <div className="grid gap-5 xl:grid-cols-[280px,1fr]">
@@ -1514,7 +1528,7 @@ export default function AdminPanel({
                               className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-900 px-3 py-2 text-xl font-semibold text-gray-100 disabled:cursor-default disabled:opacity-100"
                             />
                             <div className="flex flex-wrap items-center gap-2">
-                              {(canEditRoleName || canEditDefaultMessage) ? (
+                              {canEditRoleName ? (
                                 <button
                                   type="button"
                                   disabled={saving || (canEditRoleName ? !roleNameDraft.trim() : false)}
@@ -1537,18 +1551,6 @@ export default function AdminPanel({
                             </div>
                           </div>
 
-                          {selectedRole.systemKey === 'default_user' ? (
-                            <div className="space-y-2">
-                              <div className="text-sm text-gray-300">No-access message</div>
-                              <textarea
-                                value={defaultMessageDraft}
-                                disabled={!canEditDefaultMessage}
-                                onChange={(event) => setDefaultMessageDraft(event.target.value)}
-                                rows={1}
-                                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 disabled:opacity-60"
-                              />
-                            </div>
-                          ) : null}
                         </div>
                       </Panel>
 
