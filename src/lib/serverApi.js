@@ -661,6 +661,11 @@ export async function fetchPlayerTuttiMixes(session) {
   return payload.mixes || [];
 }
 
+export async function fetchPlayerSearchCredits(session) {
+  const payload = await apiFetch('/api/player/search/credits', {}, session);
+  return payload.credits || [];
+}
+
 export async function fetchPlayerGlobalMixes(session) {
   const payload = await apiFetch('/api/player/mixes/global', {}, session);
   return payload.mixes || [];

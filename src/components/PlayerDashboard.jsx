@@ -18,7 +18,6 @@ import {
   Repeat1,
   Repeat,
   Scale,
-  Search,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -26,7 +25,12 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { BrandWordmark } from './BrandLogo';
+import { PlayerSearchBar, PlayerSearchResults, usePlayerSearchResults } from './PlayerSearch';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
+import {
+  PLAYER_SEARCH_TYPES,
+  buildPlayerSearchItems,
+} from '../utils/playerSearch';
 import {
   addPlayerPlaylistItem,
   bootstrapServerProject,
@@ -40,6 +44,7 @@ import {
   downloadMediaBlob,
   fetchPlayerGlobalMixes,
   fetchPlayerMyDevice,
+  fetchPlayerSearchCredits,
   fetchPlayerTuttiMixes,
   getProjectCredits,
   reorderPlayerPlaylistItems,
@@ -539,6 +544,11 @@ function PlayerDashboard({
   const [preferredMetronomeMuted, setPreferredMetronomeMuted] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeMuted);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mainPanelView, setMainPanelView] = useState('library');
+  const [searchDraft, setSearchDraft] = useState('');
+  const [searchType, setSearchType] = useState(PLAYER_SEARCH_TYPES.ALL);
+  const [searchCredits, setSearchCredits] = useState([]);
+  const [searchCreditsLoading, setSearchCreditsLoading] = useState(false);
+  const [focusedSearchCreditId, setFocusedSearchCreditId] = useState(null);
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
   const [libraryScopeFolderId, setLibraryScopeFolderId] = useState(null);
   const [libraryCreateMenuOpen, setLibraryCreateMenuOpen] = useState(false);
@@ -585,6 +595,7 @@ function PlayerDashboard({
   const durationSecRef = useRef(0);
   const playGenerationRef = useRef(0);
   const projectSnapshotCacheRef = useRef(new Map());
+  const searchCreditsLoadedRef = useRef(false);
   const {
     audioInputs,
     audioOutputs,
@@ -643,6 +654,7 @@ function PlayerDashboard({
       setPlaylistItemsByPlaylistId(myDevice.playlistItemsByPlaylistId || {});
       setTuttiMixes(tutti || []);
       setGlobalMixes(global || []);
+      searchCreditsLoadedRef.current = false;
     } catch (loadError) {
       setError(loadError.message || 'Failed to load player library');
     } finally {
@@ -653,6 +665,24 @@ function PlayerDashboard({
   useEffect(() => {
     refreshPlayerData();
   }, [refreshPlayerData]);
+
+  const searchCreditsInFlightRef = useRef(false);
+  const ensureSearchCredits = useCallback(async () => {
+    if (!session || searchCreditsLoadedRef.current || searchCreditsInFlightRef.current) return;
+    searchCreditsInFlightRef.current = true;
+    setSearchCreditsLoading(true);
+    try {
+      const credits = await fetchPlayerSearchCredits(session);
+      setSearchCredits(credits);
+      searchCreditsLoadedRef.current = true;
+    } catch (creditsError) {
+      setSearchCredits([]);
+      console.error('Failed to load searchable credits', creditsError);
+    } finally {
+      searchCreditsInFlightRef.current = false;
+      setSearchCreditsLoading(false);
+    }
+  }, [session]);
 
   useEffect(() => {
     if (!mixDialog) return undefined;
@@ -1044,6 +1074,26 @@ function PlayerDashboard({
         || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
       ));
   }, [tuttiMixes]);
+
+  const searchItems = useMemo(() => {
+    const mixById = new Map();
+    [...(myMixes || []), ...(globalMixes || [])].forEach((mix) => {
+      if (!mix?.id || mixById.has(String(mix.id))) return;
+      mixById.set(String(mix.id), mix);
+    });
+    return buildPlayerSearchItems({
+      shows: tuttiShows,
+      songs: tuttiMixes,
+      mixes: Array.from(mixById.values()),
+      playlists,
+      folders,
+    });
+  }, [folders, globalMixes, myMixes, playlists, tuttiMixes, tuttiShows]);
+  const searchResults = usePlayerSearchResults(searchItems, searchCredits, searchDraft);
+  const searchSongItems = useMemo(
+    () => searchItems.filter((item) => item.type === 'song'),
+    [searchItems]
+  );
 
   const activeTuttiShowId = activeCollectionType === PLAYER_COLLECTION_TYPES.TUTTI
     && String(activeCollectionId || '').startsWith('show:')
@@ -2147,6 +2197,110 @@ function PlayerDashboard({
     }
   }, [handleSelectCollection, handleSelectItem, myDeviceQueue]);
 
+  const handleClearSearch = useCallback(() => {
+    setSearchDraft('');
+    setSearchType(PLAYER_SEARCH_TYPES.ALL);
+    setFocusedSearchCreditId(null);
+    if (mainPanelView === 'search') setMainPanelView('library');
+  }, [mainPanelView]);
+
+  const handleSubmitSearch = useCallback((query) => {
+    const nextQuery = String(query || '').trim();
+    if (!nextQuery) {
+      handleClearSearch();
+      return;
+    }
+    setSearchDraft(nextQuery);
+    setSearchType(PLAYER_SEARCH_TYPES.ALL);
+    setMainPanelView('search');
+    void ensureSearchCredits();
+  }, [ensureSearchCredits, handleClearSearch]);
+
+  const playSearchMix = useCallback(async (mix, collectionType, collectionId, index) => {
+    const queueItem = createQueueItemFromMix(mix, collectionType, collectionId);
+    if (!queueItem) return;
+    setMainPanelView('library');
+    setSelectedPlaylistId(collectionType === PLAYER_COLLECTION_TYPES.PLAYLIST ? collectionId : null);
+    if (collectionType === PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES) {
+      setSelectedFolderId(collectionId === 'root' ? null : collectionId);
+    } else {
+      setSelectedFolderId(null);
+    }
+    handleSelectItem(collectionType, collectionId, index);
+    await playMixItem(queueItem, index);
+  }, [handleSelectItem, playMixItem]);
+
+  const handleSearchSelect = useCallback(async (item) => {
+    if (!item) return;
+    if (item.type === 'show' && item.payload?.id) {
+      setMainPanelView('library');
+      setSelectedPlaylistId(null);
+      setSelectedFolderId(null);
+      setLibraryScopeFolderId(null);
+      handleSelectCollection(PLAYER_COLLECTION_TYPES.TUTTI, `show:${item.payload.id}`);
+      setActiveIndex(-1);
+      return;
+    }
+    if (item.type === 'song' && item.payload) {
+      const mix = item.payload;
+      const showId = String(mix.showId || 'unknown-show');
+      const collectionId = `show:${showId}`;
+      const show = tuttiShows.find((candidate) => String(candidate.id) === showId);
+      const index = (show?.mixes || tuttiMixes).findIndex((candidate) => (
+        String(candidate.projectId || candidate.id) === String(mix.projectId || mix.id)
+      ));
+      setMainPanelView('library');
+      setSelectedPlaylistId(null);
+      setSelectedFolderId(null);
+      setLibraryScopeFolderId(null);
+      await playSearchMix(mix, PLAYER_COLLECTION_TYPES.TUTTI, collectionId, index >= 0 ? index : 0);
+      return;
+    }
+    if (item.type === 'mix' && item.payload) {
+      const mix = item.payload;
+      const ownedIndex = myMixes.findIndex((candidate) => String(candidate.id) === String(mix.id));
+      if (ownedIndex >= 0) {
+        const folderId = mix.folderId || null;
+        const folderMixes = myMixes.filter((candidate) => (candidate.folderId || null) === folderId);
+        const index = folderMixes.findIndex((candidate) => String(candidate.id) === String(mix.id));
+        await playSearchMix(mix, PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES, folderId || 'root', index >= 0 ? index : 0);
+        return;
+      }
+      const globalIndex = globalMixes.findIndex((candidate) => String(candidate.id) === String(mix.id));
+      if (globalIndex >= 0) {
+        await playSearchMix(mix, PLAYER_COLLECTION_TYPES.GLOBAL, 'global', globalIndex);
+      }
+      return;
+    }
+    if (item.type === 'playlist' && item.payload) {
+      handleSelectLibraryEntry({ kind: 'playlist', playlist: item.payload });
+      return;
+    }
+    if (item.type === 'folder' && item.payload) {
+      handleSelectLibraryEntry({ kind: 'folder', folder: item.payload });
+      return;
+    }
+    if (item.type === 'credit') {
+      setSearchType(PLAYER_SEARCH_TYPES.CREDITS);
+      setFocusedSearchCreditId(item.id);
+      setMainPanelView('search');
+      void ensureSearchCredits();
+    }
+  }, [
+    ensureSearchCredits,
+    globalMixes,
+    handleSelectCollection,
+    handleSelectLibraryEntry,
+    myMixes,
+    playSearchMix,
+    tuttiMixes,
+    tuttiShows,
+  ]);
+
+  const handleSearchPlay = useCallback(async (item) => {
+    await handleSearchSelect(item);
+  }, [handleSearchSelect]);
+
   const openCreditsForMix = useCallback(async (mix) => {
     if (!mix?.projectId) return;
     const title = `${mix.musicalNumber ? `${mix.musicalNumber} - ` : ''}${mix.projectName || mix.name || 'Musical number'}`;
@@ -2458,6 +2612,8 @@ function PlayerDashboard({
 
   const handleGoHome = useCallback(() => {
     setMainPanelView('library');
+    setSearchDraft('');
+    setSearchType(PLAYER_SEARCH_TYPES.ALL);
     setLibraryScopeFolderId(null);
     setSelectedPlaylistId(null);
     setSelectedFolderId(null);
@@ -2468,27 +2624,41 @@ function PlayerDashboard({
 
   return (
     <div className="h-full flex flex-col bg-gray-900 text-white">
-      <div className="relative bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center">
+      <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
         <button
           type="button"
           onClick={handleGoHome}
-          className="relative z-10 m-0 leading-none rounded-md hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="m-0 leading-none rounded-md hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           title="Home"
           aria-label="Home"
         >
           <BrandWordmark className="h-9" />
         </button>
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-44">
-          <div className="pointer-events-auto relative w-full max-w-md">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-            <input
-              type="search"
-              placeholder="Search"
-              className="w-full h-9 box-border rounded-md bg-gray-900 border border-gray-700 pl-9 pr-3 text-sm leading-none text-gray-100 placeholder:text-gray-500 focus:outline-none focus:border-gray-500"
+        <div className="flex min-w-0 justify-center overflow-hidden">
+          <div className="w-full min-w-0 max-w-md">
+            <PlayerSearchBar
+              value={searchDraft}
+              onChange={(next) => {
+                setSearchDraft(next);
+                setFocusedSearchCreditId(null);
+                if (!String(next || '').trim()) {
+                  setSearchType(PLAYER_SEARCH_TYPES.ALL);
+                  if (mainPanelView === 'search') setMainPanelView('library');
+                  return;
+                }
+                if (mainPanelView !== 'settings') setMainPanelView('search');
+                void ensureSearchCredits();
+              }}
+              results={searchResults}
+              loading={searchCreditsLoading}
+              onFocus={() => { void ensureSearchCredits(); }}
+              onSubmit={handleSubmitSearch}
+              onSelect={handleSearchSelect}
+              onPlay={handleSearchPlay}
             />
           </div>
         </div>
-        <div className="relative z-10 flex items-center gap-3 shrink-0 ml-auto">
+        <div className="flex items-center gap-3 shrink-0">
           <div className="flex items-center rounded-lg bg-gray-700 p-0.5">
             <button
               type="button"
@@ -2735,6 +2905,18 @@ function PlayerDashboard({
                     />
                   </div>
                 </>
+              ) : mainPanelView === 'search' ? (
+                <PlayerSearchResults
+                  query={searchDraft.trim()}
+                  results={searchResults}
+                  songItems={searchSongItems}
+                  activeType={searchType}
+                  focusedCreditId={focusedSearchCreditId}
+                  onFocusedCreditChange={setFocusedSearchCreditId}
+                  onTypeChange={setSearchType}
+                  onSelect={handleSearchSelect}
+                  onPlay={handleSearchPlay}
+                />
               ) : (
                 <>
                   <div className="flex h-9 min-h-9 max-h-9 shrink-0 items-center overflow-hidden border-b border-gray-700 px-4">

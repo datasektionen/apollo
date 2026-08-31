@@ -102,6 +102,7 @@ import {
   validateAndTransformProjectWrite,
 } from './rbac.js';
 import { snapshotDurationMsSql } from './projectDuration.js';
+import { collectCreditInvolvements, groupInvolvementsByArtist } from './playerSearch.js';
 
 const PROJECT_SNAPSHOT_DURATION_MS_SQL = snapshotDurationMsSql('ph');
 
@@ -3630,6 +3631,61 @@ app.get('/api/player/tutti', requireAuth, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Failed to load tutti mixes' });
+  }
+});
+
+app.get('/api/player/search/credits', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT p.id,
+              p.name,
+              p.musical_number AS "musicalNumber",
+              p.scene_order AS "sceneOrder",
+              p.show_id AS "showId",
+              p.published,
+              p.created_by AS "createdByUserId",
+              p.credits_json AS "projectCredits",
+              s.name AS "showName",
+              s.order_index AS "showOrderIndex",
+              s.producers AS "showProducers",
+              ph.latest_snapshot_json AS "snapshot"
+       FROM projects p
+       LEFT JOIN shows s
+         ON s.id = p.show_id
+       LEFT JOIN project_heads ph
+         ON ph.project_id = p.id`
+    );
+    const permissionMap = await buildProjectPermissionMapForRows(req.user.id, result.rows);
+    const accessible = result.rows
+      .map((row) => attachProjectAccess(row, permissionMap))
+      .filter((row) => canAccessProjectInPlayer(row.access));
+    const catalog = await loadArtistCatalog();
+    const seenShowIds = new Set();
+    const involvements = [];
+
+    accessible.forEach((row) => {
+      const rawCredits = chooseStoredProjectCredits(row.projectCredits, row.snapshot?.credits);
+      const credits = resolveProjectCreditsPayload(rawCredits, row.snapshot, catalog);
+      const showId = String(row.showId || '');
+      const includeShowProducers = Boolean(showId) && !seenShowIds.has(showId);
+      if (includeShowProducers) seenShowIds.add(showId);
+      involvements.push(...collectCreditInvolvements({
+        projectId: row.id,
+        projectName: row.name,
+        musicalNumber: row.musicalNumber,
+        showId,
+        showName: row.showName || '',
+        credits,
+        showProducers: includeShowProducers
+          ? resolveArtistRefs(row.showProducers, catalog)
+          : [],
+      }));
+    });
+
+    res.json({ credits: groupInvolvementsByArtist(involvements) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to load searchable credits' });
   }
 });
 
