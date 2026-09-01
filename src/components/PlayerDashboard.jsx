@@ -1,20 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ChevronRight,
   ChevronsLeftRightEllipsis,
   CircleUserRound,
-  ChevronLeft,
-  ChevronRight,
-  Folder,
+  Clock,
   HeadphoneOff,
   Headphones,
-  ListMusic,
   Loader2,
-  Music,
   Metronome,
   MoreHorizontal,
   Pause,
   Play,
-  Plus,
   Repeat1,
   Repeat,
   Scale,
@@ -26,11 +22,13 @@ import {
 } from 'lucide-react';
 import { BrandWordmark } from './BrandLogo';
 import { PlayerSearchBar, PlayerSearchResults, usePlayerSearchResults } from './PlayerSearch';
+import { PlayerLibrarySidebar } from './PlayerLibrarySidebar';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
 import {
   PLAYER_SEARCH_TYPES,
   buildPlayerSearchItems,
 } from '../utils/playerSearch';
+import { buildMyDeviceQueue, listLibraryFolderMoveTargets } from '../utils/playerLibrary';
 import {
   addPlayerPlaylistItem,
   bootstrapServerProject,
@@ -554,10 +552,9 @@ function PlayerDashboard({
   const [searchCredits, setSearchCredits] = useState([]);
   const [searchCreditsLoading, setSearchCreditsLoading] = useState(false);
   const [focusedSearchCreditId, setFocusedSearchCreditId] = useState(null);
-  const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
   const [libraryScopeFolderId, setLibraryScopeFolderId] = useState(null);
-  const [libraryCreateMenuOpen, setLibraryCreateMenuOpen] = useState(false);
   const [libraryContextMenu, setLibraryContextMenu] = useState(null);
+  const [libraryMoveSubmenuOpen, setLibraryMoveSubmenuOpen] = useState(false);
   const [projectContextMenu, setProjectContextMenu] = useState(null);
   const [creditsDialog, setCreditsDialog] = useState(null);
   const [sliderDragTooltip, setSliderDragTooltip] = useState(null);
@@ -586,7 +583,6 @@ function PlayerDashboard({
   const preferredMetronomeMutedRef = useRef(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeMuted);
   const hasHydratedPlayerPlaybackPreferencesRef = useRef(false);
   const profileMenuRef = useRef(null);
-  const libraryCreateMenuRef = useRef(null);
   const libraryContextMenuRef = useRef(null);
   const projectContextMenuRef = useRef(null);
   const sliderDragRef = useRef(null);
@@ -936,11 +932,9 @@ function PlayerDashboard({
       if (!profileMenuRef.current?.contains(event.target)) {
         setProfileMenuOpen(false);
       }
-      if (!libraryCreateMenuRef.current?.contains(event.target)) {
-        setLibraryCreateMenuOpen(false);
-      }
       if (!libraryContextMenuRef.current?.contains(event.target)) {
         setLibraryContextMenu(null);
+        setLibraryMoveSubmenuOpen(false);
       }
       if (!projectContextMenuRef.current?.contains(event.target)) {
         setProjectContextMenu(null);
@@ -1015,27 +1009,14 @@ function PlayerDashboard({
     };
   }, [resolvePracticeFocusIndexFromSlider]);
 
-  const myDeviceMixesInFolder = useMemo(() => (
-    myMixes.filter((mix) => {
-      const folderId = mix.folderId || null;
-      return folderId === selectedFolderId;
-    })
-  ), [myMixes, selectedFolderId]);
-
   const selectedPlaylistItems = useMemo(() => {
     if (!selectedPlaylistId) return [];
     return playlistItemsByPlaylistId[selectedPlaylistId] || [];
   }, [playlistItemsByPlaylistId, selectedPlaylistId]);
 
   const myDeviceQueue = useMemo(() => (
-    myDeviceMixesInFolder
-      .map((mix) => createQueueItemFromMix(
-        mix,
-        PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES,
-        selectedFolderId || 'root'
-      ))
-      .filter(Boolean)
-  ), [myDeviceMixesInFolder, selectedFolderId]);
+    buildMyDeviceQueue(myMixes, selectedFolderId)
+  ), [myMixes, selectedFolderId]);
 
   const playlistQueue = useMemo(() => (
     selectedPlaylistItems
@@ -2053,59 +2034,6 @@ function PlayerDashboard({
   const activeQueueItem = activeQueueItems[activeIndex] || null;
   const defaultTuttiCollectionId = defaultTuttiShowId ? `show:${defaultTuttiShowId}` : 'tutti';
   const selectedPlaylist = playlists.find((playlist) => playlist.id === selectedPlaylistId) || null;
-  const currentLibraryFolder = folders.find((folder) => folder.id === libraryScopeFolderId) || null;
-  const libraryVisibleItems = useMemo(() => {
-    if (libraryScopeFolderId) {
-      const scopedFolders = folders
-        .filter((folder) => (folder.parentFolderId || null) === libraryScopeFolderId)
-        .map((folder) => ({
-          id: `folder:${folder.id}`,
-          kind: 'folder',
-          name: folder.name,
-          folder,
-        }));
-      const scopedPlaylists = playlists
-        .filter((playlist) => (playlist.folderId || null) === libraryScopeFolderId)
-        .map((playlist) => ({
-          id: `playlist:${playlist.id}`,
-          kind: 'playlist',
-          name: playlist.name,
-          playlist,
-        }));
-      return [...scopedFolders, ...scopedPlaylists];
-    }
-    const playlistMixIds = new Set(
-      Object.values(playlistItemsByPlaylistId || {})
-        .flat()
-        .map((item) => item?.mixId)
-        .filter(Boolean)
-        .map((mixId) => String(mixId))
-    );
-    const rootMixes = myMixes
-      .filter((mix) => (mix.folderId || null) === null)
-      .filter((mix) => !playlistMixIds.has(String(mix.id)))
-      .map((mix) => ({
-        id: `mix:${mix.id}`,
-        kind: 'mix',
-        name: mix.name || mix.projectName || 'Untitled mix',
-        mix,
-      }));
-    const foldersFlat = folders.map((folder) => ({
-      id: `folder:${folder.id}`,
-      kind: 'folder',
-      name: folder.name,
-      folder,
-    }));
-    const playlistsFlat = playlists
-      .filter((playlist) => (playlist.folderId || null) === null)
-      .map((playlist) => ({
-      id: `playlist:${playlist.id}`,
-      kind: 'playlist',
-      name: playlist.name,
-      playlist,
-    }));
-    return [...foldersFlat, ...playlistsFlat, ...rootMixes];
-  }, [folders, libraryScopeFolderId, myMixes, playlistItemsByPlaylistId, playlists]);
   const loopLabel = loopMode === PLAYER_LOOP_MODES.OFF
     ? 'Loop off'
     : (loopMode === PLAYER_LOOP_MODES.ALL ? 'Loop all' : 'Loop one');
@@ -2181,6 +2109,14 @@ function PlayerDashboard({
     });
   }, []);
 
+  const handleLibraryScopeChange = useCallback((folderId) => {
+    const nextFolderId = folderId || null;
+    setLibraryScopeFolderId(nextFolderId);
+    if (!nextFolderId) {
+      setSelectedFolderId(null);
+    }
+  }, []);
+
   const handleSelectLibraryEntry = useCallback((entry) => {
     if (!entry) return;
     setMainPanelView('library');
@@ -2201,17 +2137,32 @@ function PlayerDashboard({
       return;
     }
     if (entry.kind === 'mix' && entry.mix) {
-      const queue = myDeviceQueue;
-      const queueIndex = queue.findIndex((candidate) => String(candidate.mixId || '') === String(entry.mix.id));
-      setSelectedFolderId(null);
+      const mixFolderId = entry.mix.folderId || null;
+      const nextQueue = buildMyDeviceQueue(myMixes, mixFolderId);
+      const queueIndex = nextQueue.findIndex((candidate) => String(candidate.mixId || '') === String(entry.mix.id));
+      setSelectedFolderId(mixFolderId);
       setSelectedPlaylistId(null);
       if (queueIndex >= 0) {
-        handleSelectItem(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES, 'root', queueIndex);
+        handleSelectItem(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES, mixFolderId || 'root', queueIndex);
       } else {
-        handleSelectCollection(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES, 'root');
+        handleSelectCollection(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES, mixFolderId || 'root');
       }
     }
-  }, [handleSelectCollection, handleSelectItem, myDeviceQueue]);
+  }, [handleSelectCollection, handleSelectItem, myMixes]);
+
+  const handlePlayLibraryMix = useCallback(async (mix) => {
+    if (!mix) return;
+    const mixFolderId = mix.folderId || null;
+    const nextQueue = buildMyDeviceQueue(myMixes, mixFolderId);
+    const queueIndex = nextQueue.findIndex((candidate) => String(candidate.mixId || '') === String(mix.id));
+    if (queueIndex < 0) return;
+    setSelectedFolderId(mixFolderId);
+    setSelectedPlaylistId(null);
+    setActiveCollectionType(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES);
+    setActiveCollectionId(mixFolderId || 'root');
+    setActiveIndex(queueIndex);
+    await playMixItem(nextQueue[queueIndex], queueIndex);
+  }, [myMixes, playMixItem]);
 
   const handleClearSearch = useCallback(() => {
     setSearchDraft('');
@@ -2331,11 +2282,51 @@ function PlayerDashboard({
     }
   }, [session]);
 
-  const handleLibraryContextAction = useCallback(async (action) => {
-    const entry = libraryContextMenu?.entry;
+  const handleLibraryContextAction = useCallback(async (action, payload) => {
+    const entry = libraryContextMenu?.entry || null;
     setLibraryContextMenu(null);
-    if (!entry) return;
+    setLibraryMoveSubmenuOpen(false);
     try {
+      if (action === 'create_folder') {
+        await handleCreateFolder();
+        return;
+      }
+      if (action === 'create_playlist') {
+        await handleCreatePlaylist();
+        return;
+      }
+      if (!entry) return;
+
+      const moveFolderOrPlaylist = async (folderId) => {
+        if (entry.kind === 'folder' && entry.folder) {
+          await updatePlayerFolder(entry.folder.id, { parentFolderId: folderId }, session);
+        } else if (entry.kind === 'playlist' && entry.playlist) {
+          await updatePlayerPlaylist(entry.playlist.id, { folderId }, session);
+        } else {
+          return;
+        }
+        await refreshPlayerData();
+      };
+
+      if (action === 'move_to_folder') {
+        await moveFolderOrPlaylist(payload ?? null);
+        return;
+      }
+
+      if (action === 'move_to_new_folder') {
+        const name = window.prompt('Folder name');
+        const normalized = String(name || '').trim();
+        if (!normalized) return;
+        let parentFolderId = libraryScopeFolderId || null;
+        if (entry.kind === 'folder' && entry.folder?.id === parentFolderId) {
+          parentFolderId = entry.folder.parentFolderId || null;
+        }
+        const folder = await createPlayerFolder({ name: normalized, parentFolderId }, session);
+        if (!folder?.id) return;
+        await moveFolderOrPlaylist(folder.id);
+        return;
+      }
+
       if (entry.kind === 'folder' && entry.folder) {
         if (action === 'rename') {
           await handleRenameFolder(entry.folder);
@@ -2343,21 +2334,6 @@ function PlayerDashboard({
         }
         if (action === 'delete') {
           await handleDeleteFolder(entry.folder);
-          return;
-        }
-        if (action === 'move') {
-          const destination = selectFromPrompt(
-            `Move folder "${entry.folder.name}" to`,
-            [
-              { value: '__root__', label: 'Root' },
-              ...folders
-                .filter((folder) => folder.id !== entry.folder.id)
-                .map((folder) => ({ value: folder.id, label: folder.name })),
-            ]
-          );
-          if (destination == null) return;
-          await updatePlayerFolder(entry.folder.id, { parentFolderId: destination === '__root__' ? null : destination }, session);
-          await refreshPlayerData();
         }
         return;
       }
@@ -2369,20 +2345,8 @@ function PlayerDashboard({
         }
         if (action === 'delete') {
           await handleDeletePlaylist(entry.playlist);
-          return;
         }
-        if (action === 'move') {
-          const destination = selectFromPrompt(
-            `Move playlist "${entry.playlist.name}" to`,
-            [
-              { value: '__root__', label: 'Root' },
-              ...folders.map((folder) => ({ value: folder.id, label: folder.name })),
-            ]
-          );
-          if (destination == null) return;
-          await updatePlayerPlaylist(entry.playlist.id, { folderId: destination === '__root__' ? null : destination }, session);
-          await refreshPlayerData();
-        }
+        return;
       }
 
       if (entry.kind === 'mix' && entry.mix) {
@@ -2461,7 +2425,8 @@ function PlayerDashboard({
       setError(contextError.message || 'Library action failed');
     }
   }, [
-    folders,
+    handleCreateFolder,
+    handleCreatePlaylist,
     handleDeleteFolder,
     handleDeleteMix,
     handleDeletePlaylist,
@@ -2469,6 +2434,7 @@ function PlayerDashboard({
     handleRenameMix,
     handleRenamePlaylist,
     libraryContextMenu,
+    libraryScopeFolderId,
     openCreditsForMix,
     onOpenAdvancedMix,
     playlistItemsByPlaylistId,
@@ -2491,8 +2457,8 @@ function PlayerDashboard({
     if (!libraryContextMenu) return null;
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1280;
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 720;
-    const x = Math.max(8, Math.min(libraryContextMenu.x, viewportWidth - 172));
-    const y = Math.max(8, Math.min(libraryContextMenu.y, viewportHeight - 240));
+    const x = Math.max(8, Math.min(libraryContextMenu.x, viewportWidth - 188));
+    const y = Math.max(8, Math.min(libraryContextMenu.y, viewportHeight - 320));
     return { left: `${x}px`, top: `${y}px` };
   }, [libraryContextMenu]);
 
@@ -2757,140 +2723,25 @@ function PlayerDashboard({
           ) : null}
 
           <div className="flex-1 min-h-0 flex gap-3">
-            <div className={`${isLibraryCollapsed ? 'w-14' : 'w-80'} shrink-0 min-h-0 rounded-lg border border-gray-700 bg-gray-800/80 flex flex-col overflow-hidden transition-all duration-200`}>
-              <div className="flex h-9 min-h-9 max-h-9 shrink-0 items-center justify-between overflow-hidden border-b border-gray-700 px-3">
-                {!isLibraryCollapsed ? (
-                  libraryScopeFolderId ? (
-                    <button
-                      onClick={() => setLibraryScopeFolderId(null)}
-                      className="inline-flex min-w-0 items-center gap-1 rounded px-1 text-sm font-semibold leading-none hover:bg-gray-700"
-                      title="Back to full library"
-                    >
-                      <ChevronLeft size={13} className="shrink-0" />
-                      <span className="truncate">{currentLibraryFolder?.name || 'My Library'}</span>
-                    </button>
-                  ) : (
-                    <h2 className="m-0 text-sm font-semibold leading-none">My Library</h2>
-                  )
-                ) : (
-                  <span className="text-sm font-semibold">L</span>
-                )}
-                <div className="flex items-center gap-1">
-                  {!isLibraryCollapsed ? (
-                    <div className="relative" ref={libraryCreateMenuRef}>
-                      <button
-                        onClick={() => setLibraryCreateMenuOpen((previous) => !previous)}
-                        className="rounded bg-gray-700 hover:bg-gray-600 p-1.5"
-                        title="Create"
-                      >
-                        <Plus size={13} />
-                      </button>
-                      {libraryCreateMenuOpen ? (
-                        <div className="absolute right-0 top-full mt-1 min-w-36 rounded-md border border-gray-700 bg-gray-800 shadow-xl overflow-hidden z-30">
-                          <button
-                            onClick={async () => {
-                              setLibraryCreateMenuOpen(false);
-                              await handleCreateFolder();
-                            }}
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-                          >
-                            Create Folder
-                          </button>
-                          <button
-                            onClick={async () => {
-                              setLibraryCreateMenuOpen(false);
-                              await handleCreatePlaylist();
-                            }}
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-                          >
-                            Create Playlist
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  <button
-                    onClick={() => setIsLibraryCollapsed((previous) => !previous)}
-                    className="rounded bg-gray-700 hover:bg-gray-600 p-1.5"
-                    title={isLibraryCollapsed ? 'Expand library' : 'Collapse library'}
-                  >
-                    {isLibraryCollapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
-                  </button>
-                </div>
-              </div>
-
-              {!isLibraryCollapsed ? (
-                <div className="flex-1 overflow-auto p-2 space-y-1">
-                  {libraryVisibleItems.map((entry) => {
-                    const isActive = entry.kind === 'folder'
-                      ? (
-                        activeCollectionType === PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES
-                        && activeCollectionId === (entry.folder?.id || 'root')
-                      )
-                      : (
-                        entry.kind === 'playlist'
-                          ? (
-                            activeCollectionType === PLAYER_COLLECTION_TYPES.PLAYLIST
-                            && activeCollectionId === entry.playlist?.id
-                          )
-                          : (
-                            activeCollectionType === PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES
-                            && activeCollectionId === 'root'
-                            && String(activeQueueItem?.mixId || '') === String(entry.mix?.id || '')
-                          )
-                      );
-                    const EntryIcon = entry.kind === 'folder'
-                      ? Folder
-                      : (entry.kind === 'playlist' ? ListMusic : Play);
-                    const subtitle = entry.kind === 'playlist'
-                      ? 'Playlist'
-                      : (entry.kind === 'mix' ? `${entry.mix?.musicalNumber || '0.0'} - Mix` : 'Folder');
-                    return (
-                      <div
-                        key={entry.id}
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          setLibraryContextMenu({ entry, x: event.clientX, y: event.clientY });
-                        }}
-                        className={`group flex items-center gap-1 rounded-md pr-1 transition-colors ${
-                          isActive ? 'bg-blue-700/30' : 'hover:bg-gray-700'
-                        }`}
-                      >
-                        <button
-                          onClick={() => handleSelectLibraryEntry(entry)}
-                          onDoubleClick={async () => {
-                            if (entry.kind === 'mix' && entry.mix) {
-                              const queue = myDeviceQueue;
-                              const queueIndex = queue.findIndex((candidate) => String(candidate.mixId || '') === String(entry.mix.id));
-                              if (queueIndex >= 0) {
-                                setSelectedFolderId(null);
-                                setSelectedPlaylistId(null);
-                                setActiveCollectionType(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES);
-                                setActiveCollectionId('root');
-                                setActiveIndex(queueIndex);
-                                await playQueueItem(queueIndex);
-                              }
-                            }
-                          }}
-                          className="flex-1 min-w-0 text-left px-2 py-1.5"
-                        >
-                          <div className="flex items-center gap-4">
-                            <EntryIcon size={18} className="text-gray-400 shrink-0" />
-                            <div className="min-w-0">
-                              <div className="text-sm truncate">{entry.name}</div>
-                              <div className="text-[11px] text-gray-500 truncate">{subtitle}</div>
-                            </div>
-                          </div>
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {!libraryVisibleItems.length ? (
-                    <div className="text-xs text-gray-500 px-2 py-2">No library items here.</div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
+            <PlayerLibrarySidebar
+              folders={folders}
+              playlists={playlists}
+              myMixes={myMixes}
+              playlistItemsByPlaylistId={playlistItemsByPlaylistId}
+              libraryScopeFolderId={libraryScopeFolderId}
+              onLibraryScopeChange={handleLibraryScopeChange}
+              activeCollectionType={activeCollectionType}
+              activeCollectionId={activeCollectionId}
+              activeQueueItem={activeQueueItem}
+              onSelectEntry={handleSelectLibraryEntry}
+              onPlayMix={handlePlayLibraryMix}
+              onCreateFolder={handleCreateFolder}
+              onCreatePlaylist={handleCreatePlaylist}
+              onContextMenu={(entry, event) => {
+                setLibraryMoveSubmenuOpen(false);
+                setLibraryContextMenu({ entry, x: event.clientX, y: event.clientY });
+              }}
+            />
 
             <div className="flex-1 min-w-0 rounded-lg border border-gray-700 bg-gray-800/80 flex flex-col overflow-hidden">
               {mainPanelView === 'settings' ? (
@@ -2935,8 +2786,8 @@ function PlayerDashboard({
                 />
               ) : (
                 <>
-                  <div className="flex h-9 min-h-9 max-h-9 shrink-0 items-center overflow-hidden border-b border-gray-700 px-4">
-                    <h2 className="m-0 text-sm font-semibold leading-none truncate">
+                  <div className="flex h-11 min-h-11 max-h-11 shrink-0 items-center overflow-hidden border-b border-gray-700 px-4">
+                    <h2 className="m-0 truncate text-base font-semibold leading-none">
                       {selectedPlaylist && activeCollectionType === PLAYER_COLLECTION_TYPES.PLAYLIST
                         ? selectedPlaylist.name
                         : (activeTuttiShow?.name || 'Show')}
@@ -2945,7 +2796,11 @@ function PlayerDashboard({
                   <div className="grid grid-cols-[56px_minmax(0,1fr)_96px_34px] px-4 py-2 text-xs text-gray-400 border-b border-gray-700">
                     <div>#</div>
                     <div>Title</div>
-                    <div className="text-right">Length</div>
+                    <div className="flex justify-end">
+                      <span title="Length" aria-label="Length" className="inline-flex -translate-x-1">
+                        <Clock size={14} />
+                      </span>
+                    </div>
                     <div />
                   </div>
                   <div className="flex-1 overflow-auto">
@@ -3190,76 +3045,151 @@ function PlayerDashboard({
       {libraryContextMenu ? (
         <div
           ref={libraryContextMenuRef}
-          className="fixed z-50 min-w-[160px] rounded-md border border-gray-700 bg-gray-800 shadow-xl overflow-hidden"
+          className="fixed z-50"
           style={libraryContextMenuStyle || undefined}
         >
-          {libraryContextMenu.entry?.kind === 'mix' ? (
-            <>
-              <button
-                onClick={async () => handleLibraryContextAction('credits')}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-              >
-                Show Credits
-              </button>
-              <button
-                onClick={async () => handleLibraryContextAction('rename')}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-              >
-                Rename
-              </button>
-              <button
-                onClick={async () => handleLibraryContextAction('move')}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-              >
-                Move
-              </button>
-	              <button
-	                onClick={async () => handleLibraryContextAction('duplicate')}
-	                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-	              >
-	                Create duplicate
-	              </button>
-	              <button
-	                onClick={async () => handleLibraryContextAction('edit_mix')}
-	                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-	              >
-	                Edit mix
-	              </button>
-	              <button
-	                onClick={async () => handleLibraryContextAction('delete')}
-	                className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-gray-700"
-              >
-                Delete
-              </button>
-              <button
-                onClick={async () => handleLibraryContextAction('new_from_project')}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-              >
-                Create new mix from this project
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={async () => handleLibraryContextAction('rename')}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-              >
-                Rename
-              </button>
-              <button
-                onClick={async () => handleLibraryContextAction('move')}
-                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
-              >
-                Move
-              </button>
-              <button
-                onClick={async () => handleLibraryContextAction('delete')}
-                className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-gray-700"
-              >
-                Delete
-              </button>
-            </>
-          )}
+          <div className="min-w-[168px] rounded-md border border-gray-700 bg-gray-800 py-1 text-white shadow-xl">
+            <button
+              type="button"
+              onClick={async () => handleLibraryContextAction('create_playlist')}
+              className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+            >
+              Create playlist
+            </button>
+            <button
+              type="button"
+              onClick={async () => handleLibraryContextAction('create_folder')}
+              className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+            >
+              Create folder
+            </button>
+            {libraryContextMenu.entry ? (
+              <div className="my-1 border-t border-gray-700" />
+            ) : null}
+            {libraryContextMenu.entry?.kind === 'mix' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('credits')}
+                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                >
+                  Show Credits
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('rename')}
+                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('move')}
+                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                >
+                  Move
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('duplicate')}
+                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                >
+                  Create duplicate
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('edit_mix')}
+                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                >
+                  Edit mix
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('delete')}
+                  className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-gray-700"
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('new_from_project')}
+                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                >
+                  Create new mix from this project
+                </button>
+              </>
+            ) : libraryContextMenu.entry ? (
+              <>
+                <div
+                  className="relative"
+                  onMouseEnter={() => setLibraryMoveSubmenuOpen(true)}
+                  onMouseLeave={() => setLibraryMoveSubmenuOpen(false)}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setLibraryMoveSubmenuOpen((previous) => !previous)}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                  >
+                    Move to folder
+                    <ChevronRight size={14} className="shrink-0 text-gray-400" />
+                  </button>
+                  {libraryMoveSubmenuOpen ? (
+                    <div
+                      className={`absolute top-0 z-[60] max-h-64 min-w-[160px] overflow-auto rounded-md border border-gray-700 bg-gray-800 py-1 shadow-xl ${
+                        libraryContextMenu.x > (typeof window !== 'undefined' ? window.innerWidth - 320 : 0)
+                          ? 'right-full -mr-px'
+                          : 'left-full -ml-px'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={async () => handleLibraryContextAction('move_to_new_folder')}
+                        className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                      >
+                        New folder
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => handleLibraryContextAction('move_to_folder', null)}
+                        className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                      >
+                        Your Library
+                      </button>
+                      {listLibraryFolderMoveTargets(
+                        folders,
+                        libraryContextMenu.entry?.kind === 'folder'
+                          ? libraryContextMenu.entry.folder?.id
+                          : null
+                      ).map((folder) => (
+                        <button
+                          key={folder.id}
+                          type="button"
+                          onClick={async () => handleLibraryContextAction('move_to_folder', folder.id)}
+                          className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                        >
+                          {folder.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('rename')}
+                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('delete')}
+                  className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-gray-700"
+                >
+                  Delete
+                </button>
+              </>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -3499,7 +3429,7 @@ function PlayerDashboard({
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(380px,760px)_minmax(0,1fr)] items-center gap-4">
           <div className="min-w-0 text-lg font-semibold text-gray-200">
             <div className="truncate" title={nowPlayingLabel || activeQueueItem?.name || ''}>
-              {nowPlayingLabel || activeQueueItem?.name || 'No mix playing'}
+              {nowPlayingLabel || activeQueueItem?.name || ''}
             </div>
           </div>
 
