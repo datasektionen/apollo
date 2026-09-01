@@ -73,7 +73,7 @@ import {
   PLAYER_COLLECTION_TYPES,
   PLAYER_LOOP_MODES,
 } from '../types/player';
-import { TRACK_ROLE_METRONOME } from '../utils/trackRoles';
+import { TRACK_ROLE_METRONOME, isMetronomeRole } from '../utils/trackRoles';
 import { usePlaybackDeviceSettings, useAudioDeviceAutoPause } from '../hooks/usePlaybackDeviceSettings';
 import {
   finishLoadProgress,
@@ -123,11 +123,24 @@ const PRACTICE_FOCUS_NUMERIC_STEPS = ADVANCED_MIX_PRACTICE_FOCUS_NUMERIC_STEPS;
 const PAN_TRACK_WIDTH_PX = 160;
 const PAN_INNER_TRACK_WIDTH_PX = 134;
 const APP_SETTINGS_STORAGE_KEY = 'apollo.settings';
+const METRONOME_VOLUME_UNITY = 80;
 const DEFAULT_PLAYER_PLAYBACK_PREFERENCES = {
   practicePanRange: 100,
   practiceFocusControl: PRACTICE_FOCUS_DEFAULT_INDEX,
-  metronomeMuted: false,
+  metronomeVolume: METRONOME_VOLUME_UNITY,
 };
+
+function clampMetronomeVolume(value, fallback = METRONOME_VOLUME_UNITY) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function metronomeVolumeToScale(volume) {
+  const clamped = clampMetronomeVolume(volume, 0);
+  if (clamped <= 0) return 0;
+  return clamped / METRONOME_VOLUME_UNITY;
+}
 
 function normalizePlayerPlaybackPreferences(settings = {}) {
   const practicePanRange = Number(
@@ -136,6 +149,10 @@ function normalizePlayerPlaybackPreferences(settings = {}) {
   const practiceFocusControl = Number(
     settings.playerPracticeFocusControl ?? settings.practiceFocusControl
   );
+  const metronomeVolume = Number(
+    settings.playerMetronomeVolume ?? settings.metronomeVolume
+  );
+  const legacyMetronomeMuted = settings.playerMetronomeMuted === true || settings.metronomeMuted === true;
   return {
     practicePanRange: Number.isFinite(practicePanRange)
       ? Math.max(0, Math.min(200, Math.round(practicePanRange)))
@@ -143,7 +160,9 @@ function normalizePlayerPlaybackPreferences(settings = {}) {
     practiceFocusControl: Number.isFinite(practiceFocusControl)
       ? Math.max(PRACTICE_FOCUS_MIN_INDEX, Math.min(PRACTICE_FOCUS_MAX_INDEX, Math.round(practiceFocusControl)))
       : DEFAULT_PLAYER_PLAYBACK_PREFERENCES.practiceFocusControl,
-    metronomeMuted: settings.playerMetronomeMuted === true || settings.metronomeMuted === true,
+    metronomeVolume: Number.isFinite(metronomeVolume)
+      ? clampMetronomeVolume(metronomeVolume)
+      : (legacyMetronomeMuted ? 0 : DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeVolume),
   };
 }
 
@@ -182,7 +201,13 @@ function reorderPlaylistItems(items, fromIndex, slotIndex) {
 }
 
 function getSnapshotMetronomeTracks(snapshot) {
-  return (snapshot?.tracks || []).filter((track) => track?.role === TRACK_ROLE_METRONOME);
+  const tracks = snapshot?.tracks || [];
+  if (!tracks.length) return [];
+  const mix = getEffectiveTrackMix(snapshot);
+  return tracks.filter((track) => (
+    isMetronomeRole(track?.role)
+    || mix.statesByTrackId.get(track.id)?.effectiveRole === TRACK_ROLE_METRONOME
+  ));
 }
 
 function hasSnapshotMetronome(snapshot) {
@@ -196,20 +221,24 @@ function withSnapshotMetronomeMuted(snapshot, muted) {
   return {
     ...snapshot,
     tracks: (snapshot.tracks || []).map((track) => (
-      track?.role === TRACK_ROLE_METRONOME
+      isMetronomeRole(track?.role)
         ? { ...track, muted: Boolean(muted) }
         : track
     )),
   };
 }
 
-function applyLiveMetronomeMix(snapshot) {
+function applyLiveMetronomeMix(snapshot, volume = METRONOME_VOLUME_UNITY) {
   const mix = getEffectiveTrackMix(snapshot);
+  const scale = metronomeVolumeToScale(volume);
   getSnapshotMetronomeTracks(snapshot).forEach((track) => {
     const state = mix.statesByTrackId.get(track.id);
+    const baseGain = state?.audible === true && Number.isFinite(state.effectiveGain)
+      ? state.effectiveGain
+      : 0;
     audioManager.updateTrackMix(
       track.id,
-      state?.audible === true && Number.isFinite(state.effectiveGain) ? state.effectiveGain : 0,
+      baseGain * scale,
       Number.isFinite(state?.effectivePan) ? state.effectivePan : 0
     );
   });
@@ -543,8 +572,7 @@ function PlayerDashboard({
   const [practicePanRange, setPracticePanRange] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.practicePanRange);
   const [practiceFocusControl, setPracticeFocusControl] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.practiceFocusControl);
   const [hasRealtimeMetronome, setHasRealtimeMetronome] = useState(false);
-  const [isRealtimeMetronomeMuted, setIsRealtimeMetronomeMuted] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeMuted);
-  const [preferredMetronomeMuted, setPreferredMetronomeMuted] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeMuted);
+  const [metronomeVolume, setMetronomeVolume] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeVolume);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mainPanelView, setMainPanelView] = useState('library');
   const [searchDraft, setSearchDraft] = useState('');
@@ -578,9 +606,10 @@ function PlayerDashboard({
     durationMs: 0,
   });
   const realtimeEndInFlightRef = useRef(false);
-  const lastNonZeroVolumeRef = useRef(Math.max(5, volume));
+  const lastNonZeroVolumeRef = useRef(80);
+  const lastNonZeroMetronomeVolumeRef = useRef(METRONOME_VOLUME_UNITY);
+  const lastNumericPracticeFocusIndexRef = useRef(PRACTICE_FOCUS_DEFAULT_INDEX);
   const playQueueItemRef = useRef(null);
-  const preferredMetronomeMutedRef = useRef(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeMuted);
   const hasHydratedPlayerPlaybackPreferencesRef = useRef(false);
   const profileMenuRef = useRef(null);
   const libraryContextMenuRef = useRef(null);
@@ -805,6 +834,13 @@ function PlayerDashboard({
       || applyRealtimeGroupMixSettings(snapshot, item, controlOverrides)
   ), [applyRealtimeAdvancedMixSettings, applyRealtimeGroupMixSettings, applyRealtimePracticeSettings]);
 
+  const applyPlaybackMixSettings = useCallback((snapshot, item, controlOverrides = null) => {
+    applyRealtimeMixSettings(snapshot, item, controlOverrides);
+    if (hasSnapshotMetronome(snapshot)) {
+      applyLiveMetronomeMix(snapshot, metronomeVolume);
+    }
+  }, [applyRealtimeMixSettings, metronomeVolume]);
+
   const handlePlaybackEnded = useCallback(async () => {
     const queue = activeQueueRef.current || [];
     const currentIdx = activeIndexRef.current;
@@ -870,10 +906,6 @@ function PlayerDashboard({
   }, [volume]);
 
   useEffect(() => {
-    preferredMetronomeMutedRef.current = preferredMetronomeMuted;
-  }, [preferredMetronomeMuted]);
-
-  useEffect(() => {
     const saved = localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
     if (!saved) {
       hasHydratedPlayerPlaybackPreferencesRef.current = true;
@@ -885,8 +917,13 @@ function PlayerDashboard({
       const normalized = normalizePlayerPlaybackPreferences(parsed);
       setPracticePanRange(normalized.practicePanRange);
       setPracticeFocusControl(normalized.practiceFocusControl);
-      setPreferredMetronomeMuted(normalized.metronomeMuted);
-      setIsRealtimeMetronomeMuted(normalized.metronomeMuted);
+      const hydratedFocusStep = PRACTICE_FOCUS_STEPS[
+        Math.max(PRACTICE_FOCUS_MIN_INDEX, Math.min(PRACTICE_FOCUS_MAX_INDEX, normalized.practiceFocusControl))
+      ];
+      if (typeof hydratedFocusStep === 'number') {
+        lastNumericPracticeFocusIndexRef.current = normalized.practiceFocusControl;
+      }
+      setMetronomeVolume(normalized.metronomeVolume);
     } catch (error) {
       reportUserError(
         'Failed to read player playback preferences from local storage. Defaults will be used.',
@@ -916,16 +953,16 @@ function PlayerDashboard({
     const normalized = normalizePlayerPlaybackPreferences({
       playerPracticePanRange: practicePanRange,
       playerPracticeFocusControl: practiceFocusControl,
-      playerMetronomeMuted: preferredMetronomeMuted,
+      playerMetronomeVolume: metronomeVolume,
     });
 
     localStorage.setItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify({
       ...existing,
       playerPracticePanRange: normalized.practicePanRange,
       playerPracticeFocusControl: normalized.practiceFocusControl,
-      playerMetronomeMuted: normalized.metronomeMuted,
+      playerMetronomeVolume: normalized.metronomeVolume,
     }));
-  }, [practiceFocusControl, practicePanRange, preferredMetronomeMuted]);
+  }, [metronomeVolume, practiceFocusControl, practicePanRange]);
 
   useEffect(() => {
     const handleDocumentClick = (event) => {
@@ -945,10 +982,29 @@ function PlayerDashboard({
   }, []);
 
   useEffect(() => {
-    if (volume > 0) {
-      lastNonZeroVolumeRef.current = Math.max(5, Number(volume) || 5);
+    if (volume > 0 && sliderDragRef.current?.kind !== 'master') {
+      lastNonZeroVolumeRef.current = Math.max(1, Math.min(100, Math.round(Number(volume) || 0)));
     }
   }, [volume]);
+
+  useEffect(() => {
+    if (metronomeVolume > 0 && sliderDragRef.current?.kind !== 'metronome') {
+      lastNonZeroMetronomeVolumeRef.current = Math.max(
+        1,
+        Math.min(100, Math.round(Number(metronomeVolume) || 0))
+      );
+    }
+  }, [metronomeVolume]);
+
+  useEffect(() => {
+    const step = getPracticeFocusStep(practiceFocusControl);
+    if (typeof step === 'number') {
+      lastNumericPracticeFocusIndexRef.current = Math.max(
+        PRACTICE_FOCUS_MIN_INDEX,
+        Math.min(PRACTICE_FOCUS_MAX_INDEX, Math.round(Number(practiceFocusControl) || 0))
+      );
+    }
+  }, [getPracticeFocusStep, practiceFocusControl]);
 
   useEffect(() => {
     const handleMove = (event) => {
@@ -985,6 +1041,8 @@ function PlayerDashboard({
       sliderDragRef.current.lastValue = next;
       if (kind === 'master') {
         setVolume(next);
+      } else if (kind === 'metronome') {
+        setMetronomeVolume(next);
       } else if (kind === 'focus') {
         const nextFocusIndex = resolvePracticeFocusIndexFromSlider(next);
         setPracticeFocusControl(nextFocusIndex);
@@ -996,7 +1054,23 @@ function PlayerDashboard({
       setSliderDragTooltip({ kind, value: next });
     };
 
+    const rememberNonZeroVolume = (ref, value) => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0) return;
+      ref.current = Math.max(1, Math.min(100, Math.round(numeric)));
+    };
+
     const handleUp = () => {
+      const drag = sliderDragRef.current;
+      if (drag?.kind === 'master' || drag?.kind === 'metronome') {
+        const ref = drag.kind === 'master' ? lastNonZeroVolumeRef : lastNonZeroMetronomeVolumeRef;
+        const finalValue = Number(drag.lastValue);
+        if (finalValue > 0) {
+          rememberNonZeroVolume(ref, finalValue);
+        } else {
+          rememberNonZeroVolume(ref, drag.startValue);
+        }
+      }
       sliderDragRef.current = null;
       setSliderDragTooltip(null);
     };
@@ -1186,6 +1260,7 @@ function PlayerDashboard({
 
     setIsRendering(true);
     setError('');
+    setHasRealtimeMetronome(false);
     const generation = ++playGenerationRef.current;
     const isCancelled = () => playGenerationRef.current !== generation;
     const progressId = startLoadProgress({
@@ -1218,6 +1293,7 @@ function PlayerDashboard({
       }
       if (isCancelled()) throw createStaleAudioLoadError();
       summarizeProjectForLoadLog(snapshot, 'Project snapshot');
+      const songHasMetronome = hasSnapshotMetronome(snapshot);
       await withLoadStep('Stop current playback', async () => {
         audioManager.stop();
       });
@@ -1236,13 +1312,14 @@ function PlayerDashboard({
         async () => buildAdvancedPlaybackSnapshot(snapshot, item)
       );
       summarizeProjectForLoadLog(mixSnapshot, 'Playback mix snapshot');
-      const snapshotHasMetronome = hasSnapshotMetronome(mixSnapshot);
-      const metronomeMuted = snapshotHasMetronome ? preferredMetronomeMutedRef.current : false;
-      const playbackSnapshot = withSnapshotMetronomeMuted(mixSnapshot, metronomeMuted);
+      const snapshotHasMetronome = songHasMetronome || hasSnapshotMetronome(mixSnapshot);
+      const playbackSnapshot = snapshotHasMetronome
+        ? withSnapshotMetronomeMuted(mixSnapshot, false)
+        : mixSnapshot;
       const durationMs = computeSnapshotDurationMs(playbackSnapshot);
       setDurationSec(Math.max(0, durationMs / 1000));
       const metronomeNote = snapshotHasMetronome
-        ? (metronomeMuted ? ' · metronome muted' : ' · metronome on')
+        ? (metronomeVolume <= 0 ? ' · metronome muted' : ` · metronome ${metronomeVolume}`)
         : '';
       logLoadProgress(`Playback duration ${formatDurationMs(durationMs)}${metronomeNote}`);
       const liveMixScope = isAdvancedMixPreset(item.presetId) ? 'advanced-mix' : 'player';
@@ -1262,8 +1339,7 @@ function PlayerDashboard({
         );
       }
       await ensureSnapshotAudioBuffers(playbackSnapshot, liveMixBlobIds, isCancelled);
-      setHasRealtimeMetronome(snapshotHasMetronome);
-      setIsRealtimeMetronomeMuted(snapshotHasMetronome ? metronomeMuted : false);
+      setHasRealtimeMetronome(songHasMetronome);
 
       const realtimeControlOverrides = isGroupMixPresetId(item.presetId)
         ? createEditableMixSource(playbackSnapshot, item).controls
@@ -1281,10 +1357,7 @@ function PlayerDashboard({
         'Start Web Audio graph',
         async () => audioManager.play(playbackSnapshot, 0, getPlayerPlayOptions({ liveMixableTrackIds }))
       );
-      applyRealtimeMixSettings(playbackSnapshot, item, realtimeControlOverrides);
-      if (snapshotHasMetronome) {
-        applyLiveMetronomeMix(playbackSnapshot);
-      }
+      applyPlaybackMixSettings(playbackSnapshot, item, realtimeControlOverrides);
       realtimePlaybackRef.current = {
         project: playbackSnapshot,
         item,
@@ -1300,7 +1373,6 @@ function PlayerDashboard({
       audioManager.stop();
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
       setHasRealtimeMetronome(false);
-      setIsRealtimeMetronomeMuted(false);
       setIsPlaying(false);
       setError(error.message || 'Playback failed');
     } finally {
@@ -1309,7 +1381,7 @@ function PlayerDashboard({
         setIsRendering(false);
       }
     }
-  }, [applyPlaybackOutputConfig, applyRealtimeMixSettings, ensureSnapshotAudioBuffers, session, volume]);
+  }, [applyPlaybackMixSettings, applyPlaybackOutputConfig, ensureSnapshotAudioBuffers, metronomeVolume, session, volume]);
 
   const playQueueItem = useCallback(async (index) => {
     if (index < 0 || index >= activeQueueItems.length) return;
@@ -1358,11 +1430,11 @@ function PlayerDashboard({
     const current = realtimePlaybackRef.current;
     if (!current?.project || !current?.item) return;
     try {
-      applyRealtimeMixSettings(current.project, current.item);
+      applyPlaybackMixSettings(current.project, current.item);
     } catch (applyError) {
       setError(applyError.message || 'Failed to apply practice mix settings');
     }
-  }, [applyRealtimeMixSettings]);
+  }, [applyPlaybackMixSettings]);
 
   const handleSelectCollection = useCallback((type, id = null) => {
     setMainPanelView('library');
@@ -1397,14 +1469,14 @@ function PlayerDashboard({
       await applyPlaybackOutputConfig();
       audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
       await audioManager.play(current.project, resumeMs, getPlayerPlayOptions(current));
-      applyRealtimeMixSettings(current.project, current.item);
+      applyPlaybackMixSettings(current.project, current.item);
       setIsPlaying(true);
       return;
     }
 
     const startIndex = activeIndex >= 0 ? activeIndex : 0;
     await playQueueItem(startIndex);
-  }, [activeIndex, activeQueueItems.length, applyPlaybackOutputConfig, applyRealtimeMixSettings, currentTimeSec, durationSec, isPlaying, playQueueItem, volume]);
+  }, [activeIndex, activeQueueItems.length, applyPlaybackMixSettings, applyPlaybackOutputConfig, currentTimeSec, durationSec, isPlaying, playQueueItem, volume]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -1471,7 +1543,7 @@ function PlayerDashboard({
       const current = realtimePlaybackRef.current;
       if (isPlaying) {
         await audioManager.seek(current.project, 0, getPlayerPlayOptions(current));
-        applyRealtimeMixSettings(current.project, current.item);
+        applyPlaybackMixSettings(current.project, current.item);
       } else {
         await audioManager.pause(0);
       }
@@ -1485,7 +1557,7 @@ function PlayerDashboard({
         : 0;
     }
     await playQueueItem(previousIndex);
-  }, [activeIndex, activeQueueItems.length, applyRealtimeMixSettings, currentTimeSec, isPlaying, loopMode, playQueueItem]);
+  }, [activeIndex, activeQueueItems.length, applyPlaybackMixSettings, currentTimeSec, isPlaying, loopMode, playQueueItem]);
 
   const previewTimelineTime = useCallback((nextTimeSec) => {
     const { timeSec } = clampPlayerSeek(nextTimeSec, durationSecRef.current);
@@ -1506,14 +1578,14 @@ function PlayerDashboard({
     try {
       if (isPlayingRef.current) {
         await audioManager.seek(current.project, timeMs, getPlayerPlayOptions(current));
-        applyRealtimeMixSettings(current.project, current.item);
+        applyPlaybackMixSettings(current.project, current.item);
       } else {
         await audioManager.pause(timeMs);
       }
     } catch (seekError) {
       setError(seekError.message || 'Seek failed');
     }
-  }, [applyRealtimeMixSettings]);
+  }, [applyPlaybackMixSettings]);
 
   const handleSeek = useCallback((nextTimeSec, event = null) => {
     const scrub = timelineScrubRef.current;
@@ -1569,33 +1641,60 @@ function PlayerDashboard({
     });
   }, [commitTimelineSeek]);
 
+  const restoreStoredVolume = useCallback((ref, fallback) => {
+    const stored = Number(ref.current);
+    if (Number.isFinite(stored) && stored > 0) {
+      return Math.max(1, Math.min(100, Math.round(stored)));
+    }
+    return fallback;
+  }, []);
+
   const handleToggleMute = useCallback(() => {
     setVolume((previous) => {
       const numeric = Number(previous) || 0;
       if (numeric <= 0) {
-        return Math.max(5, Number(lastNonZeroVolumeRef.current) || 5);
+        return restoreStoredVolume(lastNonZeroVolumeRef, 80);
       }
-      lastNonZeroVolumeRef.current = Math.max(5, numeric);
+      lastNonZeroVolumeRef.current = Math.max(1, Math.min(100, Math.round(numeric)));
       return 0;
     });
-  }, []);
+  }, [restoreStoredVolume]);
 
   const handleToggleMetronomeMute = useCallback(() => {
-    const current = realtimePlaybackRef.current;
-    if (!current?.project || !current?.item || !hasSnapshotMetronome(current.project)) return;
+    setMetronomeVolume((previous) => {
+      const numeric = Number(previous) || 0;
+      if (numeric <= 0) {
+        return restoreStoredVolume(lastNonZeroMetronomeVolumeRef, METRONOME_VOLUME_UNITY);
+      }
+      lastNonZeroMetronomeVolumeRef.current = Math.max(1, Math.min(100, Math.round(numeric)));
+      return 0;
+    });
+  }, [restoreStoredVolume]);
 
-    const nextMuted = !isRealtimeMetronomeMuted;
-    const nextProject = withSnapshotMetronomeMuted(current.project, nextMuted);
-    realtimePlaybackRef.current = {
-      ...current,
-      project: nextProject,
-    };
-    setPreferredMetronomeMuted(nextMuted);
-    setIsRealtimeMetronomeMuted(nextMuted);
+  const handleTogglePracticeFocus = useCallback(() => {
+    if (isRendering) return;
+    const step = getPracticeFocusStep(practiceFocusControl);
+    if (typeof step === 'number') {
+      setPracticeFocusControl(PRACTICE_FOCUS_MAX_INDEX);
+      return;
+    }
+    if (step === 'solo') {
+      setPracticeFocusControl(PRACTICE_FOCUS_MIN_INDEX);
+      return;
+    }
+    const storedIndex = lastNumericPracticeFocusIndexRef.current;
+    setPracticeFocusControl(
+      Number.isFinite(storedIndex) ? storedIndex : PRACTICE_FOCUS_DEFAULT_INDEX
+    );
+  }, [getPracticeFocusStep, isRendering, practiceFocusControl]);
 
-    applyRealtimeMixSettings(nextProject, current.item);
-    applyLiveMetronomeMix(nextProject);
-  }, [applyRealtimeMixSettings, isRealtimeMetronomeMuted]);
+  const handleTogglePracticePanRange = useCallback(() => {
+    if (isRendering) return;
+    const current = Math.max(0, Math.min(200, Number(practicePanRange) || 0));
+    const distToMin = current;
+    const distToMax = 200 - current;
+    setPracticePanRange(distToMax >= distToMin ? 200 : 0);
+  }, [isRendering, practicePanRange]);
 
   const beginSliderDrag = useCallback((event, config) => {
     if (event.button !== 0) return;
@@ -1630,7 +1729,7 @@ function PlayerDashboard({
   }, [resolvePracticeFocusIndexFromSlider]);
 
   const formatSliderValue = useCallback((kind, value) => {
-    if (kind === 'master') {
+    if (kind === 'master' || kind === 'metronome') {
       return `${Math.round(Math.max(0, Math.min(100, value)))}`;
     }
     if (kind === 'focus') {
@@ -1644,7 +1743,7 @@ function PlayerDashboard({
 
   const parseSliderInput = useCallback((kind, rawText) => {
     const text = String(rawText || '').trim();
-    if (kind === 'master') {
+    if (kind === 'master' || kind === 'metronome') {
       if (!text) return null;
       const parsed = Number.parseFloat(text);
       if (!Number.isFinite(parsed)) return null;
@@ -1686,6 +1785,7 @@ function PlayerDashboard({
     const nextValue = parseSliderInput(sliderEditTooltip.kind, sliderEditTooltip.text);
     if (nextValue !== null) {
       if (sliderEditTooltip.kind === 'master') setVolume(nextValue);
+      if (sliderEditTooltip.kind === 'metronome') setMetronomeVolume(nextValue);
       if (sliderEditTooltip.kind === 'focus') setPracticeFocusControl(nextValue);
       if (sliderEditTooltip.kind === 'pan') setPracticePanRange(nextValue);
     }
@@ -2042,8 +2142,8 @@ function PlayerDashboard({
     ? 'text-gray-400'
     : 'text-blue-300';
   const shuffleButtonClass = shuffleEnabled ? 'text-blue-300' : 'text-gray-400';
-  const metronomeButtonClass = isRealtimeMetronomeMuted ? 'text-gray-400' : 'text-blue-300';
   const isMuted = volume <= 0;
+  const isMetronomeMuted = metronomeVolume <= 0;
   const VolumeIcon = isMuted ? VolumeX : Volume2;
   const practiceControlItem = realtimePlaybackRef.current?.item;
   const practiceControlsEnabled = isPracticePresetId(practiceControlItem?.presetId)
@@ -2714,7 +2814,7 @@ function PlayerDashboard({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden p-4">
+      <div className="flex-1 overflow-hidden px-4 pb-2 pt-4">
         <div className="h-full flex flex-col gap-3">
           {showNoAccessBanner ? (
             <div className="rounded-lg border border-amber-500/30 bg-amber-900/20 px-4 py-3 text-sm text-amber-100">
@@ -2793,11 +2893,11 @@ function PlayerDashboard({
                         : (activeTuttiShow?.name || 'Show')}
                     </h2>
                   </div>
-                  <div className="grid grid-cols-[56px_minmax(0,1fr)_96px_34px] px-4 py-2 text-xs text-gray-400 border-b border-gray-700">
+                  <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center border-b border-gray-700 px-4 text-xs leading-none text-gray-400">
                     <div>#</div>
                     <div>Title</div>
-                    <div className="flex justify-end">
-                      <span title="Length" aria-label="Length" className="inline-flex -translate-x-1">
+                    <div className="flex items-center justify-end">
+                      <span title="Length" aria-label="Length" className="inline-flex items-center -translate-x-1">
                         <Clock size={14} />
                       </span>
                     </div>
@@ -3425,15 +3525,15 @@ function PlayerDashboard({
         </div>
       ) : null}
 
-      <div className="bg-gray-850 border-t border-gray-800 px-6 py-4">
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(380px,760px)_minmax(0,1fr)] items-center gap-4">
+      <div className="bg-gray-850 px-6 pt-1 pb-3">
+        <div className="grid min-h-[127px] grid-cols-[minmax(0,1fr)_minmax(380px,760px)_minmax(0,1fr)] items-center gap-4">
           <div className="min-w-0 text-lg font-semibold text-gray-200">
             <div className="truncate" title={nowPlayingLabel || activeQueueItem?.name || ''}>
               {nowPlayingLabel || activeQueueItem?.name || ''}
             </div>
           </div>
 
-	          <div className="w-full">
+	          <div className="flex min-h-[127px] w-full flex-col justify-center">
 	            <div className="flex items-center justify-center gap-4 flex-wrap">
 	              <div className="flex items-center justify-center gap-3">
 	                <button
@@ -3497,26 +3597,148 @@ function PlayerDashboard({
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2">
-            {practiceControlsEnabled || metronomeControlsEnabled ? (
-              <div className="flex items-center gap-3">
-                {metronomeControlsEnabled ? (
-                  <button
-                    onClick={handleToggleMetronomeMute}
-                    disabled={isRendering}
-                    className={`rounded bg-gray-700 hover:bg-gray-600 p-3 disabled:opacity-50 ${metronomeButtonClass}`}
-                    title={isRealtimeMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
+          <div className="flex min-h-[127px] flex-col items-end justify-center gap-[5px]">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleToggleMute}
+                className="text-gray-400 hover:text-gray-200 transition-colors"
+                title={isMuted ? 'Unmute' : 'Mute'}
+              >
+                <VolumeIcon size={20} />
+              </button>
+              <div className="relative w-40 h-7">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={volume}
+                  readOnly
+                  onMouseDown={(event) => beginSliderDrag(event, {
+                    kind: 'master',
+                    value: volume,
+                    min: 0,
+                    max: 100,
+                    step: 1,
+                    disabled: isRendering,
+                  })}
+                  onDoubleClick={() => openSliderEdit('master', volume, isRendering)}
+                  className="w-40 h-7 volume-slider volume-slider-lg cursor-pointer block"
+                  title="Master Volume (double-click for numeric input)"
+                />
+                {sliderDragTooltip?.kind === 'master' && (
+                  <div
+                    className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
+                    style={{ marginBottom: '1px' }}
                   >
-                    <Metronome size={20} />
-                  </button>
-                ) : null}
+                    {formatSliderValue('master', Number(sliderDragTooltip.value))}
+                  </div>
+                )}
+                {sliderEditTooltip?.kind === 'master' && (
+                  <input
+                    type="text"
+                    value={sliderEditTooltip.text}
+                    onChange={(event) => setSliderEditTooltip((previous) => (
+                      previous ? { ...previous, text: event.target.value } : previous
+                    ))}
+                    onFocus={(event) => event.target.select()}
+                    onBlur={commitSliderEdit}
+                    onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                      setSliderEditTooltip(null);
+                    }
+                  }}
+                    className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
+                    style={{ marginBottom: '1px' }}
+                    autoFocus
+                  />
+                )}
+              </div>
+            </div>
 
-                {practiceControlsEnabled ? (
-                  <div className="flex flex-col gap-2.5">
+            {metronomeControlsEnabled ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleToggleMetronomeMute}
+                  disabled={isRendering}
+                  className={`text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 ${
+                    isMetronomeMuted ? 'text-gray-500' : ''
+                  }`}
+                  title={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
+                >
+                  <Metronome size={20} />
+                </button>
+                <div className="relative w-40 h-7">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={metronomeVolume}
+                    readOnly
+                    onMouseDown={(event) => beginSliderDrag(event, {
+                      kind: 'metronome',
+                      value: metronomeVolume,
+                      min: 0,
+                      max: 100,
+                      step: 1,
+                      disabled: isRendering,
+                    })}
+                    onDoubleClick={() => openSliderEdit('metronome', metronomeVolume, isRendering)}
+                    className="w-40 h-7 volume-slider volume-slider-lg cursor-pointer block"
+                    title="Metronome level (double-click for numeric input)"
+                  />
+                  {sliderDragTooltip?.kind === 'metronome' && (
+                    <div
+                      className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
+                      style={{ marginBottom: '1px' }}
+                    >
+                      {formatSliderValue('metronome', Number(sliderDragTooltip.value))}
+                    </div>
+                  )}
+                  {sliderEditTooltip?.kind === 'metronome' && (
+                    <input
+                      type="text"
+                      value={sliderEditTooltip.text}
+                      onChange={(event) => setSliderEditTooltip((previous) => (
+                        previous ? { ...previous, text: event.target.value } : previous
+                      ))}
+                      onFocus={(event) => event.target.select()}
+                      onBlur={commitSliderEdit}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        } else if (event.key === 'Escape') {
+                          event.preventDefault();
+                          setSliderEditTooltip(null);
+                        }
+                      }}
+                      className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
+                      style={{ marginBottom: '1px' }}
+                      autoFocus
+                    />
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {practiceControlsEnabled ? (
+              <>
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-400" title="Practice focus">
+                      <button
+                        type="button"
+                        onClick={handleTogglePracticeFocus}
+                        disabled={focusControlDisabled}
+                        className="text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Cycle practice focus: stored dB → Solo → Omitted"
+                      >
                         <FocusIcon size={20} />
-                      </span>
+                      </button>
                       <div
                         className={`relative w-40 h-7 ${focusControlDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                         onMouseDown={(event) => {
@@ -3591,9 +3813,15 @@ function PlayerDashboard({
                     </div>
 
                     <div className={`flex items-center gap-2 ${panControlDisabled ? 'opacity-40' : ''}`}>
-                      <span className="text-gray-400" title="Transformed pan range">
+                      <button
+                        type="button"
+                        onClick={handleTogglePracticePanRange}
+                        disabled={!practiceControlsEnabled || isRendering}
+                        className="text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Jump transformed pan range to the farthest extreme"
+                      >
                         <ChevronsLeftRightEllipsis size={20} />
-                      </span>
+                      </button>
                       <div
                         className={`relative w-40 h-7 ${panControlDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
                         onMouseDown={(event) => {
@@ -3670,71 +3898,8 @@ function PlayerDashboard({
                         )}
                       </div>
                     </div>
-                  </div>
+              </>
                 ) : null}
-              </div>
-            ) : null}
-            <div className="flex items-center gap-0">
-              <button
-                onClick={handleToggleMute}
-                className="p-1 text-gray-400 hover:text-gray-200 transition-colors"
-                title={isMuted ? 'Unmute' : 'Mute'}
-              >
-                <VolumeIcon size={20} />
-              </button>
-              <div className="relative">
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={volume}
-                  readOnly
-                  onMouseDown={(event) => beginSliderDrag(event, {
-                    kind: 'master',
-                    value: volume,
-                    min: 0,
-                    max: 100,
-                    step: 1,
-                    disabled: isRendering,
-                  })}
-                  onDoubleClick={() => openSliderEdit('master', volume, isRendering)}
-                  className="w-32 volume-slider volume-slider-lg cursor-pointer block"
-                  title="Master Volume (double-click for numeric input)"
-                />
-                {sliderDragTooltip?.kind === 'master' && (
-                  <div
-                    className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
-                    style={{ marginBottom: '1px' }}
-                  >
-                    {formatSliderValue('master', Number(sliderDragTooltip.value))}
-                  </div>
-                )}
-                {sliderEditTooltip?.kind === 'master' && (
-                  <input
-                    type="text"
-                    value={sliderEditTooltip.text}
-                    onChange={(event) => setSliderEditTooltip((previous) => (
-                      previous ? { ...previous, text: event.target.value } : previous
-                    ))}
-                    onFocus={(event) => event.target.select()}
-                    onBlur={commitSliderEdit}
-                    onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      event.currentTarget.blur();
-                      } else if (event.key === 'Escape') {
-                        event.preventDefault();
-                      setSliderEditTooltip(null);
-                    }
-                  }}
-                    className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
-                    style={{ marginBottom: '1px' }}
-                    autoFocus
-                  />
-                )}
-              </div>
-            </div>
           </div>
         </div>
         {error ? (
