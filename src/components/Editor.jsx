@@ -327,6 +327,7 @@ function Editor({
   const finalizeRecordingRef = useRef(null);
   const recordingStartTimeRef = useRef(0);
   const projectRef = useRef(project);
+  const dismissedEmptyImportForProjectIdRef = useRef(null);
   const isHandlingLoopWrapRef = useRef(false);
   const audioLoadGenerationRef = useRef(0);
   const loadProjectAudioRef = useRef(async () => {});
@@ -1792,10 +1793,13 @@ function Editor({
 
   useEffect(() => {
     if (isAdvancedMixSession) return;
-    if (hasNoTracks && !showFileImport) {
-      setShowFileImport(true);
+    if (!hasNoTracks) {
+      dismissedEmptyImportForProjectIdRef.current = null;
+      return;
     }
-  }, [hasNoTracks, isAdvancedMixSession, showFileImport]);
+    if (dismissedEmptyImportForProjectIdRef.current === project.projectId) return;
+    setShowFileImport(true);
+  }, [hasNoTracks, isAdvancedMixSession, project.projectId]);
 
   useEffect(() => {
     if (!timelineRows.length) {
@@ -4253,7 +4257,12 @@ function Editor({
           project={project}
           onImport={handleFileImport}
           manualChoirPartsEnabled={Boolean(project?.autoPan?.manualChoirParts)}
-          onClose={() => setShowFileImport(false)}
+          onClose={() => {
+            if (hasNoTracks && project.projectId) {
+              dismissedEmptyImportForProjectIdRef.current = project.projectId;
+            }
+            setShowFileImport(false);
+          }}
         />
       )}
 

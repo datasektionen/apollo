@@ -151,6 +151,13 @@ export function createDefaultImportDestination(role = TRACK_ROLES.INSTRUMENT) {
   };
 }
 
+export function createUniqueNewRootDestination(role = TRACK_ROLES.INSTRUMENT) {
+  return {
+    ...createDefaultImportDestination(role),
+    slotId: createId(),
+  };
+}
+
 export function getImportNodeKey(node) {
   if (!node) return IMPORT_PARENT_NONE;
   return node.kind === 'group' ? `group:${node.id}` : `track:${node.id}`;
@@ -326,6 +333,9 @@ export function getImportSlotKey(destination, nodes) {
   }
   if (current.mode === IMPORT_DESTINATION_MODES.NEW_SIBLING && current.trackId) {
     return `sib:track:${current.trackId}:${current.before ? 'before' : 'after'}`;
+  }
+  if (current.mode === IMPORT_DESTINATION_MODES.NEW_ROOT && current.slotId) {
+    return `root:${current.slotId}`;
   }
   return 'root';
 }
@@ -618,7 +628,7 @@ export function assignImportDrop(destination, drop, nodes = []) {
   }
 
   if (!type || type === IMPORT_DROP_TYPES.NEW_ROOT || !node) {
-    return createDefaultImportDestination(currentRole);
+    return createUniqueNewRootDestination(currentRole);
   }
 
   if (type === IMPORT_DROP_TYPES.ON && node.kind === 'track') {
@@ -681,7 +691,7 @@ export function assignImportDrop(destination, drop, nodes = []) {
     };
   }
 
-  return createDefaultImportDestination(currentRole);
+  return createUniqueNewRootDestination(currentRole);
 }
 
 function childDestinationForNode(node, role) {
@@ -958,7 +968,7 @@ export function guessImportDestinations(fileNames, project, options = {}) {
     }
 
     if (matchingLeaves.length === 0 && matchingGroups.length === 0) {
-      return createDefaultImportDestination(defaultRole);
+      return createUniqueNewRootDestination(defaultRole);
     }
 
     const candidateIds = [];
@@ -994,7 +1004,7 @@ export function guessImportDestinations(fileNames, project, options = {}) {
       };
     }
 
-    return createDefaultImportDestination(defaultRole);
+    return createUniqueNewRootDestination(defaultRole);
   });
 }
 

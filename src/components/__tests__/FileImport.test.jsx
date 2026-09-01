@@ -114,10 +114,11 @@ describe('FileImport destinations', () => {
     });
 
     expect(onImport).toHaveBeenCalledTimes(1);
-    expect(onImport.mock.calls[0][0][0].destination).toEqual({
+    expect(onImport.mock.calls[0][0][0].destination).toMatchObject({
       mode: 'new-root',
       role: TRACK_ROLES.LEAD,
     });
+    expect(onImport.mock.calls[0][0][0].destination.slotId).toEqual(expect.any(String));
   });
 
   it('asks for extra confirmation before overwriting audio', async () => {
@@ -401,5 +402,109 @@ describe('FileImport destinations', () => {
       parentTrackId: instrument.id,
       role: TRACK_ROLES.INSTRUMENT,
     });
+  });
+
+  it('places each unmatched file on its own new track and can drag one onto a new track', async () => {
+    const project = createEmptyProject('Empty');
+    const onImport = vi.fn().mockResolvedValue(undefined);
+
+    view = render(
+      <FileImport project={project} onImport={onImport} onClose={() => {}} />
+    );
+
+    const input = view.container.querySelector('input[type="file"]');
+    await addFiles(input, [makeAudioFile('kick.wav'), makeAudioFile('snare.wav')]);
+
+    const newTrackRows = Array.from(view.container.querySelectorAll('[data-import-row]'))
+      .filter((row) => row.getAttribute('data-import-row')?.startsWith('ghost:') && row.textContent.includes('New Track'));
+    expect(newTrackRows).toHaveLength(2);
+    expect(newTrackRows[0].textContent).toContain('kick.wav');
+    expect(newTrackRows[1].textContent).toContain('snare.wav');
+
+    const snareChip = Array.from(view.container.querySelectorAll('[data-import-file]'))
+      .find((chip) => chip.textContent.includes('snare.wav'));
+    expect(snareChip).toBeTruthy();
+    await act(async () => {
+      snareChip.dispatchEvent(new Event('dragstart', { bubbles: true }));
+    });
+    const firstJoin = view.container.querySelector(`[data-import-drop="join:${newTrackRows[0].getAttribute('data-import-row')}"]`);
+    expect(firstJoin).toBeTruthy();
+    await act(async () => {
+      firstJoin.dispatchEvent(new Event('drop', { bubbles: true }));
+    });
+    const groupedRows = Array.from(view.container.querySelectorAll('[data-import-row]'))
+      .filter((row) => row.getAttribute('data-import-row')?.startsWith('ghost:') && row.textContent.includes('New Track'));
+    expect(groupedRows).toHaveLength(1);
+    expect(groupedRows[0].textContent).toContain('kick.wav');
+    expect(groupedRows[0].textContent).toContain('snare.wav');
+
+    const snareChipAfterJoin = Array.from(view.container.querySelectorAll('[data-import-file]'))
+      .find((chip) => chip.textContent.includes('snare.wav'));
+    await act(async () => {
+      snareChipAfterJoin.dispatchEvent(new Event('dragstart', { bubbles: true }));
+    });
+    await act(async () => {
+      view.container.querySelector('[data-import-drop="new-root"]').dispatchEvent(new Event('drop', { bubbles: true }));
+    });
+    const splitRows = Array.from(view.container.querySelectorAll('[data-import-row]'))
+      .filter((row) => row.getAttribute('data-import-row')?.startsWith('ghost:') && row.textContent.includes('New Track'));
+    expect(splitRows).toHaveLength(2);
+    expect(splitRows.some((row) => row.textContent.includes('kick.wav') && !row.textContent.includes('snare.wav'))).toBe(true);
+    expect(splitRows.some((row) => row.textContent.includes('snare.wav') && !row.textContent.includes('kick.wav'))).toBe(true);
+
+    const importButton = Array.from(view.container.querySelectorAll('button'))
+      .find((button) => button.textContent === 'Import');
+    await act(async () => {
+      importButton.click();
+    });
+
+    expect(onImport.mock.calls[0][0].map((item) => item.file.name)).toEqual(['kick.wav', 'snare.wav']);
+    const destinations = onImport.mock.calls[0][0].map((item) => item.destination);
+    expect(destinations[0].mode).toBe('new-root');
+    expect(destinations[1].mode).toBe('new-root');
+    expect(destinations[0].slotId).not.toBe(destinations[1].slotId);
+  });
+
+  it('splits a grouped new-root file onto its own track when dragged up', async () => {
+    const project = createEmptyProject('Empty');
+    const onImport = vi.fn().mockResolvedValue(undefined);
+
+    view = render(
+      <FileImport project={project} onImport={onImport} onClose={() => {}} />
+    );
+
+    const input = view.container.querySelector('input[type="file"]');
+    await addFiles(input, [makeAudioFile('kick.wav'), makeAudioFile('snare.wav')]);
+
+    const snareChip = Array.from(view.container.querySelectorAll('[data-import-file]'))
+      .find((chip) => chip.textContent.includes('snare.wav'));
+    const kickRow = Array.from(view.container.querySelectorAll('[data-import-row]'))
+      .find((row) => row.getAttribute('data-import-row')?.startsWith('ghost:') && row.textContent.includes('kick.wav'));
+    await act(async () => {
+      snareChip.dispatchEvent(new Event('dragstart', { bubbles: true }));
+    });
+    await act(async () => {
+      view.container.querySelector(`[data-import-drop="join:${kickRow.getAttribute('data-import-row')}"]`)
+        .dispatchEvent(new Event('drop', { bubbles: true }));
+    });
+    expect(Array.from(view.container.querySelectorAll('[data-import-row]'))
+      .filter((row) => row.getAttribute('data-import-row')?.startsWith('ghost:'))).toHaveLength(1);
+
+    const groupedRowKey = view.container.querySelector('[data-import-row^="ghost:"]')?.getAttribute('data-import-row');
+    const snareChipGrouped = Array.from(view.container.querySelectorAll('[data-import-file]'))
+      .find((chip) => chip.textContent.includes('snare.wav'));
+    await act(async () => {
+      snareChipGrouped.dispatchEvent(new Event('dragstart', { bubbles: true }));
+    });
+    await act(async () => {
+      view.container.querySelector(`[data-import-drop="new-root-before:${groupedRowKey}"]`)
+        .dispatchEvent(new Event('drop', { bubbles: true }));
+    });
+
+    const splitRows = Array.from(view.container.querySelectorAll('[data-import-row]'))
+      .filter((row) => row.getAttribute('data-import-row')?.startsWith('ghost:'));
+    expect(splitRows).toHaveLength(2);
+    expect(splitRows.some((row) => row.textContent.includes('snare.wav') && !row.textContent.includes('kick.wav'))).toBe(true);
+    expect(splitRows.some((row) => row.textContent.includes('kick.wav') && !row.textContent.includes('snare.wav'))).toBe(true);
   });
 });

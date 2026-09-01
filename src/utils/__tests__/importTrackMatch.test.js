@@ -60,10 +60,25 @@ describe('guessImportDestinations', () => {
     const piano = createTrack('Piano', TRACK_ROLES.INSTRUMENT);
     const project = projectWithTracks([piano]);
     const [destination] = guessImportDestinations(['drums.wav'], project);
-    expect(destination).toEqual({
+    expect(destination).toMatchObject({
       mode: IMPORT_DESTINATION_MODES.NEW_ROOT,
       role: TRACK_ROLES.INSTRUMENT,
     });
+    expect(destination.slotId).toEqual(expect.any(String));
+  });
+
+  it('gives each unmatched file its own new root track', () => {
+    const project = createEmptyProject('Empty');
+    const destinations = guessImportDestinations(['kick.wav', 'snare.wav', 'hat.wav'], project);
+    expect(destinations).toHaveLength(3);
+    destinations.forEach((destination) => {
+      expect(destination).toMatchObject({
+        mode: IMPORT_DESTINATION_MODES.NEW_ROOT,
+        role: TRACK_ROLES.INSTRUMENT,
+      });
+      expect(destination.slotId).toEqual(expect.any(String));
+    });
+    expect(new Set(destinations.map((destination) => destination.slotId)).size).toBe(3);
   });
 
   it('assigns a unique leaf match even when that track already has clips', () => {
@@ -404,6 +419,36 @@ describe('applyImportAssignments', () => {
       getTrackNodeByTrackId(next, trumpet.id).order + 1,
     );
   });
+
+  it('creates a separate root track for each unique new-root slot', () => {
+    const project = createEmptyProject('Empty');
+    const next = applyImportAssignments(project, [
+      {
+        name: 'Kick',
+        blobId: 'blob-kick',
+        durationMs: 1000,
+        destination: {
+          mode: IMPORT_DESTINATION_MODES.NEW_ROOT,
+          role: TRACK_ROLES.INSTRUMENT,
+          slotId: 'slot-a',
+        },
+      },
+      {
+        name: 'Snare',
+        blobId: 'blob-snare',
+        durationMs: 800,
+        destination: {
+          mode: IMPORT_DESTINATION_MODES.NEW_ROOT,
+          role: TRACK_ROLES.INSTRUMENT,
+          slotId: 'slot-b',
+        },
+      },
+    ]);
+
+    expect(next.tracks.map((track) => track.name)).toEqual(['Kick', 'Snare']);
+    expect(next.tracks[0].clips.map((clip) => clip.blobId)).toEqual(['blob-kick']);
+    expect(next.tracks[1].clips.map((clip) => clip.blobId)).toEqual(['blob-snare']);
+  });
 });
 
 describe('import destination encoding', () => {
@@ -519,9 +564,25 @@ describe('import destination encoding', () => {
       parentGroupId: choir.id,
       role: TRACK_ROLES.OTHER,
     });
-    expect(assignImportDrop(current, { type: IMPORT_DROP_TYPES.NEW_ROOT })).toEqual({
+    expect(assignImportDrop(current, { type: IMPORT_DROP_TYPES.NEW_ROOT })).toMatchObject({
       mode: IMPORT_DESTINATION_MODES.NEW_ROOT,
       role: TRACK_ROLES.LEAD,
+    });
+    const split = assignImportDrop(
+      { mode: IMPORT_DESTINATION_MODES.NEW_ROOT, role: TRACK_ROLES.LEAD, slotId: 'grouped' },
+      { type: IMPORT_DROP_TYPES.NEW_ROOT },
+    );
+    expect(split.slotId).toEqual(expect.any(String));
+    expect(split.slotId).not.toBe('grouped');
+    expect(assignImportDrop(
+      { mode: IMPORT_DESTINATION_MODES.NEW_ROOT, role: TRACK_ROLES.LEAD, slotId: 'from' },
+      {
+        type: IMPORT_DROP_TYPES.JOIN,
+        destination: { mode: IMPORT_DESTINATION_MODES.NEW_ROOT, role: TRACK_ROLES.INSTRUMENT, slotId: 'onto' },
+      },
+    )).toMatchObject({
+      mode: IMPORT_DESTINATION_MODES.NEW_ROOT,
+      slotId: 'onto',
     });
   });
 
@@ -599,6 +660,27 @@ describe('import destination encoding', () => {
     expect(rows[2].ghostType).toBe('new-child');
     expect(rows[2].files.map((entry) => entry.id)).toEqual(['file-child']);
     expect(rows[3].ghostType).toBe('new-root');
+  });
+
+  it('shows unmatched unique new-root files on separate ghost tracks', () => {
+    const project = createEmptyProject('Empty');
+    const tree = listImportTree(project);
+    const rows = buildImportPreviewRows(tree.nodes, [
+      {
+        id: 'file-a',
+        file: { name: 'kick.wav' },
+        destination: { mode: IMPORT_DESTINATION_MODES.NEW_ROOT, role: TRACK_ROLES.INSTRUMENT, slotId: 'slot-a' },
+      },
+      {
+        id: 'file-b',
+        file: { name: 'snare.wav' },
+        destination: { mode: IMPORT_DESTINATION_MODES.NEW_ROOT, role: TRACK_ROLES.INSTRUMENT, slotId: 'slot-b' },
+      },
+    ]);
+
+    expect(rows.map((row) => row.ghostType)).toEqual(['new-root', 'new-root']);
+    expect(rows[0].files.map((entry) => entry.id)).toEqual(['file-a']);
+    expect(rows[1].files.map((entry) => entry.id)).toEqual(['file-b']);
   });
 
   it('places a single child-of-group ghost between two sibling tracks', () => {

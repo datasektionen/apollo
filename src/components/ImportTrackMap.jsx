@@ -195,6 +195,33 @@ function ImportTrackMap({
         event.stopPropagation();
       }}
     >
+      {isDraggingFile ? (
+        <div
+          data-import-drop="new-root-start"
+          data-import-row="new-root-start"
+          onDragOver={(event) => handleDragOver(event, {
+            type: IMPORT_DROP_TYPES.NEW_ROOT,
+            edge: 'before',
+          })}
+          onDrop={(event) => handleDrop(event, {
+            type: IMPORT_DROP_TYPES.NEW_ROOT,
+            edge: 'before',
+          })}
+          className={`w-full border-b border-dashed ${
+            activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT
+              && activeDrop?.edge === 'before'
+              && !activeDrop?.anchor
+              ? 'min-h-[28px] bg-blue-700/30 border-blue-500'
+              : 'min-h-[10px] border-gray-700'
+          }`}
+        >
+          {activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT
+            && activeDrop?.edge === 'before'
+            && !activeDrop?.anchor ? (
+              <p className="text-[11px] text-blue-100 px-2 py-1">New Track</p>
+            ) : null}
+        </div>
+      ) : null}
       {rows.map((row) => {
         if (row.kind === 'ghost') {
           const destination = row.destination || row.files?.[0]?.destination;
@@ -205,8 +232,24 @@ function ImportTrackMap({
             || TRACK_ROLES.INSTRUMENT;
           const lockType = importDestinationLocksType(destination, nodes);
           const slotFiles = row.files || (row.entry ? [row.entry] : []);
+          const isNewRootGhost = row.ghostType === 'new-root';
           const joining = activeDrop?.type === IMPORT_DROP_TYPES.JOIN
             && getImportSlotKey(activeDrop.destination, nodes) === getImportSlotKey(row.destination, nodes);
+          const splitBefore = isNewRootGhost
+            && activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT
+            && activeDrop?.edge === 'before'
+            && activeDrop?.anchor
+            && getImportSlotKey(activeDrop.anchor, nodes) === getImportSlotKey(row.destination, nodes);
+          const splitAfter = isNewRootGhost
+            && activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT
+            && activeDrop?.edge === 'after'
+            && activeDrop?.anchor
+            && getImportSlotKey(activeDrop.anchor, nodes) === getImportSlotKey(row.destination, nodes);
+          const joinDrop = {
+            type: IMPORT_DROP_TYPES.JOIN,
+            destination: row.destination,
+            node: row.node,
+          };
           return (
             <div
               key={row.key}
@@ -216,17 +259,53 @@ function ImportTrackMap({
                 joining ? 'bg-blue-900/50' : 'bg-gray-900/80'
               }`}
               style={{ paddingLeft: `${8 + row.depth * 12}px` }}
-              onDragOver={(event) => handleDragOver(event, {
-                type: IMPORT_DROP_TYPES.JOIN,
-                destination: row.destination,
-                node: row.node,
-              })}
-              onDrop={(event) => handleDrop(event, {
-                type: IMPORT_DROP_TYPES.JOIN,
-                destination: row.destination,
-                node: row.node,
-              })}
+              onDragOver={(event) => handleDragOver(event, joinDrop)}
+              onDrop={(event) => handleDrop(event, joinDrop)}
             >
+              {splitBefore ? (
+                <div className="absolute left-1 right-1 top-0 h-0.5 bg-blue-400 z-20 pointer-events-none" />
+              ) : null}
+              {splitAfter ? (
+                <div className="absolute left-1 right-1 bottom-0 h-0.5 bg-blue-400 z-20 pointer-events-none" />
+              ) : null}
+              {isNewRootGhost && isDraggingFile ? (
+                <>
+                  <DropZone
+                    dropKey={`new-root-before:${row.key}`}
+                    className="absolute inset-x-0 top-0 h-[35%] z-10"
+                    onDragOver={(event) => handleDragOver(event, {
+                      type: IMPORT_DROP_TYPES.NEW_ROOT,
+                      edge: 'before',
+                      anchor: row.destination,
+                    })}
+                    onDrop={(event) => handleDrop(event, {
+                      type: IMPORT_DROP_TYPES.NEW_ROOT,
+                      edge: 'before',
+                      anchor: row.destination,
+                    })}
+                  />
+                  <DropZone
+                    dropKey={`join:${row.key}`}
+                    className="absolute inset-x-0 top-[35%] bottom-[35%] z-10"
+                    onDragOver={(event) => handleDragOver(event, joinDrop)}
+                    onDrop={(event) => handleDrop(event, joinDrop)}
+                  />
+                  <DropZone
+                    dropKey={`new-root-after:${row.key}`}
+                    className="absolute inset-x-0 bottom-0 h-[35%] z-10"
+                    onDragOver={(event) => handleDragOver(event, {
+                      type: IMPORT_DROP_TYPES.NEW_ROOT,
+                      edge: 'after',
+                      anchor: row.destination,
+                    })}
+                    onDrop={(event) => handleDrop(event, {
+                      type: IMPORT_DROP_TYPES.NEW_ROOT,
+                      edge: 'after',
+                      anchor: row.destination,
+                    })}
+                  />
+                </>
+              ) : null}
               <div className={`w-5 h-5 rounded border border-dashed flex items-center justify-center flex-shrink-0 ${
                 lockType
                   ? `${getRoleColorClass(role)} text-white border-transparent`
@@ -244,7 +323,7 @@ function ImportTrackMap({
                   value={role}
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) => onChangeRole(destination, event.target.value)}
-                  className="bg-gray-800 border border-gray-700 rounded px-1 py-0 text-[10px] relative z-20 focus:outline-none focus:border-blue-500"
+                  className={`bg-gray-800 border border-gray-700 rounded px-1 py-0 text-[10px] relative ${isDraggingFile ? 'z-0' : 'z-20'} focus:outline-none focus:border-blue-500`}
                 >
                   {roleOptions.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -371,12 +450,16 @@ function ImportTrackMap({
           data-import-row="new-root"
           onDragOver={(event) => handleDragOver(event, { type: IMPORT_DROP_TYPES.NEW_ROOT })}
           onDrop={(event) => handleDrop(event, { type: IMPORT_DROP_TYPES.NEW_ROOT })}
-          className={`w-full min-h-[10px] border-t border-dashed ${
-            activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT
-              ? 'bg-blue-700/30 border-blue-500'
-              : 'border-gray-700'
+          className={`w-full border-t border-dashed ${
+            activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT && !activeDrop?.anchor
+              ? 'min-h-[28px] bg-blue-700/30 border-blue-500'
+              : 'min-h-[10px] border-gray-700'
           }`}
-        />
+        >
+          {activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT && !activeDrop?.anchor ? (
+            <p className="text-[11px] text-blue-100 px-2 py-1">New Track</p>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
