@@ -3022,7 +3022,7 @@ function PlayerDashboard({
                                         event.stopPropagation();
                                         await handlePlayPlaylistRow(row);
                                       }}
-                                      className="hidden group-hover:flex items-center justify-center rounded text-gray-300 hover:text-white focus:text-white"
+                                      className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded text-gray-300 hover:text-white focus:text-white"
                                       title={`Play ${rowTitle}`}
                                     >
                                       <Play size={14} />
@@ -3103,7 +3103,7 @@ function PlayerDashboard({
                                     event.stopPropagation();
                                     await playQueueItem(index);
                                   }}
-                                  className="hidden group-hover:flex items-center justify-center rounded text-gray-300 hover:text-white focus:text-white"
+                                  className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded text-gray-300 hover:text-white focus:text-white"
                                   title={`Play ${listTitle}`}
                                 >
                                   <Play size={14} />
