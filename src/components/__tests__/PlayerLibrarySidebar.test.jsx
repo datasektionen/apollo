@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlayerLibrarySidebar } from '../PlayerLibrarySidebar';
 
 beforeAll(() => {
@@ -23,6 +23,18 @@ function render(ui) {
   };
 }
 
+function flushToggleAnimation(nowMs = 200) {
+  act(() => {
+    animationNow = nowMs;
+    const callbacks = [...rafCallbacks];
+    rafCallbacks.length = 0;
+    callbacks.forEach((callback) => callback(nowMs));
+  });
+}
+
+let animationNow = 0;
+let rafCallbacks = [];
+
 const folders = [
   { id: 'folder-1', name: 'Private charts', createdAt: '2026-01-01', updatedAt: '2026-02-01' },
 ];
@@ -41,9 +53,18 @@ describe('PlayerLibrarySidebar', () => {
       setItem: (key, value) => { store.set(key, String(value)); },
       removeItem: (key) => { store.delete(key); },
     };
+    animationNow = 0;
+    rafCallbacks = [];
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      rafCallbacks.push(callback);
+      return rafCallbacks.length;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    vi.spyOn(performance, 'now').mockImplementation(() => animationNow);
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     document.body.innerHTML = '';
   });
 
@@ -63,6 +84,7 @@ describe('PlayerLibrarySidebar', () => {
     expect(view.container.textContent).toContain('Private charts');
     expect(view.container.textContent).toContain('Warmup');
     expect(view.container.textContent).toContain('Tango practice');
+    expect(view.container.querySelector('.lucide-library-big')).toBeTruthy();
 
     const createButton = view.container.querySelector('button[title="Create"]');
     expect(createButton).toBeTruthy();
@@ -92,6 +114,7 @@ describe('PlayerLibrarySidebar', () => {
     act(() => {
       view.container.querySelector('button[aria-label="Search Your Library"]').click();
     });
+    flushToggleAnimation();
     expect(view.container.querySelector('button[title="Change library order"]')?.textContent || '').not.toContain('Latest');
     const input = view.container.querySelector('input[placeholder="Search your library"]');
     expect(input).toBeTruthy();
@@ -133,12 +156,58 @@ describe('PlayerLibrarySidebar', () => {
       />
     );
 
+    const expandedIcon = Array.from(view.container.querySelectorAll('button')).find((button) => (
+      button.textContent.includes('Warmup')
+    ))?.querySelector('svg');
+    expect(expandedIcon?.getAttribute('width')).toBe('24');
+
     act(() => {
       view.container.querySelector('button[aria-label="Collapse Your Library"]').click();
     });
+    flushToggleAnimation();
     expect(view.container.querySelector('button[aria-label="Expand Your Library"]')).toBeTruthy();
-    expect(view.container.textContent).not.toContain('Your Library');
     expect(view.container.querySelector('button[aria-label="Warmup (Playlist)"]')).toBeTruthy();
+    const minimizedIcon = view.container.querySelector('button[aria-label="Warmup (Playlist)"] svg');
+    expect(minimizedIcon?.getAttribute('width')).toBe('24');
+    expect(minimizedIcon?.getAttribute('height')).toBe('24');
+    view.unmount();
+  });
+
+  it('keeps hover and click on the same library item target', () => {
+    const selected = [];
+    const view = render(
+      <PlayerLibrarySidebar
+        folders={folders}
+        playlists={playlists}
+        myMixes={myMixes}
+        playlistItemsByPlaylistId={{}}
+        onSelectEntry={(entry) => selected.push(entry)}
+      />
+    );
+
+    const expanded = Array.from(view.container.querySelectorAll('button')).find((button) => (
+      button.textContent.includes('Warmup')
+    ));
+    expect(expanded).toBeTruthy();
+    expect(expanded.className).toContain('hover:bg-gray-700');
+    expect(expanded.className).toContain('w-full');
+    act(() => {
+      expanded.click();
+    });
+    expect(selected.at(-1)).toEqual(expect.objectContaining({ kind: 'playlist', name: 'Warmup' }));
+
+    act(() => {
+      view.container.querySelector('button[aria-label="Collapse Your Library"]').click();
+    });
+    flushToggleAnimation();
+    const minimized = view.container.querySelector('button[aria-label="Warmup (Playlist)"]');
+    expect(minimized).toBeTruthy();
+    expect(minimized.className).toContain('hover:bg-gray-700');
+    expect(minimized.className).toContain('w-full');
+    act(() => {
+      minimized.click();
+    });
+    expect(selected.at(-1)).toEqual(expect.objectContaining({ kind: 'playlist', name: 'Warmup' }));
     view.unmount();
   });
 

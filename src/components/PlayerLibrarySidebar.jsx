@@ -5,7 +5,7 @@ import {
   ArrowUp,
   ChevronLeft,
   Folder,
-  Library,
+  LibraryBig,
   ListFilter,
   ListMusic,
   PanelLeftClose,
@@ -22,8 +22,11 @@ import {
   buildLibrarySearchItems,
   buildLibraryVisibleItems,
   clampLibrarySidebarWidth,
+  commitLibrarySidebarDrag,
   libraryEntryFromSearchItem,
   libraryEntrySubtitle,
+  librarySidebarProgress,
+  lerp,
   readLibrarySidebarSettings,
   resolveLibrarySidebarDrag,
   searchPlayerLibrary,
@@ -36,6 +39,15 @@ const ENTRY_ICON_SIZE = 24;
 const HEADER_ICON_SIZE = 20;
 const TOOLBAR_ICON_SIZE = 16;
 const RESIZE_GAP_PX = 12;
+const CARD_BORDER_PX = 1;
+const LIST_PAD_MIN = 4;
+const LIST_PAD_MAX = 8;
+const ENTRY_PAD_MAX = 8;
+const ENTRY_GAP_MAX = 12;
+const TOOLBAR_HEIGHT = 36;
+const MINIMIZED_INNER = LIBRARY_SIDEBAR.MINIMIZED_WIDTH - CARD_BORDER_PX * 2 - LIST_PAD_MIN * 2;
+const ENTRY_ROW_HEIGHT = MINIMIZED_INNER;
+const MINIMIZED_CENTER_PAD = Math.max(0, (ENTRY_ROW_HEIGHT - ENTRY_ICON_SIZE) / 2);
 const ENTRY_ICONS = {
   folder: Folder,
   playlist: ListMusic,
@@ -74,6 +86,17 @@ function useAnchoredMenu(open) {
   return { triggerRef, menuRef, coords };
 }
 
+function getSidebarLayout(sidebarWidth) {
+  const progress = librarySidebarProgress(sidebarWidth);
+  return {
+    progress,
+    listPad: lerp(LIST_PAD_MIN, LIST_PAD_MAX, progress),
+    iconPad: lerp(MINIMIZED_CENTER_PAD, ENTRY_PAD_MAX, progress),
+    rowHeight: ENTRY_ROW_HEIGHT,
+    gap: lerp(0, ENTRY_GAP_MAX, progress),
+  };
+}
+
 function LibraryHoverTooltip({ tooltip }) {
   if (!tooltip || typeof document === 'undefined') return null;
   return createPortal(
@@ -90,10 +113,56 @@ function LibraryHoverTooltip({ tooltip }) {
   );
 }
 
+function HeaderToggleIcon({ progress, hovering, instant, animating }) {
+  const showHover = hovering && !instant;
+  const snap = instant;
+  const minimized = progress <= 0;
+
+  const libraryOpacity = snap
+    ? (minimized ? 1 : 0)
+    : (showHover ? 0 : 1 - progress);
+  const openOpacity = snap
+    ? 0
+    : (showHover ? 1 - progress : 0);
+  const closeOpacity = snap
+    ? 0
+    : (showHover ? progress : 0);
+  const slotOpen = snap ? minimized : (progress < 1 || showHover);
+  const iconMotion = snap || animating ? 'none' : 'opacity 150ms linear';
+  const slotMotion = snap || animating ? 'none' : 'width 150ms linear, margin 150ms linear';
+
+  return (
+    <span
+      className="relative h-5 shrink-0 overflow-hidden"
+      style={{
+        width: slotOpen ? HEADER_ICON_SIZE : 0,
+        marginRight: slotOpen && progress > 0 ? 6 : 0,
+        transition: slotMotion,
+      }}
+    >
+      <LibraryBig
+        size={HEADER_ICON_SIZE}
+        className="pointer-events-none absolute left-0 top-0"
+        style={{ opacity: libraryOpacity, transition: iconMotion }}
+      />
+      <PanelLeftOpen
+        size={HEADER_ICON_SIZE}
+        className="pointer-events-none absolute left-0 top-0"
+        style={{ opacity: openOpacity, transition: iconMotion }}
+      />
+      <PanelLeftClose
+        size={HEADER_ICON_SIZE}
+        className="pointer-events-none absolute left-0 top-0"
+        style={{ opacity: closeOpacity, transition: iconMotion }}
+      />
+    </span>
+  );
+}
+
 function LibraryEntryRow({
   entry,
   isActive,
-  minimized,
+  layout,
   onSelect,
   onPlayMix,
   onContextMenu,
@@ -101,8 +170,9 @@ function LibraryEntryRow({
 }) {
   const EntryIcon = ENTRY_ICONS[entry.kind] || Folder;
   const subtitle = libraryEntrySubtitle(entry);
+  const fullyMinimized = layout.progress <= 0;
   const handleHover = (event, hovering) => {
-    if (!minimized) {
+    if (!fullyMinimized) {
       onHoverChange(null);
       return;
     }
@@ -120,7 +190,14 @@ function LibraryEntryRow({
   };
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => onSelect(entry)}
+      onDoubleClick={async () => {
+        if (entry.kind === 'mix' && entry.mix) {
+          await onPlayMix?.(entry.mix);
+        }
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -128,36 +205,38 @@ function LibraryEntryRow({
       }}
       onMouseEnter={(event) => handleHover(event, true)}
       onMouseLeave={(event) => handleHover(event, false)}
-      className={`group flex items-center rounded-md transition-colors ${
-        minimized ? 'justify-center p-1' : 'gap-1 pr-1'
-      } ${isActive ? 'bg-blue-700/30' : 'hover:bg-gray-700'}`}
+      className={`flex w-full min-w-0 items-center overflow-hidden rounded-md text-left transition-colors ${
+        isActive ? 'bg-blue-700/30' : 'hover:bg-gray-700'
+      }`}
+      style={{
+        height: layout.rowHeight,
+        paddingLeft: layout.iconPad,
+        paddingRight: layout.iconPad,
+        gap: layout.gap,
+      }}
+      aria-label={fullyMinimized ? `${entry.name} (${subtitle})` : undefined}
     >
-      <button
-        type="button"
-        onClick={() => onSelect(entry)}
-        onDoubleClick={async () => {
-          if (entry.kind === 'mix' && entry.mix) {
-            await onPlayMix?.(entry.mix);
-          }
+      <EntryIcon
+        size={ENTRY_ICON_SIZE}
+        className="shrink-0 text-gray-300"
+        style={{ width: ENTRY_ICON_SIZE, height: ENTRY_ICON_SIZE, minWidth: ENTRY_ICON_SIZE }}
+      />
+      <div
+        className="overflow-hidden"
+        style={{
+          opacity: layout.progress,
+          flexGrow: layout.progress,
+          flexShrink: 1,
+          flexBasis: 0,
+          minWidth: 0,
+          maxWidth: layout.progress <= 0 ? 0 : undefined,
         }}
-        className={minimized
-          ? 'flex h-11 w-11 items-center justify-center rounded-md'
-          : 'flex-1 min-w-0 text-left px-2 py-1.5'}
-        aria-label={minimized ? `${entry.name} (${subtitle})` : undefined}
+        aria-hidden={fullyMinimized}
       >
-        {minimized ? (
-          <EntryIcon size={ENTRY_ICON_SIZE} className="text-gray-300" />
-        ) : (
-          <div className="flex items-center gap-3">
-            <EntryIcon size={ENTRY_ICON_SIZE} className="text-gray-400 shrink-0" />
-            <div className="min-w-0">
-              <div className="text-sm truncate">{entry.name}</div>
-              <div className="text-[11px] text-gray-500 truncate">{subtitle}</div>
-            </div>
-          </div>
-        )}
-      </button>
-    </div>
+        <div className="truncate text-sm">{entry.name}</div>
+        <div className="truncate text-[11px] text-gray-500">{subtitle}</div>
+      </div>
+    </button>
   );
 }
 
@@ -180,10 +259,13 @@ export function PlayerLibrarySidebar({
   const saved = useMemo(() => readLibrarySidebarSettings(), []);
   const [mode, setMode] = useState(saved.mode);
   const [width, setWidth] = useState(saved.width);
+  const [viewWidth, setViewWidth] = useState(null);
   const [sort, setSort] = useState(saved.sort);
   const [sortReversed, setSortReversed] = useState(saved.sortReversed);
   const [isResizing, setIsResizing] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
   const [resizeHover, setResizeHover] = useState(false);
+  const [headerHover, setHeaderHover] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -191,9 +273,22 @@ export function PlayerLibrarySidebar({
   const [hoverTooltip, setHoverTooltip] = useState(null);
   const searchInputRef = useRef(null);
   const resizeRef = useRef(null);
+  const animRef = useRef(null);
+  const sidebarWidthRef = useRef(null);
+  const sidebarRootRef = useRef(null);
+  const resizingRef = useRef(false);
   const createMenu = useAnchoredMenu(createOpen);
   const sortMenu = useAnchoredMenu(sortOpen);
-  const minimized = mode === LIBRARY_SIDEBAR_MODES.MINIMIZED;
+
+  const committedWidth = mode === LIBRARY_SIDEBAR_MODES.MINIMIZED
+    ? LIBRARY_SIDEBAR.MINIMIZED_WIDTH
+    : clampLibrarySidebarWidth(width);
+  const sidebarWidth = viewWidth ?? committedWidth;
+  sidebarWidthRef.current = sidebarWidth;
+  const layout = getSidebarLayout(sidebarWidth);
+  const { progress } = layout;
+  const fullyMinimized = progress <= 0;
+  const chromeInteractive = progress > 0.85;
 
   const currentFolder = folders.find((folder) => folder.id === libraryScopeFolderId) || null;
   const scopedItems = useMemo(() => buildLibraryVisibleItems({
@@ -210,7 +305,7 @@ export function PlayerLibrarySidebar({
     myMixes,
   }), [folders, myMixes, playlists]);
 
-  const searchQuery = searchOpen ? searchDraft.trim() : '';
+  const searchQuery = searchOpen && progress > 0 ? searchDraft.trim() : '';
   const displayedItems = useMemo(() => {
     if (searchQuery) {
       return searchPlayerLibrary(catalogItems, searchQuery)
@@ -221,9 +316,48 @@ export function PlayerLibrarySidebar({
     return sortLibraryItems(scopedItems, sort, sortReversed);
   }, [catalogItems, scopedItems, searchQuery, sort, sortReversed]);
 
+  const stopAnimation = useCallback(() => {
+    if (animRef.current != null) {
+      window.cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+    }
+    setIsAnimating(false);
+  }, []);
+
+  const animateToWidth = useCallback((targetWidth, targetMode, { onComplete } = {}) => {
+    stopAnimation();
+    const from = sidebarWidthRef.current;
+    const start = performance.now();
+    setIsAnimating(true);
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / LIBRARY_SIDEBAR.TOGGLE_ANIMATION_MS);
+      setViewWidth(from + (targetWidth - from) * t);
+      if (t < 1) {
+        animRef.current = window.requestAnimationFrame(step);
+        return;
+      }
+      animRef.current = null;
+      setMode(targetMode);
+      if (targetMode === LIBRARY_SIDEBAR_MODES.DEFAULT) {
+        setWidth(clampLibrarySidebarWidth(targetWidth));
+      }
+      setIsAnimating(false);
+      onComplete?.(targetWidth, targetMode);
+      if (!resizingRef.current) {
+        setViewWidth(null);
+      }
+    };
+    animRef.current = window.requestAnimationFrame(step);
+  }, [stopAnimation]);
+
+  useEffect(() => () => {
+    if (animRef.current != null) window.cancelAnimationFrame(animRef.current);
+  }, []);
+
   useEffect(() => {
+    if (isResizing || isAnimating) return;
     writeLibrarySidebarSettings({ mode, width, sort, sortReversed });
-  }, [mode, sort, sortReversed, width]);
+  }, [isAnimating, isResizing, mode, sort, sortReversed, width]);
 
   useEffect(() => {
     if (!searchOpen) return undefined;
@@ -232,12 +366,13 @@ export function PlayerLibrarySidebar({
   }, [searchOpen]);
 
   useEffect(() => {
-    if (!minimized) return;
+    if (!fullyMinimized) return;
     setSearchOpen(false);
     setSearchDraft('');
     setCreateOpen(false);
     setSortOpen(false);
-  }, [minimized]);
+    setHoverTooltip(null);
+  }, [fullyMinimized]);
 
   useEffect(() => {
     const handleDocumentClick = (event) => {
@@ -261,21 +396,67 @@ export function PlayerLibrarySidebar({
 
   useEffect(() => {
     if (!isResizing) return undefined;
-    const handleMove = (event) => {
+    const applyDragPosition = (clientX) => {
       const drag = resizeRef.current;
-      if (!drag) return;
+      if (!drag || drag.modeAnimating) return;
+      const pointerWidth = clientX - drag.originLeft - drag.grabOffset;
       const next = resolveLibrarySidebarDrag({
         mode: drag.mode,
-        startWidth: drag.startWidth,
-        deltaX: event.clientX - drag.startX,
+        pointerWidth,
       });
+      if (next.mode !== drag.mode) {
+        const targetWidth = next.mode === LIBRARY_SIDEBAR_MODES.MINIMIZED
+          ? LIBRARY_SIDEBAR.MINIMIZED_WIDTH
+          : LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH;
+        drag.modeAnimating = true;
+        drag.last = { mode: next.mode, width: targetWidth };
+        animateToWidth(targetWidth, next.mode, {
+          onComplete: (finishedWidth, finishedMode) => {
+            const active = resizeRef.current;
+            if (!active) return;
+            active.mode = finishedMode;
+            active.modeAnimating = false;
+            active.last = { mode: finishedMode, width: finishedWidth };
+            if (resizingRef.current) {
+              applyDragPosition(active.lastClientX);
+            }
+          },
+        });
+        return;
+      }
+      drag.last = next;
+      setViewWidth(next.width);
       setMode(next.mode);
       if (next.mode === LIBRARY_SIDEBAR_MODES.DEFAULT) {
         setWidth(next.width);
       }
     };
+    const handleMove = (event) => {
+      const drag = resizeRef.current;
+      if (!drag) return;
+      drag.lastClientX = event.clientX;
+      applyDragPosition(event.clientX);
+    };
     const handleUp = () => {
+      const drag = resizeRef.current;
+      resizingRef.current = false;
       setIsResizing(false);
+      if (drag?.modeAnimating) {
+        return;
+      }
+      const next = drag?.last || {
+        mode: drag?.mode,
+        width: sidebarWidthRef.current,
+      };
+      const committed = commitLibrarySidebarDrag({
+        mode: next.mode,
+        width: next.width,
+      });
+      setMode(committed.mode);
+      if (committed.mode === LIBRARY_SIDEBAR_MODES.DEFAULT) {
+        setWidth(committed.width);
+      }
+      setViewWidth(null);
     };
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
@@ -283,11 +464,11 @@ export function PlayerLibrarySidebar({
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [isResizing]);
+  }, [animateToWidth, isResizing]);
 
-  const sidebarWidth = minimized ? LIBRARY_SIDEBAR.MINIMIZED_WIDTH : clampLibrarySidebarWidth(width);
   const sortLabel = LIBRARY_SORT_OPTIONS.find((option) => option.id === sort)?.label || 'Latest';
   const showResizeLine = isResizing || resizeHover;
+  const instantChrome = isResizing;
 
   const isEntryActive = (entry) => {
     if (entry.kind === 'folder') return false;
@@ -301,25 +482,43 @@ export function PlayerLibrarySidebar({
   };
 
   const toggleMode = () => {
-    if (minimized) {
-      setMode(LIBRARY_SIDEBAR_MODES.DEFAULT);
-      setWidth((current) => clampLibrarySidebarWidth(current));
+    if (fullyMinimized) {
+      animateToWidth(clampLibrarySidebarWidth(width), LIBRARY_SIDEBAR_MODES.DEFAULT);
       return;
     }
-    setMode(LIBRARY_SIDEBAR_MODES.MINIMIZED);
+    animateToWidth(LIBRARY_SIDEBAR.MINIMIZED_WIDTH, LIBRARY_SIDEBAR_MODES.MINIMIZED);
   };
 
   const startResize = (event) => {
     event.preventDefault();
+    stopAnimation();
+    const startMode = fullyMinimized
+      ? LIBRARY_SIDEBAR_MODES.MINIMIZED
+      : LIBRARY_SIDEBAR_MODES.DEFAULT;
+    const startWidth = fullyMinimized
+      ? LIBRARY_SIDEBAR.MINIMIZED_WIDTH
+      : Math.max(LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH, sidebarWidth);
+    const rect = sidebarRootRef.current?.getBoundingClientRect();
+    const originLeft = rect?.left ?? 0;
+    const grabOffset = event.clientX - (rect?.right ?? event.clientX);
+    resizingRef.current = true;
     resizeRef.current = {
-      mode,
-      startX: event.clientX,
-      startWidth: sidebarWidth,
+      mode: startMode,
+      originLeft,
+      grabOffset,
+      lastClientX: event.clientX,
+      modeAnimating: false,
+      last: {
+        mode: startMode,
+        width: startWidth,
+      },
     };
+    setViewWidth(sidebarWidth);
     setIsResizing(true);
     setCreateOpen(false);
     setSortOpen(false);
     setHoverTooltip(null);
+    setHeaderHover(false);
   };
 
   const createMenuNode = createOpen && createMenu.coords && typeof document !== 'undefined'
@@ -403,48 +602,54 @@ export function PlayerLibrarySidebar({
 
   return (
     <div
-      className={`relative shrink-0 min-h-0 ${isResizing ? '' : 'transition-[width] duration-200'}`}
+      ref={sidebarRootRef}
+      className="relative shrink-0 min-h-0"
       style={{ width: sidebarWidth }}
     >
       <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-gray-700 bg-gray-800/80">
-        <div className={`relative z-20 flex h-11 min-h-11 max-h-11 shrink-0 items-center gap-1 border-b border-gray-700 px-2 ${
-          minimized ? 'justify-center' : ''
+        <div className={`relative z-20 flex h-11 min-h-11 max-h-11 shrink-0 items-center border-b border-gray-700 ${
+          fullyMinimized ? 'justify-center px-1' : 'gap-1 px-2'
         }`}>
           <button
             type="button"
             onClick={toggleMode}
-            className={`group/toggle flex min-w-0 items-center rounded-md py-1 text-left hover:bg-gray-700 ${
-              minimized ? 'h-8 w-8 justify-center px-0' : 'flex-1 gap-1.5 px-1'
+            onMouseEnter={() => setHeaderHover(true)}
+            onMouseLeave={() => setHeaderHover(false)}
+            className={`group/toggle flex items-center rounded-md py-1 text-left hover:bg-gray-700 ${
+              fullyMinimized ? 'h-8 w-8 justify-center px-0' : 'min-w-0 flex-1 px-1'
             }`}
-            title={minimized ? 'Expand Your Library' : 'Collapse Your Library'}
-            aria-label={minimized ? 'Expand Your Library' : 'Collapse Your Library'}
+            title={fullyMinimized ? 'Expand Your Library' : 'Collapse Your Library'}
+            aria-label={fullyMinimized ? 'Expand Your Library' : 'Collapse Your Library'}
           >
-            {minimized ? (
-              <span className="relative flex h-6 w-6 items-center justify-center">
-                <Library
-                  size={HEADER_ICON_SIZE}
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transition-opacity duration-150 group-hover/toggle:opacity-0"
-                />
-                <PanelLeftOpen
-                  size={HEADER_ICON_SIZE}
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/toggle:opacity-100"
-                />
+            <HeaderToggleIcon
+              progress={progress}
+              hovering={headerHover}
+              instant={instantChrome}
+              animating={isAnimating}
+            />
+            {fullyMinimized ? null : (
+              <span
+                className="truncate text-base font-semibold leading-none"
+                style={{
+                  opacity: progress,
+                  maxWidth: lerp(0, 180, progress),
+                  minWidth: 0,
+                  flexGrow: 0,
+                  flexShrink: 1,
+                  overflow: 'hidden',
+                }}
+              >
+                Your Library
               </span>
-            ) : (
-              <>
-                <span className="flex w-0 shrink-0 items-center justify-center overflow-hidden opacity-0 transition-all duration-200 group-hover/toggle:w-6 group-hover/toggle:opacity-100">
-                  <PanelLeftClose size={HEADER_ICON_SIZE} />
-                </span>
-                <span className="truncate text-base font-semibold leading-none">Your Library</span>
-              </>
             )}
           </button>
 
-          {!minimized ? (
+          {fullyMinimized ? null : (
             <button
               ref={createMenu.triggerRef}
               type="button"
               onClick={() => {
+                if (!chromeInteractive) return;
                 setCreateOpen((previous) => !previous);
                 setSortOpen(false);
               }}
@@ -452,117 +657,154 @@ export function PlayerLibrarySidebar({
               title="Create"
               aria-haspopup="menu"
               aria-expanded={createOpen}
+              aria-hidden={!chromeInteractive}
+              tabIndex={chromeInteractive ? 0 : -1}
+              style={{
+                opacity: progress,
+                width: lerp(0, 32, progress),
+                minWidth: 0,
+                overflow: 'hidden',
+                pointerEvents: chromeInteractive ? 'auto' : 'none',
+              }}
             >
               <Plus size={HEADER_ICON_SIZE} />
             </button>
-          ) : null}
+          )}
         </div>
 
-        {!minimized && libraryScopeFolderId && !searchQuery ? (
-          <div className="shrink-0 border-b border-gray-700 px-2 py-1.5">
+        {libraryScopeFolderId && !searchQuery ? (
+          <div
+            className="shrink-0 overflow-hidden border-b border-gray-700"
+            style={{
+              paddingLeft: lerp(4, 8, progress),
+              paddingRight: lerp(4, 8, progress),
+              paddingTop: lerp(4, 6, progress),
+              paddingBottom: lerp(4, 6, progress),
+            }}
+          >
             <button
               type="button"
               onClick={() => onLibraryScopeChange?.(null)}
-              className="inline-flex max-w-full items-center gap-1 rounded px-1 text-sm hover:bg-gray-700"
-              title="Back to Your Library"
-            >
-              <ChevronLeft size={13} className="shrink-0" />
-              <span className="truncate">{currentFolder?.name || 'Your Library'}</span>
-            </button>
-          </div>
-        ) : null}
-
-        {!minimized ? (
-          <div className="flex h-9 min-h-9 max-h-9 shrink-0 items-center gap-2 border-b border-gray-700 px-2">
-            {searchOpen ? (
-              <div className="relative min-w-0 flex-1">
-                <Search size={TOOLBAR_ICON_SIZE} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchDraft}
-                  placeholder="Search your library"
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => setSearchDraft(event.target.value)}
-                  onBlur={() => {
-                    if (!searchDraft.trim()) setSearchOpen(false);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Escape') return;
-                    if (searchDraft) {
-                      setSearchDraft('');
-                      return;
-                    }
-                    setSearchOpen(false);
-                  }}
-                  className={`h-7 w-full rounded-md border border-gray-700 bg-gray-900 py-0 pl-8 text-sm text-gray-100 placeholder:text-gray-500 focus:border-gray-500 focus:outline-none ${
-                    searchDraft ? 'pr-7' : 'pr-2'
-                  }`}
-                />
-                {searchDraft ? (
-                  <button
-                    type="button"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:text-white"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      setSearchDraft('');
-                      searchInputRef.current?.focus();
-                    }}
-                    aria-label="Clear library search"
-                  >
-                    <X size={12} />
-                  </button>
-                ) : null}
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchOpen(true);
-                  setCreateOpen(false);
-                }}
-                className="rounded p-1.5 text-gray-300 hover:bg-gray-700 hover:text-white"
-                title="Search Your Library"
-                aria-label="Search Your Library"
-              >
-                <Search size={TOOLBAR_ICON_SIZE} />
-              </button>
-            )}
-            <button
-              ref={sortMenu.triggerRef}
-              type="button"
-              onClick={() => {
-                setSortOpen((previous) => !previous);
-                setCreateOpen(false);
-              }}
-              className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded px-1.5 py-1 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
-              aria-haspopup="menu"
-              aria-expanded={sortOpen}
-              title="Change library order"
-            >
-              {searchOpen ? null : <span>{sortLabel}</span>}
-              <ListFilter size={TOOLBAR_ICON_SIZE} className="shrink-0" />
-            </button>
-          </div>
-        ) : null}
-
-        {minimized && libraryScopeFolderId ? (
-          <div className="flex justify-center px-1 py-1">
-            <button
-              type="button"
-              onClick={() => onLibraryScopeChange?.(null)}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-gray-300 hover:bg-gray-700"
+              className="inline-flex max-w-full items-center gap-1 rounded hover:bg-gray-700"
               title="Back to Your Library"
               aria-label="Back to Your Library"
+              style={{
+                height: lerp(36, 28, progress),
+                paddingLeft: lerp(6, 4, progress),
+                paddingRight: lerp(6, 4, progress),
+              }}
             >
-              <ChevronLeft size={16} />
+              <ChevronLeft size={Math.round(lerp(16, 13, progress))} className="shrink-0" />
+              <span
+                className="truncate text-sm"
+                style={{
+                  opacity: progress,
+                  maxWidth: lerp(0, 200, progress),
+                  overflow: 'hidden',
+                }}
+              >
+                {currentFolder?.name || 'Your Library'}
+              </span>
             </button>
           </div>
         ) : null}
 
         <div
-          className={`flex-1 overflow-auto ${minimized ? 'p-1 space-y-1' : 'p-2 space-y-1'}`}
+          className="flex shrink-0 items-center gap-2 overflow-hidden border-gray-700"
+          style={{
+            height: lerp(0, TOOLBAR_HEIGHT, progress),
+            opacity: progress,
+            paddingLeft: 8,
+            paddingRight: 8,
+            pointerEvents: chromeInteractive ? 'auto' : 'none',
+            borderBottomWidth: progress > 0 ? 1 : 0,
+            borderBottomStyle: 'solid',
+          }}
+          aria-hidden={!chromeInteractive}
+        >
+          {searchOpen ? (
+            <div className="relative min-w-0 flex-1">
+              <Search size={TOOLBAR_ICON_SIZE} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchDraft}
+                placeholder="Search your library"
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => setSearchDraft(event.target.value)}
+                onBlur={() => {
+                  if (!searchDraft.trim()) setSearchOpen(false);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Escape') return;
+                  if (searchDraft) {
+                    setSearchDraft('');
+                    return;
+                  }
+                  setSearchOpen(false);
+                }}
+                className={`h-7 w-full rounded-md border border-gray-700 bg-gray-900 py-0 pl-8 text-sm text-gray-100 placeholder:text-gray-500 focus:border-gray-500 focus:outline-none ${
+                  searchDraft ? 'pr-7' : 'pr-2'
+                }`}
+              />
+              {searchDraft ? (
+                <button
+                  type="button"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:text-white"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setSearchDraft('');
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label="Clear library search"
+                >
+                  <X size={12} />
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchOpen(true);
+                setCreateOpen(false);
+              }}
+              className="rounded p-1.5 text-gray-300 hover:bg-gray-700 hover:text-white"
+              title="Search Your Library"
+              aria-label="Search Your Library"
+              tabIndex={chromeInteractive ? 0 : -1}
+            >
+              <Search size={TOOLBAR_ICON_SIZE} />
+            </button>
+          )}
+          <button
+            ref={sortMenu.triggerRef}
+            type="button"
+            onClick={() => {
+              if (!chromeInteractive) return;
+              setSortOpen((previous) => !previous);
+              setCreateOpen(false);
+            }}
+            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded px-1.5 py-1 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+            aria-haspopup="menu"
+            aria-expanded={sortOpen}
+            title="Change library order"
+            tabIndex={chromeInteractive ? 0 : -1}
+          >
+            {searchOpen ? null : <span>{sortLabel}</span>}
+            <ListFilter size={TOOLBAR_ICON_SIZE} className="shrink-0" />
+          </button>
+        </div>
+
+        <div
+          className="flex-1 overflow-auto"
+          style={{
+            padding: layout.listPad,
+            rowGap: 4,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
           onContextMenu={(event) => {
             event.preventDefault();
             onContextMenu?.(null, event);
@@ -573,7 +815,7 @@ export function PlayerLibrarySidebar({
               key={entry.id}
               entry={entry}
               isActive={isEntryActive(entry)}
-              minimized={minimized}
+              layout={layout}
               onSelect={onSelectEntry}
               onPlayMix={onPlayMix}
               onContextMenu={(nextEntry, event) => onContextMenu?.(nextEntry, event)}
@@ -581,7 +823,16 @@ export function PlayerLibrarySidebar({
             />
           ))}
           {!displayedItems.length ? (
-            <div className={`text-xs text-gray-500 ${minimized ? 'px-1 py-2 text-center' : 'px-2 py-2'}`}>
+            <div
+              className="text-xs text-gray-500"
+              style={{
+                paddingLeft: fullyMinimized ? 4 : 8,
+                paddingRight: fullyMinimized ? 4 : 8,
+                paddingTop: 8,
+                paddingBottom: 8,
+                textAlign: fullyMinimized ? 'center' : 'left',
+              }}
+            >
               {searchQuery ? 'No matching library items.' : 'No library items here.'}
             </div>
           ) : null}

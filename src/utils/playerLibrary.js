@@ -27,13 +27,16 @@ export const LIBRARY_SORT_OPTIONS = [
   { id: LIBRARY_SORTS.ALPHA, label: 'Alphabetical' },
 ];
 
+const MINIMIZED_WIDTH = 64;
+const DEFAULT_MIN_WIDTH = 240;
+
 export const LIBRARY_SIDEBAR = {
-  MINIMIZED_WIDTH: 72,
-  DEFAULT_MIN_WIDTH: 240,
+  MINIMIZED_WIDTH,
+  DEFAULT_MIN_WIDTH,
   DEFAULT_MAX_WIDTH: 480,
   DEFAULT_WIDTH: 320,
-  COLLAPSE_THRESHOLD: 80,
-  EXPAND_THRESHOLD: 48,
+  FLIP_WIDTH: Math.round((MINIMIZED_WIDTH + DEFAULT_MIN_WIDTH) / 2),
+  TOGGLE_ANIMATION_MS: 100,
 };
 
 const DEFAULT_LIBRARY_SIDEBAR_SETTINGS = {
@@ -117,47 +120,53 @@ export function writeLibrarySidebarSettings(settings) {
   }
 }
 
+export function lerp(start, end, progress) {
+  return start + (end - start) * progress;
+}
+
+export function librarySidebarProgress(width) {
+  const span = LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH - LIBRARY_SIDEBAR.MINIMIZED_WIDTH;
+  const numeric = Number(width);
+  if (!Number.isFinite(numeric) || span <= 0) return 1;
+  return Math.max(0, Math.min(1, (numeric - LIBRARY_SIDEBAR.MINIMIZED_WIDTH) / span));
+}
+
 export function resolveLibrarySidebarDrag({
   mode,
   startWidth,
   deltaX,
+  pointerWidth,
 }) {
-  const currentMode = normalizeLibrarySidebarMode(mode);
-  const movement = Number(deltaX) || 0;
+  const measured = Number.isFinite(Number(pointerWidth))
+    ? Math.round(Number(pointerWidth))
+    : Math.round((Number(startWidth) || LIBRARY_SIDEBAR.DEFAULT_WIDTH) + (Number(deltaX) || 0));
 
-  if (currentMode === LIBRARY_SIDEBAR_MODES.MINIMIZED) {
-    if (movement <= LIBRARY_SIDEBAR.EXPAND_THRESHOLD) {
-      return {
-        mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
-        width: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
-      };
-    }
-    const extra = movement - LIBRARY_SIDEBAR.EXPAND_THRESHOLD;
+  if (measured > LIBRARY_SIDEBAR.FLIP_WIDTH) {
     return {
       mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
-      width: clampLibrarySidebarWidth(LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH + extra),
-    };
-  }
-
-  const nextWidth = (Number(startWidth) || LIBRARY_SIDEBAR.DEFAULT_WIDTH) + movement;
-  if (nextWidth >= LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH) {
-    return {
-      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
-      width: clampLibrarySidebarWidth(nextWidth),
-    };
-  }
-
-  const overshoot = LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH - nextWidth;
-  if (overshoot < LIBRARY_SIDEBAR.COLLAPSE_THRESHOLD) {
-    return {
-      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
-      width: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH,
+      width: clampLibrarySidebarWidth(measured),
     };
   }
 
   return {
     mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
     width: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
+  };
+}
+
+export function commitLibrarySidebarDrag({
+  mode,
+  width,
+}) {
+  if (normalizeLibrarySidebarMode(mode) === LIBRARY_SIDEBAR_MODES.MINIMIZED) {
+    return {
+      mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
+      width: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
+    };
+  }
+  return {
+    mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
+    width: clampLibrarySidebarWidth(width),
   };
 }
 

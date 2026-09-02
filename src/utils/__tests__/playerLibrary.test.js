@@ -6,7 +6,9 @@ import {
   buildLibrarySearchItems,
   buildLibraryVisibleItems,
   buildMyDeviceQueue,
+  commitLibrarySidebarDrag,
   libraryEntryFromSearchItem,
+  librarySidebarProgress,
   listLibraryFolderMoveTargets,
   resolveLibrarySidebarDrag,
   searchPlayerLibrary,
@@ -198,6 +200,16 @@ describe('searchPlayerLibrary', () => {
   });
 });
 
+describe('librarySidebarProgress', () => {
+  it('maps live width onto the minimized-to-default range', () => {
+    expect(librarySidebarProgress(LIBRARY_SIDEBAR.MINIMIZED_WIDTH)).toBe(0);
+    expect(librarySidebarProgress(LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH)).toBe(1);
+    expect(librarySidebarProgress(
+      (LIBRARY_SIDEBAR.MINIMIZED_WIDTH + LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH) / 2
+    )).toBeCloseTo(0.5);
+  });
+});
+
 describe('resolveLibrarySidebarDrag', () => {
   it('resizes within the default range', () => {
     expect(resolveLibrarySidebarDrag({
@@ -207,11 +219,10 @@ describe('resolveLibrarySidebarDrag', () => {
     })).toEqual({ mode: LIBRARY_SIDEBAR_MODES.DEFAULT, width: 300 });
   });
 
-  it('holds the minimum default width until the collapse threshold is crossed', () => {
+  it('holds the minimum default width until the pointer reaches the midpoint', () => {
     expect(resolveLibrarySidebarDrag({
       mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
-      startWidth: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH,
-      deltaX: -(LIBRARY_SIDEBAR.COLLAPSE_THRESHOLD - 1),
+      pointerWidth: LIBRARY_SIDEBAR.FLIP_WIDTH + 1,
     })).toEqual({
       mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
       width: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH,
@@ -219,19 +230,17 @@ describe('resolveLibrarySidebarDrag', () => {
 
     expect(resolveLibrarySidebarDrag({
       mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
-      startWidth: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH,
-      deltaX: -LIBRARY_SIDEBAR.COLLAPSE_THRESHOLD,
+      pointerWidth: LIBRARY_SIDEBAR.FLIP_WIDTH,
     })).toEqual({
       mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
       width: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
     });
   });
 
-  it('stays minimized until dragged far enough to expand', () => {
+  it('stays minimized until the pointer goes past the midpoint', () => {
     expect(resolveLibrarySidebarDrag({
       mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
-      startWidth: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
-      deltaX: LIBRARY_SIDEBAR.EXPAND_THRESHOLD,
+      pointerWidth: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
     })).toEqual({
       mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
       width: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
@@ -239,11 +248,76 @@ describe('resolveLibrarySidebarDrag', () => {
 
     expect(resolveLibrarySidebarDrag({
       mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
-      startWidth: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
-      deltaX: LIBRARY_SIDEBAR.EXPAND_THRESHOLD + 24,
+      pointerWidth: LIBRARY_SIDEBAR.FLIP_WIDTH,
+    })).toEqual({
+      mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
+      width: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
+    });
+
+    expect(resolveLibrarySidebarDrag({
+      mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
+      pointerWidth: LIBRARY_SIDEBAR.FLIP_WIDTH + 1,
     })).toEqual({
       mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
-      width: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH + 24,
+      width: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH,
+    });
+  });
+
+  it('returns to default after collapsing if the pointer crosses the midpoint again', () => {
+    expect(resolveLibrarySidebarDrag({
+      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
+      pointerWidth: LIBRARY_SIDEBAR.FLIP_WIDTH,
+    })).toEqual({
+      mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
+      width: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
+    });
+
+    expect(resolveLibrarySidebarDrag({
+      mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
+      pointerWidth: LIBRARY_SIDEBAR.FLIP_WIDTH + 1,
+    })).toEqual({
+      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
+      width: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH,
+    });
+  });
+
+  it('only resizes the default sidebar when the pointer is past the minimum edge', () => {
+    expect(resolveLibrarySidebarDrag({
+      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
+      pointerWidth: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH - 20,
+    })).toEqual({
+      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
+      width: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH,
+    });
+
+    expect(resolveLibrarySidebarDrag({
+      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
+      pointerWidth: 300,
+    })).toEqual({
+      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
+      width: 300,
+    });
+  });
+});
+
+describe('commitLibrarySidebarDrag', () => {
+  it('keeps a snapped default width', () => {
+    expect(commitLibrarySidebarDrag({
+      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
+      width: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH + 40,
+    })).toEqual({
+      mode: LIBRARY_SIDEBAR_MODES.DEFAULT,
+      width: LIBRARY_SIDEBAR.DEFAULT_MIN_WIDTH + 40,
+    });
+  });
+
+  it('commits minimized mode to the rail width', () => {
+    expect(commitLibrarySidebarDrag({
+      mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
+      width: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
+    })).toEqual({
+      mode: LIBRARY_SIDEBAR_MODES.MINIMIZED,
+      width: LIBRARY_SIDEBAR.MINIMIZED_WIDTH,
     });
   });
 });
