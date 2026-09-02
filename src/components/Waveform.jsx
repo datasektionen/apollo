@@ -41,7 +41,13 @@ function Waveform({
       hideScrollbar: true,
     });
 
-    wavesurfer.on('ready', () => onReady?.());
+    wavesurfer.on('ready', () => {
+      containerRef.current?.querySelectorAll('canvas').forEach((canvas) => {
+        canvas.setAttribute('draggable', 'false');
+        canvas.style.setProperty('-webkit-user-drag', 'none');
+      });
+      onReady?.();
+    });
 
     wavesurferRef.current = wavesurfer;
 
@@ -117,7 +123,13 @@ function Waveform({
     <div 
       ref={containerRef} 
       className="w-full"
-      style={{ height: `${height}px` }}
+      draggable={false}
+      onDragStart={(event) => event.preventDefault()}
+      style={{
+        height: `${height}px`,
+        pointerEvents: 'none',
+        WebkitUserDrag: 'none',
+      }}
     />
   );
 }

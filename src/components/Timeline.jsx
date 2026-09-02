@@ -828,8 +828,13 @@ function Timeline({
     return selectedIds;
   };
 
+  const handleNativeDragStart = (e) => {
+    e.preventDefault();
+  };
+
   const handleTimelineMouseDown = (e) => {
     if (e.button !== 0 || dragState) return;
+    e.preventDefault();
     const point = getTimelineContentPoint(e.clientX, e.clientY);
     if (!point) return;
 
@@ -904,10 +909,7 @@ function Timeline({
   };
 
   const handleClipMouseDown = (e, clip, track) => {
-    if (e.button === 2) {
-      e.preventDefault();
-    }
-
+    e.preventDefault();
     e.stopPropagation();
 
     if (e.button === 0 && (e.shiftKey || isPrimaryModifierPressed(e))) {
@@ -1969,7 +1971,8 @@ function Timeline({
 
   const handleRulerMouseDown = (e) => {
     if (e.button !== 0) return; // Only left click
-    
+    e.preventDefault();
+
     const rect = rulerScrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollLeft;
     const timeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
@@ -1989,6 +1992,7 @@ function Timeline({
   };
 
   const handleLoopMarkerMouseDown = (e, markerType) => {
+    e.preventDefault();
     e.stopPropagation();
     if (e.button !== 0) return; // Only left click
     
@@ -2299,6 +2303,7 @@ function Timeline({
             style={{ width: `${timelineWidthPx}px`, height: '24px' }} 
             className="relative cursor-pointer"
             onMouseDown={handleRulerMouseDown}
+            onDragStart={handleNativeDragStart}
           >
             <div className="absolute left-0 right-0 top-0 h-[23px] overflow-hidden">
               {/* Time markers */}
@@ -2450,6 +2455,7 @@ function Timeline({
       ref={timelineRef}
       className={`${sharedVerticalScroll ? 'relative' : 'flex-1 overflow-hidden relative'} h-full bg-gray-900 w-full min-w-0`}
       onMouseDown={handleTimelineMouseDown}
+      onDragStart={handleNativeDragStart}
       onContextMenu={handleContextMenu}
     >
       <div 
@@ -2637,6 +2643,7 @@ function Timeline({
                           }}
                           onClick={(e) => handleClipClick(e, clip, track.id)}
                           onMouseDown={(e) => handleClipMouseDown(e, clip, track)}
+                          onDragStart={handleNativeDragStart}
                           onContextMenu={handleClipRightClick}
                         >
                           <div

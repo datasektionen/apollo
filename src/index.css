@@ -32,10 +32,13 @@ body.row-drag-cursor * {
   box-sizing: border-box;
 }
 
-/* Disable text selection globally except editable controls */
-*:not(input):not(textarea):not([contenteditable="true"]) {
+/* Disable text selection and native element drag globally except editable
+   controls and explicit HTML5 drag sources. Native drag of canvases/images
+   otherwise steals mouse-drag from the DAW timeline and similar editors. */
+*:not(input):not(textarea):not([contenteditable="true"]):not([draggable="true"]) {
   -webkit-user-select: none;
   user-select: none;
+  -webkit-user-drag: none;
 }
 
 input,
@@ -43,6 +46,17 @@ textarea,
 [contenteditable="true"] {
   -webkit-user-select: text;
   user-select: text;
+}
+
+img,
+canvas,
+svg,
+video {
+  -webkit-user-drag: none;
+}
+
+[draggable="true"] {
+  -webkit-user-drag: element;
 }
 
 /* Hide scrollbars on timeline ruler while keeping scroll functionality */

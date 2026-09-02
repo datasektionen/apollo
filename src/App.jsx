@@ -15,6 +15,7 @@ import { prepareMediaForImportSource } from './lib/mediaEncoding';
 import { registerAndUploadMediaBlob } from './lib/mediaUpload';
 import { normalizeProjectName } from './utils/naming';
 import { createId } from './utils/id';
+import { installNativeDragGuard } from './utils/nativeDrag';
 import {
   beginOidcLogin,
   bootstrapServerProject,
@@ -177,6 +178,8 @@ function App() {
       window.removeEventListener('popstate', handlePopState);
     };
   }, []);
+
+  useEffect(() => installNativeDragGuard(), []);
 
   useEffect(() => {
     if (!serverSession) return;
