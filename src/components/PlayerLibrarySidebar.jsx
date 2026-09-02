@@ -850,7 +850,7 @@ export function PlayerLibrarySidebar({
       >
         <div
           className={`absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full transition-colors ${
-            showResizeLine ? 'bg-white/55' : 'bg-transparent'
+            isResizing ? 'bg-white/75' : showResizeLine ? 'bg-white/45' : 'bg-transparent'
           }`}
         />
       </div>
