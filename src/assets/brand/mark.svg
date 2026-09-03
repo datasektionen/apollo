@@ -2,10 +2,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 270.93333 270.93333">
   <defs>
     <linearGradient id="swatch18">
-      <stop style="stop-color:#92742d;stop-opacity:1;" offset="0.06" id="stop18" />
-      <stop style="stop-color:#cca234;stop-opacity:1;" offset="0.38523316" id="stop20" />
-      <stop style="stop-color:#92742d;stop-opacity:1;" offset="0.88999999" id="stop21" />
-      <stop style="stop-color:#b49032;stop-opacity:1;" offset="1" id="stop1" />
+      <stop style="stop-color:#8c7133;stop-opacity:1;" offset="0.06" id="stop18" />
+      <stop style="stop-color:#cb9d34;stop-opacity:1;" offset="0.38523316" id="stop20" />
+      <stop style="stop-color:#8c7133;stop-opacity:1;" offset="0.88999999" id="stop21" />
+      <stop style="stop-color:#af8b37;stop-opacity:1;" offset="1" id="stop1" />
     </linearGradient>
     <linearGradient
        xlink:href="#swatch18"
