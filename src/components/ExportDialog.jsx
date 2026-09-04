@@ -364,6 +364,32 @@ async function writeFileToDirectory(rootDirectoryHandle, relativePath, blob) {
   await writable.close();
 }
 
+function isDirectoryExportUnsupported(error) {
+  return error?.name === 'NotSupportedError'
+    || error?.message === 'Directory export is not supported in this browser.';
+}
+
+async function saveExportFiles(files, { directoryHandle = null, signal = null, onProgress = null } = {}) {
+  let written = 0;
+  for (const file of files) {
+    if (signal?.aborted) {
+      const abortError = new Error('Export cancelled');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
+
+    if (directoryHandle) {
+      await writeFileToDirectory(directoryHandle, file.relativePath, file.blob);
+    } else {
+      // Browser downloads are saved to the user's configured default folder.
+      downloadFile(file.blob, file.filename || file.relativePath);
+    }
+
+    written += 1;
+    onProgress?.(written, files.length);
+  }
+}
+
 function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExportSettings }) {
   const abortControllerRef = useRef(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -787,6 +813,8 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     let directoryHandle;
+    let useBrowserDownloads = typeof window === 'undefined'
+      || typeof window.showDirectoryPicker !== 'function';
     const exportSettingsForRun = normalizeExportSettings({
       ...(project.exportSettings || {}),
       transformedPanRange,
@@ -797,18 +825,25 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
 
     try {
       // Must be called directly from the click gesture (Windows requires this).
-      directoryHandle = await pickExportDirectory(project.projectId);
+      if (!useBrowserDownloads) {
+        directoryHandle = await pickExportDirectory(project.projectId);
+      }
     } catch (error) {
       if (error?.name === 'AbortError') {
         setIsExporting(false);
         abortControllerRef.current = null;
         return;
       }
-      console.error('Export folder selection failed:', error);
-      alert('Export failed: ' + error.message);
-      setIsExporting(false);
-      abortControllerRef.current = null;
-      return;
+      if (isDirectoryExportUnsupported(error)) {
+        useBrowserDownloads = true;
+        directoryHandle = null;
+      } else {
+        console.error('Export folder selection failed:', error);
+        alert('Export failed: ' + error.message);
+        setIsExporting(false);
+        abortControllerRef.current = null;
+        return;
+      }
     }
 
     initializeProgress('audio', 'Preparing export...');
@@ -852,23 +887,18 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
       }
 
       setWriteProgress({ completed: 0, total: files.length });
-      setProgressMessage('Writing files...');
-      let written = 0;
-      for (const file of files) {
-        if (abortController.signal.aborted) {
-          const abortError = new Error('Export cancelled');
-          abortError.name = 'AbortError';
-          throw abortError;
-        }
-        await writeFileToDirectory(directoryHandle, file.relativePath, file.blob);
-        written += 1;
-        setWriteProgress({ completed: written, total: files.length });
-        const renderFraction = 1;
-        const writeFraction = written / files.length;
-        setProgressPercent(((renderFraction * 0.99) + (writeFraction * 0.01)) * 100);
-      }
+      setProgressMessage(useBrowserDownloads ? 'Downloading files...' : 'Writing files...');
+      await saveExportFiles(files, {
+        directoryHandle: useBrowserDownloads ? null : directoryHandle,
+        signal: abortController.signal,
+        onProgress: (written, total) => {
+          setWriteProgress({ completed: written, total });
+          const writeFraction = total > 0 ? written / total : 1;
+          setProgressPercent(((1 * 0.99) + (writeFraction * 0.01)) * 100);
+        },
+      });
 
-      markExportDone('Export complete');
+      markExportDone(useBrowserDownloads ? 'Export downloaded' : 'Export complete');
       setIsExporting(false);
       abortControllerRef.current = null;
     } catch (error) {
@@ -901,21 +931,30 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     let directoryHandle;
+    let useBrowserDownloads = typeof window === 'undefined'
+      || typeof window.showDirectoryPicker !== 'function';
 
     try {
       // Must be called directly from the click gesture (Windows requires this).
-      directoryHandle = await pickExportDirectory(project.projectId);
+      if (!useBrowserDownloads) {
+        directoryHandle = await pickExportDirectory(project.projectId);
+      }
     } catch (error) {
       if (error?.name === 'AbortError') {
         setIsExporting(false);
         abortControllerRef.current = null;
         return;
       }
-      console.error('External DAW export folder selection failed:', error);
-      alert('Export failed: ' + error.message);
-      setIsExporting(false);
-      abortControllerRef.current = null;
-      return;
+      if (isDirectoryExportUnsupported(error)) {
+        useBrowserDownloads = true;
+        directoryHandle = null;
+      } else {
+        console.error('External DAW export folder selection failed:', error);
+        alert('Export failed: ' + error.message);
+        setIsExporting(false);
+        abortControllerRef.current = null;
+        return;
+      }
     }
 
     initializeProgress('audio', 'Preparing External DAW stems...');
@@ -961,22 +1000,18 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
         total: Math.max(0, files.length - 1),
       });
       setWriteProgress({ completed: 0, total: files.length });
-      setProgressMessage('Writing files...');
-      let written = 0;
-      for (const file of files) {
-        if (abortController.signal.aborted) {
-          const abortError = new Error('Export cancelled');
-          abortError.name = 'AbortError';
-          throw abortError;
-        }
-        await writeFileToDirectory(directoryHandle, file.relativePath, file.blob);
-        written += 1;
-        setWriteProgress({ completed: written, total: files.length });
-        const writeFraction = written / files.length;
-        setProgressPercent(((1 * 0.99) + (writeFraction * 0.01)) * 100);
-      }
+      setProgressMessage(useBrowserDownloads ? 'Downloading files...' : 'Writing files...');
+      await saveExportFiles(files, {
+        directoryHandle: useBrowserDownloads ? null : directoryHandle,
+        signal: abortController.signal,
+        onProgress: (written, total) => {
+          setWriteProgress({ completed: written, total });
+          const writeFraction = total > 0 ? written / total : 1;
+          setProgressPercent(((1 * 0.99) + (writeFraction * 0.01)) * 100);
+        },
+      });
 
-      markExportDone('External DAW export complete');
+      markExportDone(useBrowserDownloads ? 'External DAW export downloaded' : 'External DAW export complete');
       setIsExporting(false);
       abortControllerRef.current = null;
     } catch (error) {
