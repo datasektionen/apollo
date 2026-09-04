@@ -1,7 +1,6 @@
 import { useCallback, useState, useEffect } from 'react';
 import useStore from './store/useStore';
 import Editor from './components/Editor';
-import { BrandMark } from './components/BrandLogo';
 import HostedLogin from './components/HostedLogin';
 import HostedDashboard from './components/HostedDashboard';
 import PlayerDashboard from './components/PlayerDashboard';
@@ -619,14 +618,9 @@ function App() {
   }, []);
 
   if (authBootstrapping) {
-    return (
-      <div className="h-screen w-screen overflow-hidden bg-gray-900 text-white flex items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-4 rounded border border-gray-700 bg-gray-800 px-6 py-5">
-          <BrandMark className="h-12 w-12" alt="" />
-          <p className="text-sm text-gray-300">Restoring Apollo session...</p>
-        </div>
-      </div>
-    );
+    // Keep the document's dark background while auth is resolved. Rendering
+    // a temporary screen here causes a distracting flash on every reload.
+    return null;
   }
 
   const adminRouteActive = isAdminPath(currentPath);
