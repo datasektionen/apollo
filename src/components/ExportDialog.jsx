@@ -5,6 +5,13 @@ import {
   EXPORT_PRESET_DEFINITIONS,
   exportProject,
 } from '../lib/exportEngine';
+import {
+  exportExternalDawStems,
+  DEFAULT_EXTERNAL_DAW_MIX_SETTINGS,
+  EXTERNAL_DAW_TRACK_SCOPES,
+  getExternalDawTrackDescriptors,
+  normalizeExternalDawMixSettings,
+} from '../lib/externalDawExport';
 import { exportAsZIP, downloadFile } from '../lib/projectPortability';
 import { loadExportDirectoryHandle, saveExportDirectoryHandle } from '../lib/db';
 import { normalizeExportSettings } from '../types/project';
@@ -16,12 +23,18 @@ import {
   TRACK_ROLE_CHOIR,
   TRACK_ROLE_INSTRUMENT,
   TRACK_ROLE_LEAD,
+  TRACK_ROLE_METRONOME,
 } from '../utils/trackRoles';
 
 const PRESET_BY_ID = Object.fromEntries(
   EXPORT_PRESET_DEFINITIONS.map((preset) => [preset.id, preset])
 );
 const DEFAULT_EXPANDED_NODE_IDS = new Set(['all', 'practice']);
+const EXPORT_TYPES = {
+  RENDERED_MIXES: 'rendered-mixes',
+  EXTERNAL_DAW: 'external-daw',
+  INTERNAL_PROJECT: 'internal-project',
+};
 const EXPORT_DIALOG_PRESET_LABEL_OVERRIDES = {
   [EXPORT_PRESETS.ACAPELLA]: 'Instruments',
   [EXPORT_PRESETS.NO_LEAD]: 'Leads',
@@ -36,6 +49,14 @@ const EXPORT_DIALOG_PRESET_LABEL_OVERRIDES = {
   [EXPORT_PRESETS.LEAD_PARTS_OMITTED]: 'Leads',
   [EXPORT_PRESETS.CHOIR_PARTS_OMITTED]: 'Choir',
 };
+const EXTERNAL_DAW_MIX_OPTIONS = [
+  ['trackVolume', 'Track volume', 'Apply Apollo track volume'],
+  ['trackPan', 'Track pan', 'Apply Apollo track pan'],
+  ['groupGain', 'Group gain', 'Apply Apollo group volume/gain'],
+  ['groupPan', 'Group pan', 'Apply Apollo group pan'],
+  ['muteStates', 'Mute/solo states', 'Apply Apollo mute and solo states'],
+  ['masterSettings', 'Master settings', 'Apply Apollo master volume and output settings'],
+];
 function formatElapsedAdaptive(ms) {
   const totalSeconds = Math.max(0, Math.floor((ms || 0) / 1000));
   if (totalSeconds < 10) return `${totalSeconds}s`;
@@ -346,6 +367,13 @@ async function writeFileToDirectory(rootDirectoryHandle, relativePath, blob) {
 function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExportSettings }) {
   const abortControllerRef = useRef(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportType, setExportType] = useState(EXPORT_TYPES.RENDERED_MIXES);
+  const [externalDawTrackScope, setExternalDawTrackScope] = useState(EXTERNAL_DAW_TRACK_SCOPES.AUDIBLE);
+  const [externalDawIncludeMetronome, setExternalDawIncludeMetronome] = useState(false);
+  const [externalDawMixSettings, setExternalDawMixSettings] = useState(
+    { ...DEFAULT_EXTERNAL_DAW_MIX_SETTINGS }
+  );
+  const [externalDawSelectedTrackIds, setExternalDawSelectedTrackIds] = useState(new Set());
   const [selectedLeafNodeIds, setSelectedLeafNodeIds] = useState(new Set(['preset-tutti']));
   const [exportBaseName, setExportBaseName] = useState(project.musicalNumber || '0.0');
   const [fileFormat, setFileFormat] = useState('mp3');
@@ -381,6 +409,9 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
   const [timeNow, setTimeNow] = useState(Date.now());
   const [remainingEstimateSnapshotMs, setRemainingEstimateSnapshotMs] = useState(null);
   const [remainingEstimateAnchorMs, setRemainingEstimateAnchorMs] = useState(null);
+  const isRenderedMixExport = exportType === EXPORT_TYPES.RENDERED_MIXES;
+  const isExternalDawExport = exportType === EXPORT_TYPES.EXTERNAL_DAW;
+  const isInternalProjectExport = exportType === EXPORT_TYPES.INTERNAL_PROJECT;
   const practiceFocusDiffRatio = (Math.max(-6, Math.min(6, practiceFocusDiffDb)) + 6) / 12;
   const practiceFocusDiffLabelLeft = `calc(15px + ${practiceFocusDiffRatio} * (100% - 30px))`;
 
@@ -402,6 +433,40 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
       choirUnits: getChoirUnits(activeTracks, trackStateById),
     };
   }, [project]);
+
+  const externalDawTrackDescriptors = useMemo(
+    () => getExternalDawTrackDescriptors(project, {
+      trackScope: EXTERNAL_DAW_TRACK_SCOPES.ALL,
+      includeMetronome: true,
+    }),
+    [project]
+  );
+  const externalDawSelectableTrackDescriptors = useMemo(
+    () => externalDawTrackDescriptors.filter(
+      (descriptor) => externalDawIncludeMetronome || !descriptor.isMetronome
+    ),
+    [externalDawIncludeMetronome, externalDawTrackDescriptors]
+  );
+  const externalDawSelectedTrackCount = externalDawSelectableTrackDescriptors.reduce(
+    (count, descriptor) => count + (externalDawSelectedTrackIds.has(descriptor.trackId) ? 1 : 0),
+    0
+  );
+  const isExternalDawSelectionValid = externalDawTrackScope !== EXTERNAL_DAW_TRACK_SCOPES.SELECTED
+    || externalDawSelectedTrackCount > 0;
+
+  useEffect(() => {
+    const descriptorIds = new Set(externalDawTrackDescriptors.map((descriptor) => descriptor.trackId));
+    const defaultIds = new Set(
+      externalDawTrackDescriptors
+        .filter((descriptor) => descriptor.audible && !descriptor.isMetronome)
+        .map((descriptor) => descriptor.trackId)
+    );
+    setExternalDawSelectedTrackIds((previous) => {
+      const next = new Set([...previous].filter((trackId) => descriptorIds.has(trackId)));
+      if (next.size === 0 && defaultIds.size > 0) return defaultIds;
+      return next;
+    });
+  }, [externalDawTrackDescriptors]);
 
   const audioExportTree = useMemo(
     () => buildAudioExportTree(instrumentUnits, leadUnits, choirUnits),
@@ -498,6 +563,36 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
     });
     return byPreset;
   }, [selectedLeafNodeIds, leafNodeById]);
+
+  const toggleExternalDawTrack = (trackId) => {
+    setExternalDawSelectedTrackIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(trackId)) {
+        next.delete(trackId);
+      } else {
+        next.add(trackId);
+      }
+      return next;
+    });
+  };
+
+  const handleExternalDawIncludeMetronomeChange = (included) => {
+    setExternalDawIncludeMetronome(included);
+    if (!included) {
+      setExternalDawSelectedTrackIds((previous) => new Set(
+        [...previous].filter((trackId) => (
+          !externalDawTrackDescriptors.find((descriptor) => descriptor.trackId === trackId)?.isMetronome
+        ))
+      ));
+    }
+  };
+
+  const updateExternalDawMixSetting = (key, checked) => {
+    setExternalDawMixSettings((previous) => normalizeExternalDawMixSettings({
+      ...previous,
+      [key]: checked,
+    }));
+  };
 
   const getNodeFileCountText = (nodeId) => {
     const leafIds = leafNodeIdsByNodeId.get(nodeId) || [];
@@ -650,13 +745,15 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
     }
     const count = Math.max(0, renderProgress.total || selectedLeafNodeIds.size || 0);
     const verb = progressStatus === 'done' ? 'Exported' : 'Exporting';
-    return `${verb} ${count} file${count === 1 ? '' : 's'}`;
+    const noun = isExternalDawExport ? 'stem' : 'file';
+    return `${verb} ${count} ${noun}${count === 1 ? '' : 's'}`;
   }, [
     showProgressWindow,
     progressMode,
     progressStatus,
     renderProgress.total,
     selectedLeafNodeIds.size,
+    isExternalDawExport,
   ]);
 
   const toggleNodeExpanded = (nodeId) => {
@@ -789,6 +886,114 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
     }
   };
 
+  const handleExportExternalDaw = async () => {
+    const normalizedExportName = normalizeExportName(exportBaseName);
+    if (!normalizedExportName) {
+      alert('Export name cannot be empty.');
+      return;
+    }
+    if (hasInvalidExportNameChars(normalizedExportName)) {
+      alert('Export name cannot contain: \\ / : * ? " < > |');
+      return;
+    }
+
+    setIsExporting(true);
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    let directoryHandle;
+
+    try {
+      // Must be called directly from the click gesture (Windows requires this).
+      directoryHandle = await pickExportDirectory(project.projectId);
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        setIsExporting(false);
+        abortControllerRef.current = null;
+        return;
+      }
+      console.error('External DAW export folder selection failed:', error);
+      alert('Export failed: ' + error.message);
+      setIsExporting(false);
+      abortControllerRef.current = null;
+      return;
+    }
+
+    initializeProgress('audio', 'Preparing External DAW stems...');
+    setProgressMessage('Rendering/encoding...');
+
+    try {
+      const files = await exportExternalDawStems(
+        project,
+        audioBuffers,
+        normalizedExportName,
+        {
+          signal: abortController.signal,
+          trackScope: externalDawTrackScope,
+          includeMetronome: externalDawIncludeMetronome,
+          mixSettings: externalDawMixSettings,
+          selectedTrackIds: externalDawTrackScope === EXTERNAL_DAW_TRACK_SCOPES.SELECTED
+            ? [...externalDawSelectedTrackIds]
+            : null,
+          onProgress: (info) => {
+            if (abortController.signal.aborted) return;
+            const fraction = Number.isFinite(info?.fraction) ? info.fraction : 0;
+            const completed = Number.isFinite(info?.completed) ? info.completed : 0;
+            const total = Number.isFinite(info?.total) ? info.total : 0;
+            setRenderProgress({
+              completed: Math.max(0, completed),
+              total: Math.max(0, total),
+            });
+            const renderFraction = Math.max(0, Math.min(1, fraction));
+            const writeFraction = writeProgress.total > 0
+              ? Math.max(0, Math.min(1, writeProgress.completed / writeProgress.total))
+              : 0;
+            setProgressPercent(((renderFraction * 0.99) + (writeFraction * 0.01)) * 100);
+          },
+        }
+      );
+
+      if (!files.length) {
+        throw new Error('No files produced by the External DAW export.');
+      }
+
+      setRenderProgress({
+        completed: Math.max(0, files.length - 1),
+        total: Math.max(0, files.length - 1),
+      });
+      setWriteProgress({ completed: 0, total: files.length });
+      setProgressMessage('Writing files...');
+      let written = 0;
+      for (const file of files) {
+        if (abortController.signal.aborted) {
+          const abortError = new Error('Export cancelled');
+          abortError.name = 'AbortError';
+          throw abortError;
+        }
+        await writeFileToDirectory(directoryHandle, file.relativePath, file.blob);
+        written += 1;
+        setWriteProgress({ completed: written, total: files.length });
+        const writeFraction = written / files.length;
+        setProgressPercent(((1 * 0.99) + (writeFraction * 0.01)) * 100);
+      }
+
+      markExportDone('External DAW export complete');
+      setIsExporting(false);
+      abortControllerRef.current = null;
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        markExportError('Export cancelled');
+        setIsExporting(false);
+        abortControllerRef.current = null;
+        return;
+      }
+      console.error('External DAW export failed:', error);
+      markExportError(error?.message || 'Export failed');
+      alert('Export failed: ' + error.message);
+      setIsExporting(false);
+      abortControllerRef.current = null;
+    }
+  };
+
   const handleExportProjectZIP = async () => {
     initializeProgress('zip', 'Creating ZIP archive');
     setIsExporting(true);
@@ -834,8 +1039,12 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
   };
 
   const handleExport = async () => {
-    if (fileFormat === 'zip') {
+    if (isInternalProjectExport) {
       await handleExportProjectZIP();
+      return;
+    }
+    if (isExternalDawExport) {
+      await handleExportExternalDaw();
       return;
     }
     await handleExportAudio(fileFormat);
@@ -874,7 +1083,9 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div
         className={`bg-gray-800 rounded-lg w-full overflow-hidden flex flex-col ${
-          showProgressWindow ? 'max-w-sm' : 'max-w-2xl h-[72vh]'
+          showProgressWindow
+            ? 'max-w-sm'
+            : 'max-w-3xl h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)]'
         }`}
       >
         {showProgressWindow ? (
@@ -896,9 +1107,9 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
 
         {!showProgressWindow ? (
           <div className="flex-1 min-h-0 overflow-hidden px-3 pt-0 pb-3 flex flex-col">
-            <div className="grid grid-cols-1 grid-rows-[minmax(0,1fr)_auto] lg:grid-cols-[1fr_320px] lg:grid-rows-1 gap-4 flex-1 min-h-0">
+            <div className="grid grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[1fr_320px] lg:grid-rows-1 gap-4 flex-1 min-h-0">
               <div className="bg-gray-900 rounded-lg p-3 h-full overflow-auto min-h-0">
-                {fileFormat !== 'zip' && (() => {
+                {isRenderedMixExport ? (() => {
                   const renderNode = (node, depth = 0) => {
                     const preset = node.presetId ? PRESET_BY_ID[node.presetId] : null;
                     const label = node.label || (
@@ -960,24 +1171,42 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
                     );
                   };
                   return renderNode(audioExportTree, 0);
-                })()}
+                })() : (
+                  <div className="h-full flex items-center justify-center text-center text-sm text-gray-400 px-6">
+                    {isExternalDawExport
+                      ? 'Exports one time-aligned stem per Apollo track. Group names are included in non-root track filenames.'
+                      : 'Exports the Apollo project as an internal Apollo Project ZIP, including its project data and media.'}
+                  </div>
+                )}
               </div>
-              <div className="p-0 h-auto lg:h-full min-h-0 flex flex-col">
+              <div className="p-0 h-auto lg:h-full min-h-0 overflow-y-auto pr-1 flex flex-col">
                 <div className="mb-3">
-                  <label className="block text-xs text-gray-400 mb-1">File format</label>
+                  <label className="block text-xs text-gray-400 mb-1">Export type</label>
                   <select
-                    value={fileFormat}
-                    onChange={(e) => setFileFormat(e.target.value)}
+                    value={exportType}
+                    onChange={(e) => setExportType(e.target.value)}
                     className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
                     disabled={isExporting}
                   >
-                    <option value="mp3">MP3</option>
-                    <option value="wav">WAV</option>
-                    <option value="zip">ZIP</option>
+                    <option value={EXPORT_TYPES.RENDERED_MIXES}>Rendered Apollo Mixes</option>
+                    <option value={EXPORT_TYPES.EXTERNAL_DAW}>External DAW</option>
+                    <option value={EXPORT_TYPES.INTERNAL_PROJECT}>Internal Apollo Project</option>
                   </select>
                 </div>
-                {fileFormat !== 'zip' && (
+                {isRenderedMixExport && (
                   <>
+                    <div className="mb-3">
+                      <label className="block text-xs text-gray-400 mb-1">File format</label>
+                      <select
+                        value={fileFormat}
+                        onChange={(e) => setFileFormat(e.target.value)}
+                        className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+                        disabled={isExporting}
+                      >
+                        <option value="mp3">MP3</option>
+                        <option value="wav">WAV</option>
+                      </select>
+                    </div>
                     <div className="mb-3">
                       <label className="block text-xs text-gray-400 mb-1">Transformed pan range</label>
                       <input
@@ -1070,6 +1299,95 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
                     </div>
                   </>
                 )}
+                {isExternalDawExport && (
+                  <div className="mb-3 rounded bg-gray-900 px-3 py-3 text-sm text-gray-300 space-y-3">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Tracks</label>
+                      <select
+                        value={externalDawTrackScope}
+                        onChange={(e) => setExternalDawTrackScope(e.target.value)}
+                        className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+                        disabled={isExporting}
+                      >
+                        <option value={EXTERNAL_DAW_TRACK_SCOPES.AUDIBLE}>All audible tracks</option>
+                        <option value={EXTERNAL_DAW_TRACK_SCOPES.ALL}>All tracks, including muted</option>
+                        <option value={EXTERNAL_DAW_TRACK_SCOPES.SELECTED}>Choose tracks...</option>
+                      </select>
+                    </div>
+
+                    {externalDawTrackScope === EXTERNAL_DAW_TRACK_SCOPES.SELECTED && (
+                      <div>
+                        <div className="mb-1 text-xs text-gray-500">
+                          {externalDawSelectedTrackCount} selected
+                        </div>
+                        <div className="max-h-40 overflow-auto rounded border border-gray-700 bg-gray-800 px-2 py-1">
+                          {externalDawSelectableTrackDescriptors.map((descriptor) => (
+                              <label
+                                key={descriptor.trackId}
+                                className="flex items-center gap-2 py-1 text-xs text-gray-300"
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900"
+                                  checked={externalDawSelectedTrackIds.has(descriptor.trackId)}
+                                  onChange={() => toggleExternalDawTrack(descriptor.trackId)}
+                                  disabled={isExporting}
+                                />
+                                <span className="truncate">{descriptor.pathLabel}</span>
+                                {!descriptor.audible && (
+                                  <span className="shrink-0 text-gray-500">(muted)</span>
+                                )}
+                              </label>
+                            ))}
+                          {externalDawSelectableTrackDescriptors.length === 0 && (
+                            <div className="py-2 text-xs text-gray-500">No audio tracks available.</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+                        checked={externalDawIncludeMetronome}
+                        onChange={(e) => handleExternalDawIncludeMetronomeChange(e.target.checked)}
+                        disabled={isExporting}
+                      />
+                      <span>Include metronome</span>
+                    </label>
+
+                    <div>
+                      <div className="mb-1 text-xs text-gray-400">Mix handling</div>
+                      <div className="space-y-2">
+                        {EXTERNAL_DAW_MIX_OPTIONS.map(([key, label, description]) => (
+                          <label key={key} className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-4 w-4 rounded border-gray-600 bg-gray-900"
+                              checked={externalDawMixSettings[key]}
+                              onChange={(e) => updateExternalDawMixSetting(key, e.target.checked)}
+                              disabled={isExporting}
+                            />
+                            <span>
+                              <span className="block text-sm text-gray-300">{label}</span>
+                              <span className="block text-xs text-gray-500">{description}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-xs text-gray-500">Clip edits are always applied.</p>
+                    </div>
+                  </div>
+                )}
+                {isInternalProjectExport && (
+                  <div className="mb-3 rounded bg-gray-900 px-3 py-3 text-sm text-gray-300">
+                    <div className="font-medium text-gray-200">Apollo Project ZIP</div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Includes the Apollo project data and source media for importing back into Apollo.
+                    </p>
+                  </div>
+                )}
                 <div className="mt-auto">
                   <div className="mb-3">
                     <label className="block text-xs text-gray-400 mb-1">Export name</label>
@@ -1084,7 +1402,11 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
                   </div>
                   <button
                     onClick={handleExport}
-                    disabled={isExporting || (fileFormat !== 'zip' && selectedPresetIds.length === 0)}
+                    disabled={
+                      isExporting
+                      || (isRenderedMixExport && selectedPresetIds.length === 0)
+                      || (isExternalDawExport && !isExternalDawSelectionValid)
+                    }
                     className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
                   >
                     <Upload size={20} />

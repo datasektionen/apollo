@@ -4,6 +4,7 @@ import {
   gainToDb,
   msToSeconds,
   normalizePanLawDb,
+  DEFAULT_PAN_LAW_DB,
   getPanLawCompensationGain,
   getPanLawHeadroomGain,
 } from '../utils/audio';
@@ -1362,8 +1363,19 @@ export async function renderPresetVariant(
   return files[0] || null;
 }
 
-async function renderTracksToAudioBuffer(project, tracks, audioBuffers, gainAdjustments = {}, panAdjustments = {}, trackStateById = null, renderSettings = null) {
-  let maxDurationMs = 0;
+async function renderTracksToAudioBuffer(
+  project,
+  tracks,
+  audioBuffers,
+  gainAdjustments = {},
+  panAdjustments = {},
+  trackStateById = null,
+  renderSettings = null,
+  renderOptions = null
+) {
+  let maxDurationMs = Number.isFinite(Number(renderOptions?.durationMs))
+    ? Math.max(0, Number(renderOptions.durationMs))
+    : 0;
   for (const track of tracks) {
     for (const clip of track.clips) {
       const clipEnd = clip.timelineStartMs + (clip.cropEndMs - clip.cropStartMs);
@@ -1373,35 +1385,67 @@ async function renderTracksToAudioBuffer(project, tracks, audioBuffers, gainAdju
 
   // Render exactly to the last clip end (no extra tail padding).
   const length = Math.max(1, Math.ceil(msToSeconds(maxDurationMs) * SAMPLE_RATE));
+  const legacyTrackMixOption = renderOptions?.applyTrackMix;
+  const applyTrackVolume = legacyTrackMixOption !== undefined
+    ? legacyTrackMixOption !== false
+    : renderOptions?.applyTrackVolume !== false;
+  const applyTrackPan = legacyTrackMixOption !== undefined
+    ? legacyTrackMixOption !== false
+    : renderOptions?.applyTrackPan !== false;
+  const applyGroupGain = legacyTrackMixOption !== undefined
+    ? legacyTrackMixOption !== false
+    : renderOptions?.applyGroupGain !== false;
+  const applyGroupPan = legacyTrackMixOption !== undefined
+    ? legacyTrackMixOption !== false
+    : renderOptions?.applyGroupPan !== false;
+  const applyMuteStates = legacyTrackMixOption !== undefined
+    ? legacyTrackMixOption !== false
+    : renderOptions?.applyMuteStates !== false;
+  const applyMasterSettings = renderOptions?.applyMasterMix !== undefined
+    ? renderOptions.applyMasterMix !== false
+    : renderOptions?.applyMasterSettings !== false;
+  const applyAnyPan = applyTrackPan || applyGroupPan;
   const normalizedRenderSettings = normalizeExportSettings({
     ...(project?.exportSettings || {}),
     ...(renderSettings || {}),
   });
-  const forceMonoOutput = normalizedRenderSettings.forceMonoOutput === true;
+  const forceMonoOutput = applyMasterSettings && normalizedRenderSettings.forceMonoOutput === true;
   const outputChannelCount = forceMonoOutput ? 1 : 2;
-  const panLawDb = normalizePanLawDb(normalizedRenderSettings.panLawDb);
+  const panLawDb = applyMasterSettings
+    ? normalizePanLawDb(normalizedRenderSettings.panLawDb)
+    : DEFAULT_PAN_LAW_DB;
   const offlineContext = new OfflineAudioContext(outputChannelCount, length, SAMPLE_RATE);
 
   const masterGain = offlineContext.createGain();
-  masterGain.gain.value = volumeToGain(project.masterVolume) * (forceMonoOutput ? 1 : getPanLawHeadroomGain(panLawDb));
+  masterGain.gain.value = applyMasterSettings
+    ? volumeToGain(project.masterVolume) * (forceMonoOutput ? 1 : getPanLawHeadroomGain(panLawDb))
+    : 1;
   masterGain.connect(offlineContext.destination);
 
   for (const track of tracks) {
     const effective = trackStateById?.get(track.id) || null;
-    if (effective && !effective.audible) continue;
+    if (applyMuteStates && effective && !effective.audible) continue;
 
-    const baseGain = Number.isFinite(effective?.effectiveGain)
-      ? effective.effectiveGain
-      : volumeToGain(track.volume);
+    const trackGain = applyTrackVolume
+      ? (Number.isFinite(effective?.trackGain) ? effective.trackGain : volumeToGain(track.volume))
+      : 1;
+    const groupGain = applyGroupGain
+      ? (Number.isFinite(effective?.groupGain) ? effective.groupGain : 1)
+      : 1;
     const adjustmentGain = gainAdjustments[track.id] || 1.0;
-    const totalGain = baseGain * adjustmentGain;
+    const totalGain = trackGain * groupGain * adjustmentGain;
     const rawPan = clampPan(
-      panAdjustments[track.id] !== undefined
+      applyTrackPan && panAdjustments[track.id] !== undefined
         ? panAdjustments[track.id]
-        : (Number.isFinite(effective?.effectivePan) ? effective.effectivePan : track.pan)
+        : (
+          (applyGroupPan && Number.isFinite(effective?.groupPan) ? effective.groupPan : 0)
+          + (applyTrackPan && Number.isFinite(effective?.trackPan) ? effective.trackPan : (applyTrackPan ? track.pan : 0))
+        )
     );
     const totalPan = forceMonoOutput ? 0 : rawPan;
-    const panLawCompensationGain = forceMonoOutput ? 1 : getPanLawCompensationGain(totalPan, panLawDb);
+    const panLawCompensationGain = forceMonoOutput || !applyAnyPan
+      ? 1
+      : getPanLawCompensationGain(totalPan, panLawDb);
 
     for (const clip of track.clips) {
       if (clip.muted) continue;
@@ -1415,7 +1459,7 @@ async function renderTracksToAudioBuffer(project, tracks, audioBuffers, gainAdju
       const gainNode = offlineContext.createGain();
       gainNode.gain.value = totalGain * dbToGain(clip.gainDb) * panLawCompensationGain;
       source.connect(gainNode);
-      if (forceMonoOutput) {
+      if (forceMonoOutput || !applyAnyPan) {
         gainNode.connect(masterGain);
       } else {
         const panNode = offlineContext.createStereoPanner();
@@ -1435,7 +1479,17 @@ async function renderTracksToAudioBuffer(project, tracks, audioBuffers, gainAdju
   return await offlineContext.startRendering();
 }
 
-async function renderTracks(project, tracks, audioBuffers, gainAdjustments = {}, panAdjustments = {}, format = 'wav', trackStateById = null, renderSettings = null) {
+async function renderTracks(
+  project,
+  tracks,
+  audioBuffers,
+  gainAdjustments = {},
+  panAdjustments = {},
+  format = 'wav',
+  trackStateById = null,
+  renderSettings = null,
+  renderOptions = null
+) {
   const renderedBuffer = await renderTracksToAudioBuffer(
     project,
     tracks,
@@ -1443,9 +1497,45 @@ async function renderTracks(project, tracks, audioBuffers, gainAdjustments = {},
     gainAdjustments,
     panAdjustments,
     trackStateById,
-    renderSettings
+    renderSettings,
+    renderOptions
   );
   return audioBufferToBlob(renderedBuffer, format === 'mp3' ? 'mp3' : 'wav');
+}
+
+/**
+ * Render one Apollo track as a standalone, time-aligned audio stem.
+ *
+ * The optional duration keeps every stem in an external DAW export the same
+ * length, even when individual tracks have different last-clip positions.
+ */
+export async function renderTrackStem(
+  project,
+  track,
+  audioBuffers,
+  format = 'wav',
+  trackStateById = null,
+  renderSettings = null,
+  durationMs = null,
+  renderOptions = null
+) {
+  if (!track) {
+    throw new Error('Cannot render an empty track.');
+  }
+  return renderTracks(
+    project,
+    [track],
+    audioBuffers,
+    {},
+    {},
+    format,
+    trackStateById,
+    renderSettings,
+    {
+      durationMs,
+      ...(renderOptions || {}),
+    }
+  );
 }
 
 function audioBufferToBlob(audioBuffer, format = 'wav') {
