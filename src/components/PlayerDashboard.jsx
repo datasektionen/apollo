@@ -2898,7 +2898,7 @@ function PlayerDashboard({
                     </h2>
                   </div>
                   <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center border-b border-gray-700 px-4 text-xs leading-none text-gray-400">
-                    <div>#</div>
+                    <div className="translate-x-px">#</div>
                     <div>Title</div>
                     <div className="flex items-center justify-end">
                       <span title="Length" aria-label="Length" className="inline-flex items-center -translate-x-1">
