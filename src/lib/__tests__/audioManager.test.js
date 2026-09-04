@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getPanLawHeadroomGain } from '../../utils/audio';
 
 function deferred() {
   let resolve;
@@ -105,6 +106,13 @@ describe('AudioManager playback requests', () => {
       constructor() {
         this.gain = { value: 1 };
         this.pan = { value: 0 };
+        this.threshold = { value: 0 };
+        this.knee = { value: 0 };
+        this.ratio = { value: 1 };
+        this.attack = { value: 0 };
+        this.release = { value: 0 };
+        this.curve = null;
+        this.oversample = 'none';
         this.channelCount = 2;
         this.channelCountMode = 'explicit';
         this.channelInterpretation = 'speakers';
@@ -161,6 +169,14 @@ describe('AudioManager playback requests', () => {
       }
 
       createStereoPanner() {
+        return new MockAudioNode();
+      }
+
+      createDynamicsCompressor() {
+        return new MockAudioNode();
+      }
+
+      createWaveShaper() {
         return new MockAudioNode();
       }
 
@@ -241,6 +257,40 @@ describe('AudioManager playback requests', () => {
     expect(startedSources).toHaveLength(1);
     expect(manager.activeSources.size).toBe(1);
     expect(manager.startTime).toBeCloseTo(9.5);
+  });
+
+  it('applies the stored project master separately from the player output volume', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+    manager.setOutputVolume(50);
+
+    const project = makeProject();
+    project.masterVolume = 25;
+    await manager.play(project, 0);
+
+    expect(manager.currentMasterVolume).toBe(25);
+    expect(manager.currentOutputVolume).toBe(50);
+    expect(manager.masterGainNode.gain.value).toBeCloseTo(
+      manager.getMasterVolumeGain()
+        * manager.getOutputVolumeGain()
+        * getPanLawHeadroomGain(),
+      8
+    );
+  });
+
+  it('creates a final limiter and sub-0 dBFS safety ceiling for live playback', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    await manager.init();
+
+    expect(manager.masterLimiterNode.threshold.value).toBe(-1);
+    expect(manager.masterLimiterNode.ratio.value).toBe(20);
+    expect(manager.masterCeilingNode.oversample).toBe('4x');
+    expect(Math.max(...manager.masterCeilingNode.curve)).toBeLessThan(1);
+    expect(Math.min(...manager.masterCeilingNode.curve)).toBeGreaterThan(-1);
+    expect(manager.masterOutputNode).toBe(manager.masterCeilingNode);
+    expect(manager.masterOutputNode.connections).toContain(manager.audioContext.destination);
   });
 
   it('does not start sources after a pending play request is stopped', async () => {
@@ -355,7 +405,7 @@ describe('AudioManager playback requests', () => {
     expect(manager.audioContext.sampleRate).toBe(48000);
     expect(createdAudioElements).toHaveLength(0);
     expect(manager.outputTargetNode).toBe(manager.audioContext.destination);
-    expect(manager.masterGainNode.connections).toContain(manager.audioContext.destination);
+    expect(manager.masterOutputNode.connections).toContain(manager.audioContext.destination);
     expect(startedSources).toHaveLength(1);
   });
 
@@ -371,7 +421,7 @@ describe('AudioManager playback requests', () => {
 
     expect(createdAudioElements).toHaveLength(1);
     expect(manager.outputTargetNode).toBe(manager.outputStreamDestination);
-    expect(manager.masterGainNode.connections).toContain(manager.outputStreamDestination);
+    expect(manager.masterOutputNode.connections).toContain(manager.outputStreamDestination);
     expect(startedSources).toHaveLength(1);
   });
 

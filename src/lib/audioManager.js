@@ -23,6 +23,37 @@ import {
 } from './mediaEncoding';
 import { logLoadProgress, shortLoadId, withLoadStep } from './loadProgress';
 
+const MASTER_LIMITER_THRESHOLD_DB = -1;
+const MASTER_LIMITER_KNEE_DB = 0;
+const MASTER_LIMITER_RATIO = 20;
+const MASTER_LIMITER_ATTACK_SEC = 0;
+const MASTER_LIMITER_RELEASE_SEC = 0.1;
+const MASTER_CEILING = 0.9999;
+const MASTER_CEILING_START = 0.98;
+
+function createMasterCeilingCurve(size = 4096) {
+  const curve = new Float32Array(size);
+  const ceilingRange = MASTER_CEILING - MASTER_CEILING_START;
+  const normalization = Math.tanh(3);
+
+  for (let index = 0; index < size; index += 1) {
+    const input = (index / (size - 1)) * 2 - 1;
+    const sign = input < 0 ? -1 : 1;
+    const magnitude = Math.abs(input);
+    if (magnitude <= MASTER_CEILING_START) {
+      curve[index] = input;
+      continue;
+    }
+
+    const normalized = (magnitude - MASTER_CEILING_START) / (1 - MASTER_CEILING_START);
+    const limitedMagnitude = MASTER_CEILING_START
+      + (ceilingRange * Math.tanh(normalized * 3) / normalization);
+    curve[index] = sign * Math.min(MASTER_CEILING, limitedMagnitude);
+  }
+
+  return curve;
+}
+
 /**
  * Audio Manager
  * Handles Web Audio API playback, mixing, and rendering
@@ -31,6 +62,9 @@ export class AudioManager {
   constructor() {
     this.audioContext = null;
     this.masterGainNode = null;
+    this.masterLimiterNode = null;
+    this.masterCeilingNode = null;
+    this.masterOutputNode = null;
     this.mediaCache = new Map(); // blobId -> AudioBuffer
     this.activeSources = new Map(); // trackId -> { source, gainNode, panNode }
     this.isPlaying = false;
@@ -40,6 +74,7 @@ export class AudioManager {
     this.playbackRequestId = 0;
     this.initializingPlaybackRequestId = null;
     this.currentMasterVolume = 100;
+    this.currentOutputVolume = 100;
     this.currentPanLawDb = normalizePanLawDb();
     this.currentOutputDeviceId = '';
     this.currentOutputChannelCount = 2;
@@ -78,6 +113,7 @@ export class AudioManager {
     this.masterGainNode.channelInterpretation = 'speakers';
     this.masterGainNode.channelCount = this.getTargetOutputChannelCount();
     this.masterGainNode.gain.value = this.getMasterOutputGain();
+    this.createMasterSafetyStage();
     await this.configureOutputRouting();
     this.attachHardwareLifecycleListeners();
     await this.handleOutputDeviceChange({ primeOnly: true });
@@ -485,6 +521,18 @@ export class AudioManager {
     this.applyMasterGain();
   }
 
+  /**
+   * Set the local listening/output volume without changing the project mix
+   * master. Player mode uses this in addition to the stored project master.
+   */
+  setOutputVolume(volume) {
+    const parsed = Number(volume);
+    if (Number.isFinite(parsed)) {
+      this.currentOutputVolume = Math.max(0, Math.min(100, parsed));
+    }
+    this.applyMasterGain();
+  }
+
   setMasterVolumeCurve(curve) {
     this.masterVolumeCurve = curve === 'unity' ? 'unity' : 'legacy';
     this.applyMasterGain();
@@ -607,18 +655,24 @@ export class AudioManager {
       this.audioContext = null;
     }
 
+    this.masterLimiterNode = null;
+    this.masterCeilingNode = null;
+    this.masterOutputNode = null;
+    this.currentOutputVolume = 100;
+
     this.mediaCache.clear();
     this.activeSources.clear();
   }
 
   getMasterOutputGain() {
+    const outputGain = this.getOutputVolumeGain();
     if (this.isMonoOutput()) {
-      return this.getMasterVolumeGain();
+      return this.getMasterVolumeGain() * outputGain;
     }
     const headroomGain = this.masterHeadroomEnabled
       ? getPanLawHeadroomGain(this.currentPanLawDb)
       : 1;
-    return this.getMasterVolumeGain() * headroomGain;
+    return this.getMasterVolumeGain() * headroomGain * outputGain;
   }
 
   getMasterVolumeGain() {
@@ -630,10 +684,55 @@ export class AudioManager {
     return volumeToGain(clamped);
   }
 
+  getOutputVolumeGain() {
+    const clamped = Math.max(0, Math.min(100, Number(this.currentOutputVolume) || 0));
+    return clamped / 100;
+  }
+
   applyMasterGain() {
     if (!this.masterGainNode) return;
     this.masterGainNode.channelCount = this.getTargetOutputChannelCount();
     this.masterGainNode.gain.value = this.getMasterOutputGain();
+  }
+
+  createMasterSafetyStage() {
+    if (!this.audioContext || !this.masterGainNode) return;
+
+    let outputNode = this.masterGainNode;
+    if (typeof this.audioContext.createDynamicsCompressor === 'function') {
+      try {
+        const limiter = this.audioContext.createDynamicsCompressor();
+        limiter.threshold.value = MASTER_LIMITER_THRESHOLD_DB;
+        limiter.knee.value = MASTER_LIMITER_KNEE_DB;
+        limiter.ratio.value = MASTER_LIMITER_RATIO;
+        limiter.attack.value = MASTER_LIMITER_ATTACK_SEC;
+        limiter.release.value = MASTER_LIMITER_RELEASE_SEC;
+        this.masterGainNode.connect(limiter);
+        this.masterLimiterNode = limiter;
+        outputNode = limiter;
+      } catch {
+        this.masterLimiterNode = null;
+      }
+    }
+
+    if (typeof this.audioContext.createWaveShaper === 'function') {
+      try {
+        const ceiling = this.audioContext.createWaveShaper();
+        ceiling.curve = createMasterCeilingCurve();
+        ceiling.oversample = '4x';
+        outputNode.connect(ceiling);
+        this.masterCeilingNode = ceiling;
+        outputNode = ceiling;
+      } catch {
+        this.masterCeilingNode = null;
+      }
+    }
+
+    this.masterOutputNode = outputNode;
+  }
+
+  getMasterOutputNode() {
+    return this.masterOutputNode || this.masterGainNode;
   }
 
   getClipOutputGain(baseGain, clipGain, pan) {
@@ -824,7 +923,7 @@ export class AudioManager {
       const routedTarget = await this.ensureOutputRoutingTarget();
       if (routedTarget) {
         this.outputTargetNode = routedTarget;
-        this.masterGainNode.connect(this.outputTargetNode);
+        this.getMasterOutputNode().connect(this.outputTargetNode);
         return;
       }
     }
@@ -834,17 +933,18 @@ export class AudioManager {
   }
 
   disconnectMasterOutput() {
-    if (!this.masterGainNode) return;
+    const outputNode = this.getMasterOutputNode();
+    if (!outputNode) return;
     if (this.outputTargetNode) {
       try {
-        this.masterGainNode.disconnect(this.outputTargetNode);
+        outputNode.disconnect(this.outputTargetNode);
       } catch {
         // Ignore reconnect noise when the previous route is already gone.
       }
       return;
     }
     try {
-      this.masterGainNode.disconnect();
+      outputNode.disconnect();
     } catch {
       // Ignore initial disconnect attempts before anything is connected.
     }
@@ -853,7 +953,7 @@ export class AudioManager {
   connectMasterToDestination() {
     this.applyOutputChannelConfig();
     this.outputTargetNode = this.audioContext.destination;
-    this.masterGainNode.connect(this.outputTargetNode);
+    this.getMasterOutputNode().connect(this.outputTargetNode);
   }
 
   pauseOutputRoutingElement() {

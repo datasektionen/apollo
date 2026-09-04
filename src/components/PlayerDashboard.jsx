@@ -294,7 +294,7 @@ function buildMixCategoryOptions(snapshot) {
 
 function getPlayerPlayOptions(playback = {}, extra = {}) {
   return {
-    useProjectMasterVolume: false,
+    useProjectMasterVolume: true,
     liveMixableTrackIds: playback.liveMixableTrackIds || null,
     ...extra,
   };
@@ -889,9 +889,13 @@ function PlayerDashboard({
   }, []);
 
   useEffect(() => {
-    audioManager.setMasterVolumeCurve('unity');
-    audioManager.setMasterHeadroomEnabled(false);
+    // Player output must use the same project/master curve and pan-law
+    // headroom as DAW playback. The player slider is a separate local output
+    // level, applied on top of the project mix master.
+    audioManager.setMasterVolumeCurve('legacy');
+    audioManager.setMasterHeadroomEnabled(true);
     return () => {
+      audioManager.setOutputVolume(100);
       audioManager.setMasterHeadroomEnabled(true);
       audioManager.setMasterVolumeCurve('legacy');
     };
@@ -902,7 +906,7 @@ function PlayerDashboard({
   }, [applyPlaybackOutputConfig]);
 
   useEffect(() => {
-    audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
+    audioManager.setOutputVolume(Math.max(0, Math.min(100, volume)));
   }, [volume]);
 
   useEffect(() => {
@@ -1352,7 +1356,7 @@ function PlayerDashboard({
         'Configure playback output',
         async () => applyPlaybackOutputConfig()
       );
-      audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
+      audioManager.setOutputVolume(Math.max(0, Math.min(100, volume)));
       await withLoadStep(
         'Start Web Audio graph',
         async () => audioManager.play(playbackSnapshot, 0, getPlayerPlayOptions({ liveMixableTrackIds }))
@@ -1467,7 +1471,7 @@ function PlayerDashboard({
       const resumeMs = Math.max(0, Math.round((Number(currentTimeSec) || 0) * 1000));
       const current = realtimePlaybackRef.current;
       await applyPlaybackOutputConfig();
-      audioManager.setMasterVolume(Math.max(0, Math.min(100, volume)));
+      audioManager.setOutputVolume(Math.max(0, Math.min(100, volume)));
       await audioManager.play(current.project, resumeMs, getPlayerPlayOptions(current));
       applyPlaybackMixSettings(current.project, current.item);
       setIsPlaying(true);
