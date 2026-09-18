@@ -145,7 +145,20 @@ export class AudioManager {
       await this.init();
     }
 
-    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+    let audioBuffer;
+    try {
+      audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+    } catch (error) {
+      const ctx = this.audioContext;
+      const contextLabel = ctx
+        ? `${Math.round(Number(ctx.sampleRate) || 0)}Hz state=${ctx.state || 'unknown'}`
+        : 'AudioContext unavailable';
+      logLoadProgress(
+        `Native decodeAudioData ${error?.name || 'Error'}: ${error?.message || error} · ${contextLabel}`,
+        { depth: 3 }
+      );
+      throw error;
+    }
 
     // decodeAudioData already matches the live context. If a buffer still
     // disagrees, resample to the hardware rate rather than a fixed 44.1kHz.

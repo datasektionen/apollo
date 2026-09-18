@@ -32,11 +32,27 @@ export function formatLoadBytes(bytes) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function logLevelPrefix(level) {
+export function loadLogLevelPrefix(level) {
   if (level === 'ok') return 'ok';
   if (level === 'error') return 'err';
+  if (level === 'warn') return 'alt';
   if (level === 'start') return '…';
   return 'i';
+}
+
+function resolveFailureLevel(extra, error) {
+  const raw = typeof extra?.failureLevel === 'function'
+    ? extra.failureLevel(error)
+    : extra?.failureLevel;
+  if (raw === 'warn' || raw === 'info' || raw === 'ok' || raw === 'error') return raw;
+  return 'error';
+}
+
+function formatStepFailure(label, error, extra) {
+  if (typeof extra?.formatFailure === 'function') {
+    return extra.formatFailure(error, label);
+  }
+  return `${label}: ${error?.message || error}`;
 }
 
 export function formatLoadProgressText(session, now = nowMs()) {
@@ -63,7 +79,7 @@ export function formatLoadProgressText(session, now = nowMs()) {
     if (entry.bytes != null) extras.push(formatLoadBytes(entry.bytes));
     const extraText = extras.length ? `  (${extras.join(', ')})` : '';
     lines.push(
-      `${indent}+${formatLoadDuration(entry.atMs)}  ${logLevelPrefix(entry.level)}  ${entry.message}${extraText}`
+      `${indent}+${formatLoadDuration(entry.atMs)}  ${loadLogLevelPrefix(entry.level)}  ${entry.message}${extraText}`
     );
   });
   return lines.join('\n');
@@ -202,7 +218,10 @@ export async function withLoadStep(label, fn, extra = {}) {
     return result;
   } catch (error) {
     const durationMs = nowMs() - startedAt;
-    appendLog('error', `${label}: ${error?.message || error}`, { durationMs, depth });
+    appendLog(resolveFailureLevel(extra, error), formatStepFailure(label, error, extra), {
+      durationMs,
+      depth,
+    });
     emit();
     throw error;
   }

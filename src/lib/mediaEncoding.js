@@ -1,5 +1,5 @@
 import Flac from 'libflacjs/dist/libflac.js';
-import { logAudioBufferStats, logLoadProgress, shortLoadId, withLoadStep } from './loadProgress';
+import { logAudioBufferStats, shortLoadId, withLoadStep } from './loadProgress';
 
 export const SUPPORTED_IMPORT_EXTENSIONS = new Set(['wav', 'mp3', 'flac', 'ogg']);
 export const SUPPORTED_IMPORT_ACCEPT = [
@@ -476,12 +476,18 @@ export async function persistAudioBufferAsLocalPcm({
       {
         depth: 2,
         bytesFrom: (blob) => blob?.size,
+        failureLevel: 'warn',
+        formatFailure: (error, label) => `${label}: skipped (${error?.message || error})`,
       }
     );
     await withLoadStep(
       `Write PCM to IndexedDB (${shortLoadId(blobId)})`,
       async () => storeMediaBlob(localCacheFileName, audioBuffer, localCacheBlob, blobId),
-      { depth: 2 }
+      {
+        depth: 2,
+        failureLevel: 'warn',
+        formatFailure: (error, label) => `${label}: skipped (${error?.message || error})`,
+      }
     );
     return {
       storedLocally: true,
@@ -490,10 +496,6 @@ export async function persistAudioBufferAsLocalPcm({
       storeError: null,
     };
   } catch (error) {
-    logLoadProgress(
-      `IndexedDB write failed (${shortLoadId(blobId)}): ${error?.message || error}`,
-      { level: 'error', depth: 2 }
-    );
     return {
       storedLocally: false,
       localCacheBlob,

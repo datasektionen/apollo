@@ -7,6 +7,7 @@ import {
   formatLoadProgressText,
   getLoadProgress,
   isLoadProgressRunning,
+  loadLogLevelPrefix,
   logLoadProgress,
   startLoadProgress,
   summarizeProjectForLoadLog,
@@ -94,5 +95,25 @@ describe('loadProgress tracker', () => {
     expect(text).toContain('Status: done');
     expect(text).toContain('IndexedDB miss (stem-1)');
     expect(text).toContain('Finished in');
+  });
+
+  it('can log an expected fallback without treating it as an error', async () => {
+    startLoadProgress({ kind: 'play', title: 'Tutti' });
+    await expect(withLoadStep(
+      'IndexedDB lookup (stem-1)',
+      async () => {
+        throw new Error('Media blob stem-1 not found');
+      },
+      {
+        depth: 1,
+        failureLevel: 'warn',
+        formatFailure: (_error, label) => `${label}: not cached locally`,
+      }
+    )).rejects.toThrow('Media blob stem-1 not found');
+
+    const lookup = getLoadProgress().logs.find((entry) => entry.level === 'warn');
+    expect(lookup.message).toBe('IndexedDB lookup (stem-1): not cached locally');
+    expect(loadLogLevelPrefix('warn')).toBe('alt');
+    expect(formatLoadProgressText(getLoadProgress())).toContain('alt  IndexedDB lookup (stem-1): not cached locally');
   });
 });

@@ -5,21 +5,16 @@ import {
   formatLoadBytes,
   formatLoadDuration,
   formatLoadProgressText,
+  loadLogLevelPrefix,
   subscribeLoadProgress,
 } from '../lib/loadProgress';
 
 function levelClass(level) {
   if (level === 'ok') return 'text-emerald-300';
   if (level === 'error') return 'text-red-300';
+  if (level === 'warn') return 'text-amber-300';
   if (level === 'start') return 'text-sky-300';
   return 'text-gray-300';
-}
-
-function levelPrefix(level) {
-  if (level === 'ok') return 'ok';
-  if (level === 'error') return 'err';
-  if (level === 'start') return '…';
-  return 'i';
 }
 
 export default function LoadProgressDialog() {
@@ -140,7 +135,7 @@ export default function LoadProgressDialog() {
             >
               <span className="text-gray-600">+{formatLoadDuration(entry.atMs)}</span>
               {'  '}
-              <span className="text-gray-500">{levelPrefix(entry.level)}</span>
+              <span className="text-gray-500">{loadLogLevelPrefix(entry.level)}</span>
               {'  '}
               {entry.message}
               {entry.durationMs != null ? (

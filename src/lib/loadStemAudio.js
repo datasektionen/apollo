@@ -70,6 +70,23 @@ function localPcmFileName(blobId, fileName = null) {
   return fileName || `${blobId}.${PLANAR_PCM_EXTENSION}`;
 }
 
+function localCacheFallbackOptions({ inMemory = false } = {}) {
+  return {
+    failureLevel: 'warn',
+    formatFailure: (error, label) => {
+      const detail = String(error?.message || error || '');
+      if (/not found/i.test(detail)) {
+        return inMemory
+          ? `${label}: not cached locally, using in-memory audio`
+          : `${label}: not cached locally`;
+      }
+      return inMemory
+        ? `${label}: local cache unavailable, using in-memory audio (${detail})`
+        : `${label}: local cache unavailable (${detail})`;
+    },
+  };
+}
+
 function isPlanarPcmMediaEntry(media) {
   const fileName = String(media?.fileName || '').toLowerCase();
   const mimeType = String(media?.blob?.type || '').toLowerCase();
@@ -177,16 +194,13 @@ export async function ensureStemInMediaCache({
         {
           depth: 1,
           bytesFrom: (entry) => entry?.blob?.size,
+          ...localCacheFallbackOptions({ inMemory: true }),
         }
       );
       throwIfCancelled(isCancelled);
       return { source: 'ram', audioBuffer, media };
     } catch (error) {
       if (error?.name === 'StaleAudioLoad') throw error;
-      logLoadProgress(
-        `RAM hit but IndexedDB metadata missing (${shortLoadId(blobId)}); using in-memory entry`,
-        { depth: 1 }
-      );
       return {
         source: 'ram',
         audioBuffer,
@@ -195,6 +209,7 @@ export async function ensureStemInMediaCache({
     }
   }
 
+  const canDownload = typeof download === 'function';
   try {
     const media = await withLoadStep(
       `IndexedDB lookup (${shortLoadId(blobId)})`,
@@ -202,6 +217,7 @@ export async function ensureStemInMediaCache({
       {
         depth: 1,
         bytesFrom: (entry) => entry?.blob?.size,
+        ...(canDownload ? localCacheFallbackOptions() : {}),
       }
     );
     throwIfCancelled(isCancelled);
@@ -209,7 +225,15 @@ export async function ensureStemInMediaCache({
     const audioBuffer = await withLoadStep(
       `Ensure AudioBuffer in RAM (${shortLoadId(blobId)})`,
       async () => loadAudioBuffer(blobId, media.blob),
-      { depth: 1 }
+      {
+        depth: 1,
+        ...(canDownload ? {
+          failureLevel: 'warn',
+          formatFailure: (error, label) => (
+            `${label}: local audio unusable, downloading compressed file (${error?.message || error})`
+          ),
+        } : {}),
+      }
     );
     throwIfCancelled(isCancelled);
     if (typeof storeMediaBlob === 'function' && !isPlanarPcmMediaEntry(media)) {
@@ -225,11 +249,7 @@ export async function ensureStemInMediaCache({
     return { source: 'idb', audioBuffer, media };
   } catch (localError) {
     if (localError?.name === 'StaleAudioLoad') throw localError;
-    logLoadProgress(
-      `IndexedDB miss (${shortLoadId(blobId)}): ${localError?.message || localError}`,
-      { depth: 1 }
-    );
-    if (typeof download !== 'function') {
+    if (!canDownload) {
       throw localError;
     }
 

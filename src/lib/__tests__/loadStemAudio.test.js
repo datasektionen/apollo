@@ -10,7 +10,7 @@ import {
   audioBufferToPlanarPcmBlob,
   persistAudioBufferAsLocalPcm,
 } from '../mediaEncoding';
-import { dismissLoadProgress, finishLoadProgress } from '../loadProgress';
+import { dismissLoadProgress, finishLoadProgress, getLoadProgress, startLoadProgress } from '../loadProgress';
 
 afterEach(() => {
   resetLocalPcmPersistForTests();
@@ -126,6 +126,43 @@ describe('ensureStemInMediaCache', () => {
     expect(result.audioBuffer).toBe(audioBuffer);
     expect(mediaCache.get(blobId)).toBe(audioBuffer);
     expect(storeMediaBlob).not.toHaveBeenCalled();
+  });
+
+  it('logs a local cache miss as a fallback when download is available', async () => {
+    startLoadProgress({ kind: 'play', title: 'Song' });
+    const blobId = 'stem-cold';
+    await ensureStemInMediaCache({
+      blobId,
+      mediaCache: new Map(),
+      getMediaBlob: async () => {
+        throw new Error(`Media blob ${blobId} not found`);
+      },
+      download: async () => fakeRemoteBlob(16),
+      decodeAudioFile: async () => fakeAudioBuffer(),
+      storeMediaBlob: async () => {},
+      deferPersist: true,
+    });
+
+    const logs = getLoadProgress().logs;
+    const lookup = logs.find((entry) => entry.level === 'warn' && String(entry.message).includes('IndexedDB lookup'));
+    expect(lookup.message).toContain('not cached locally');
+    expect(logs.some((entry) => entry.level === 'error')).toBe(false);
+  });
+
+  it('keeps a local cache miss as an error when there is no download path', async () => {
+    startLoadProgress({ kind: 'open', title: 'Song' });
+    await expect(ensureStemInMediaCache({
+      blobId: 'stem-offline',
+      mediaCache: new Map(),
+      getMediaBlob: async () => {
+        throw new Error('Media blob stem-offline not found');
+      },
+    })).rejects.toThrow('Media blob stem-offline not found');
+
+    const lookup = getLoadProgress().logs.find((entry) => (
+      entry.level === 'error' && String(entry.message).includes('IndexedDB lookup')
+    ));
+    expect(lookup).toBeTruthy();
   });
 });
 
