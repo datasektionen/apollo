@@ -19,7 +19,10 @@ import {
 import {
   audioBufferFromPlanarPcm,
   audioBufferToLocalWavBlob,
+  decodeFlacArrayBuffer,
+  isFlacArrayBuffer,
   isPlanarPcmArrayBuffer,
+  prefersSoftwareFlacDecode,
 } from './mediaEncoding';
 import { logLoadProgress, shortLoadId, withLoadStep } from './loadProgress';
 
@@ -146,18 +149,42 @@ export class AudioManager {
     }
 
     let audioBuffer;
-    try {
-      audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-    } catch (error) {
-      const ctx = this.audioContext;
-      const contextLabel = ctx
-        ? `${Math.round(Number(ctx.sampleRate) || 0)}Hz state=${ctx.state || 'unknown'}`
-        : 'AudioContext unavailable';
-      logLoadProgress(
-        `Native decodeAudioData ${error?.name || 'Error'}: ${error?.message || error} · ${contextLabel}`,
+    const useSoftwareFlac = isFlacArrayBuffer(arrayBuffer) && prefersSoftwareFlacDecode();
+    if (useSoftwareFlac) {
+      audioBuffer = await withLoadStep(
+        'Decode FLAC (software)',
+        async () => decodeFlacArrayBuffer(
+          arrayBuffer,
+          (channels, frames, sampleRate) => this.audioContext.createBuffer(channels, frames, sampleRate)
+        ),
         { depth: 3 }
       );
-      throw error;
+    } else {
+      try {
+        audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+      } catch (error) {
+        const ctx = this.audioContext;
+        const contextLabel = ctx
+          ? `${Math.round(Number(ctx.sampleRate) || 0)}Hz state=${ctx.state || 'unknown'}`
+          : 'AudioContext unavailable';
+        logLoadProgress(
+          `Native decodeAudioData ${error?.name || 'Error'}: ${error?.message || error} · ${contextLabel}`,
+          { depth: 3 }
+        );
+        if (isFlacArrayBuffer(arrayBuffer) && arrayBuffer.byteLength > 0) {
+          logLoadProgress('Retrying FLAC with software decoder', { depth: 3 });
+          audioBuffer = await withLoadStep(
+            'Decode FLAC (software)',
+            async () => decodeFlacArrayBuffer(
+              arrayBuffer,
+              (channels, frames, sampleRate) => this.audioContext.createBuffer(channels, frames, sampleRate)
+            ),
+            { depth: 3 }
+          );
+        } else {
+          throw error;
+        }
+      }
     }
 
     // decodeAudioData already matches the live context. If a buffer still

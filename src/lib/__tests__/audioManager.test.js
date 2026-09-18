@@ -457,6 +457,44 @@ describe('AudioManager playback requests', () => {
     expect(resampleSpy).not.toHaveBeenCalled();
   });
 
+  it('decodes FLAC with the software decoder when native decodeAudioData fails', async () => {
+    const { audioBufferToFlacBlob } = await import('../mediaEncoding');
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    await manager.init();
+    manager.audioContext.createBuffer = (channels, length, sampleRate) => {
+      const data = Array.from({ length: channels }, () => new Float32Array(length));
+      return {
+        numberOfChannels: channels,
+        length,
+        sampleRate,
+        duration: length / sampleRate,
+        getChannelData: (channel) => data[channel],
+      };
+    };
+    manager.audioContext.decodeAudioData = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Decoding failed'), { name: 'EncodingError' })
+    );
+
+    const frames = 32;
+    const samples = new Float32Array(frames);
+    for (let i = 0; i < frames; i += 1) samples[i] = (i / frames) - 0.5;
+    const source = {
+      numberOfChannels: 1,
+      length: frames,
+      sampleRate: 48000,
+      getChannelData: () => samples,
+    };
+    const flac = await (await audioBufferToFlacBlob(source)).arrayBuffer();
+    const decoded = await manager.decodeAudioFile(flac);
+
+    expect(manager.audioContext.decodeAudioData).toHaveBeenCalledTimes(1);
+    expect(decoded.numberOfChannels).toBe(1);
+    expect(decoded.sampleRate).toBe(48000);
+    expect(decoded.length).toBe(frames);
+    expect(decoded.getChannelData(0)[0]).toBeCloseTo(samples[0], 4);
+  });
+
   it('reuses mix nodes on seek and starts the new source at the same audio time the old one stops', async () => {
     const { AudioManager } = await import('../audioManager');
     const manager = new AudioManager();

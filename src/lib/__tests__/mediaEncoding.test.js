@@ -6,7 +6,9 @@ import {
   audioBufferToPlanarPcmBlob,
   getAudioFormatFromFile,
   getServerUploadDescriptor,
+  isFlacArrayBuffer,
   isPlanarPcmArrayBuffer,
+  prefersSoftwareFlacDecode,
   replaceFileExtension,
 } from '../mediaEncoding';
 
@@ -124,5 +126,57 @@ describe('mediaEncoding import policy', () => {
     expect(restored.sampleRate).toBe(44100);
     expect(Array.from(restored.getChannelData(0))).toEqual(Array.from(left));
     expect(Array.from(restored.getChannelData(1))).toEqual(Array.from(right));
+  });
+
+  it('detects native FLAC files and Safari software-decode preference', () => {
+    const flac = new Uint8Array([0x66, 0x4C, 0x61, 0x43, 0, 0, 0, 0]).buffer;
+    expect(isFlacArrayBuffer(flac)).toBe(true);
+    expect(isFlacArrayBuffer(new ArrayBuffer(8))).toBe(false);
+    expect(prefersSoftwareFlacDecode(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
+    )).toBe(true);
+    expect(prefersSoftwareFlacDecode(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    )).toBe(false);
+    expect(prefersSoftwareFlacDecode(
+      'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.43 Mobile Safari/537.36'
+    )).toBe(false);
+  });
+
+  it('round-trips 24-bit FLAC through the software decoder', async () => {
+    const { audioBufferToFlacBlob, decodeFlacArrayBuffer } = await import('../mediaEncoding');
+    const frames = 48;
+    const left = new Float32Array(frames);
+    const right = new Float32Array(frames);
+    for (let i = 0; i < frames; i += 1) {
+      left[i] = Math.sin((i / frames) * Math.PI * 2) * 0.5;
+      right[i] = Math.cos((i / frames) * Math.PI * 2) * 0.25;
+    }
+    const original = {
+      numberOfChannels: 2,
+      length: frames,
+      sampleRate: 44100,
+      getChannelData: (channel) => (channel === 0 ? left : right),
+    };
+    const blob = await audioBufferToFlacBlob(original);
+    const arrayBuffer = await blob.arrayBuffer();
+    expect(isFlacArrayBuffer(arrayBuffer)).toBe(true);
+
+    const restored = await decodeFlacArrayBuffer(arrayBuffer, (channels, length, sampleRate) => {
+      const data = Array.from({ length: channels }, () => new Float32Array(length));
+      return {
+        numberOfChannels: channels,
+        length,
+        sampleRate,
+        getChannelData: (channel) => data[channel],
+      };
+    });
+    expect(restored.numberOfChannels).toBe(2);
+    expect(restored.sampleRate).toBe(44100);
+    expect(restored.length).toBe(frames);
+    for (let i = 0; i < frames; i += 1) {
+      expect(restored.getChannelData(0)[i]).toBeCloseTo(left[i], 4);
+      expect(restored.getChannelData(1)[i]).toBeCloseTo(right[i], 4);
+    }
   });
 });

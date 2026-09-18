@@ -28,6 +28,13 @@ const PLANAR_PCM_HEADER_BYTES = 20;
 const PLANAR_PCM_VERSION = 1;
 
 let flacModulePromise = null;
+let flacOpChain = Promise.resolve();
+
+function runExclusiveFlacOp(work) {
+  const run = flacOpChain.then(work, work);
+  flacOpChain = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 function getFileBaseName(fileName = 'audio') {
   const trimmed = String(fileName || 'audio').trim() || 'audio';
@@ -117,6 +124,16 @@ export function isWavArrayBuffer(arrayBuffer) {
   if (!arrayBuffer || arrayBuffer.byteLength < 12) return false;
   const view = new DataView(arrayBuffer);
   return readAscii(view, 0, 4) === 'RIFF' && readAscii(view, 8, 4) === 'WAVE';
+}
+
+export function isFlacArrayBuffer(arrayBuffer) {
+  if (!arrayBuffer || arrayBuffer.byteLength < 4) return false;
+  return readAscii(new DataView(arrayBuffer), 0, 4) === 'fLaC';
+}
+
+export function prefersSoftwareFlacDecode(userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent) {
+  const ua = String(userAgent || '');
+  return /safari/i.test(ua) && !/chrome|chromium|android/i.test(ua);
 }
 
 export function parsePlanarPcmArrayBuffer(arrayBuffer) {
@@ -277,6 +294,164 @@ async function getFlacModule() {
   return flacModulePromise;
 }
 
+function mergeUint8Chunks(chunks) {
+  let total = 0;
+  for (const chunk of chunks) total += chunk?.byteLength || 0;
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    if (!chunk) continue;
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+
+function packedPcmToFloat32(bytes, bitsPerSample) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const scale = 2 ** (bitsPerSample - 1);
+  if (bitsPerSample === 8) {
+    const frames = bytes.byteLength;
+    const samples = new Float32Array(frames);
+    for (let i = 0; i < frames; i += 1) {
+      samples[i] = (bytes[i] - 128) / 128;
+    }
+    return samples;
+  }
+  if (bitsPerSample === 16) {
+    const frames = Math.floor(bytes.byteLength / 2);
+    const samples = new Float32Array(frames);
+    for (let i = 0; i < frames; i += 1) {
+      samples[i] = view.getInt16(i * 2, true) / scale;
+    }
+    return samples;
+  }
+  const frames = Math.floor(bytes.byteLength / 4);
+  const samples = new Float32Array(frames);
+  for (let i = 0; i < frames; i += 1) {
+    samples[i] = view.getInt32(i * 4, true) / scale;
+  }
+  return samples;
+}
+
+function channelDataToFloat32(chunk, bitsPerSample) {
+  if (chunk instanceof Float32Array) return chunk;
+  if (chunk instanceof Int32Array) {
+    const scale = 2 ** (bitsPerSample - 1);
+    const samples = new Float32Array(chunk.length);
+    for (let i = 0; i < chunk.length; i += 1) {
+      samples[i] = chunk[i] / scale;
+    }
+    return samples;
+  }
+  if (chunk instanceof Uint8Array) {
+    return packedPcmToFloat32(chunk, bitsPerSample);
+  }
+  throw new Error('Unsupported FLAC PCM chunk type');
+}
+
+function concatFloat32(parts) {
+  let total = 0;
+  for (const part of parts) total += part.length;
+  const samples = new Float32Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    samples.set(part, offset);
+    offset += part.length;
+  }
+  return samples;
+}
+
+export async function decodeFlacArrayBuffer(arrayBuffer, createBuffer) {
+  if (typeof createBuffer !== 'function') {
+    throw new Error('AudioBuffer factory missing');
+  }
+  if (!isFlacArrayBuffer(arrayBuffer)) {
+    throw new Error('Not a FLAC audio buffer');
+  }
+
+  return runExclusiveFlacOp(async () => {
+    const flac = await getFlacModule();
+    const bytes = new Uint8Array(arrayBuffer);
+    let offset = 0;
+    let metadata = null;
+    let decodeError = null;
+    const channelChunks = [];
+
+    const decoder = flac.create_libflac_decoder(false);
+    if (!decoder) {
+      throw new Error('Failed to initialize FLAC decoder.');
+    }
+
+    try {
+      const initStatus = flac.init_decoder_stream(
+        decoder,
+        (bufferSize) => {
+          if (offset >= bytes.byteLength) {
+            return { buffer: undefined, readDataLength: 0, error: false };
+          }
+            const size = Math.max(0, Number(bufferSize) || 0);
+            const end = Math.min(offset + size, bytes.byteLength);
+          const buffer = bytes.subarray(offset, end);
+          const readDataLength = end - offset;
+          offset = end;
+          return { buffer, readDataLength, error: false };
+        },
+        (data) => {
+          const channels = Array.isArray(data) ? data : [data];
+          if (channels.length === 0) return;
+          if (channelChunks.length === 0) {
+            for (let channel = 0; channel < channels.length; channel += 1) {
+              channelChunks.push([]);
+            }
+          }
+          for (let channel = 0; channel < channelChunks.length; channel += 1) {
+            if (channels[channel]) channelChunks[channel].push(channels[channel]);
+          }
+        },
+        (code, description) => {
+          decodeError = new Error(description || `FLAC decode error ${code}`);
+        },
+        (meta) => {
+          if (meta) metadata = meta;
+        }
+      );
+      if (initStatus !== 0) {
+        throw new Error('Failed to initialize FLAC decoder.');
+      }
+      if (!flac.FLAC__stream_decoder_process_until_end_of_stream(decoder) || decodeError) {
+        throw decodeError || new Error('Failed to decode FLAC audio.');
+      }
+      if (!flac.FLAC__stream_decoder_finish(decoder) && decodeError) {
+        throw decodeError;
+      }
+
+      const channels = Number(metadata?.channels || channelChunks.length || 0);
+      const sampleRate = Number(metadata?.sampleRate || metadata?.sample_rate || 0);
+      const bitsPerSample = Number(metadata?.bitsPerSample || metadata?.bits_per_sample || FLAC_BITS_PER_SAMPLE);
+      if (channels < 1 || sampleRate < 1 || channelChunks.length < channels) {
+        throw new Error('FLAC metadata missing after decode.');
+      }
+
+      const channelData = channelChunks.slice(0, channels).map((chunks) => {
+        if (chunks.length === 1) return channelDataToFloat32(chunks[0], bitsPerSample);
+        if (chunks[0] instanceof Uint8Array) {
+          return packedPcmToFloat32(mergeUint8Chunks(chunks), bitsPerSample);
+        }
+        return concatFloat32(chunks.map((chunk) => channelDataToFloat32(chunk, bitsPerSample)));
+      });
+      const frames = channelData[0]?.length || 0;
+      const audioBuffer = createBuffer(channels, frames, sampleRate);
+      for (let channel = 0; channel < channels; channel += 1) {
+        audioBuffer.getChannelData(channel).set(channelData[channel]);
+      }
+      return audioBuffer;
+    } finally {
+      flac.FLAC__stream_decoder_delete(decoder);
+    }
+  });
+}
+
 export function audioBufferToLocalWavBlob(audioBuffer) {
   const numberOfChannels = audioBuffer.numberOfChannels;
   const length = audioBuffer.length;
@@ -313,50 +488,52 @@ export function audioBufferToLocalWavBlob(audioBuffer) {
 }
 
 export async function audioBufferToFlacBlob(audioBuffer) {
-  const flac = await getFlacModule();
-  const channelCount = Math.max(1, Number(audioBuffer?.numberOfChannels) || 1);
-  const sampleRate = Math.max(1, Math.round(Number(audioBuffer?.sampleRate) || 44100));
-  const frameCount = Math.max(0, Number(audioBuffer?.length) || 0);
-  const interleavedSamples = audioBufferToInterleavedInt32(audioBuffer, FLAC_BITS_PER_SAMPLE);
-  const encodedChunks = [];
+  return runExclusiveFlacOp(async () => {
+    const flac = await getFlacModule();
+    const channelCount = Math.max(1, Number(audioBuffer?.numberOfChannels) || 1);
+    const sampleRate = Math.max(1, Math.round(Number(audioBuffer?.sampleRate) || 44100));
+    const frameCount = Math.max(0, Number(audioBuffer?.length) || 0);
+    const interleavedSamples = audioBufferToInterleavedInt32(audioBuffer, FLAC_BITS_PER_SAMPLE);
+    const encodedChunks = [];
 
-  const encoder = flac.create_libflac_encoder(
-    sampleRate,
-    channelCount,
-    FLAC_BITS_PER_SAMPLE,
-    FLAC_COMPRESSION_LEVEL,
-    0,
-    false,
-    0
-  );
-
-  if (!encoder) {
-    throw new Error('Failed to initialize FLAC encoder.');
-  }
-
-  try {
-    const initStatus = flac.init_encoder_stream(
-      encoder,
-      (buffer, bytes) => {
-        if (!buffer || !bytes) return;
-        encodedChunks.push(buffer.slice(0, bytes));
-      },
-      () => {}
+    const encoder = flac.create_libflac_encoder(
+      sampleRate,
+      channelCount,
+      FLAC_BITS_PER_SAMPLE,
+      FLAC_COMPRESSION_LEVEL,
+      0,
+      false,
+      0
     );
-    if (initStatus !== 0) {
+
+    if (!encoder) {
       throw new Error('Failed to initialize FLAC encoder.');
     }
 
-    if (!flac.FLAC__stream_encoder_process_interleaved(encoder, interleavedSamples, frameCount)) {
-      throw new Error('Failed to encode FLAC audio.');
+    try {
+      const initStatus = flac.init_encoder_stream(
+        encoder,
+        (buffer, bytes) => {
+          if (!buffer || !bytes) return;
+          encodedChunks.push(buffer.slice(0, bytes));
+        },
+        () => {}
+      );
+      if (initStatus !== 0) {
+        throw new Error('Failed to initialize FLAC encoder.');
+      }
+
+      if (!flac.FLAC__stream_encoder_process_interleaved(encoder, interleavedSamples, frameCount)) {
+        throw new Error('Failed to encode FLAC audio.');
+      }
+      if (!flac.FLAC__stream_encoder_finish(encoder)) {
+        throw new Error('Failed to finalize FLAC audio.');
+      }
+      return new Blob(encodedChunks, { type: 'audio/flac' });
+    } finally {
+      flac.FLAC__stream_encoder_delete(encoder);
     }
-    if (!flac.FLAC__stream_encoder_finish(encoder)) {
-      throw new Error('Failed to finalize FLAC audio.');
-    }
-    return new Blob(encodedChunks, { type: 'audio/flac' });
-  } finally {
-    flac.FLAC__stream_encoder_delete(encoder);
-  }
+  });
 }
 
 export function getServerUploadDescriptor({ sourceKind = 'import', sourceFileName = '', sourceMimeType = '' } = {}) {
