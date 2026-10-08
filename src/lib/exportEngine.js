@@ -468,6 +468,44 @@ function isDescendantGroup(trackTree = [], groupId, ancestorGroupIds) {
   return false;
 }
 
+/**
+ * A group role unit is the part. Highlight that group even when muted children
+ * are missing from the audible unit. Keep track highlights when the group also
+ * contains an audible stem from another unit.
+ */
+function createPracticeUnitFocus(baseSnapshot, context, unit) {
+  const trackIds = (Array.isArray(unit?.trackIds) ? unit.trackIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  const unitId = String(unit?.unitId || '');
+  const groupId = unitId.startsWith('group:') ? unitId.slice('group:'.length) : '';
+  if (!groupId) {
+    return normalizeAdvancedMixFocus({ highlightedTrackIds: trackIds });
+  }
+
+  const descendantTrackIds = getGroupDescendantTrackIdsByGroup(baseSnapshot).get(groupId);
+  if (!descendantTrackIds?.length) {
+    return normalizeAdvancedMixFocus({ highlightedTrackIds: trackIds });
+  }
+
+  const descendantSet = new Set(descendantTrackIds.map((id) => String(id)));
+  if (!trackIds.every((id) => descendantSet.has(id))) {
+    return normalizeAdvancedMixFocus({ highlightedTrackIds: trackIds });
+  }
+
+  const unitTrackSet = new Set(trackIds);
+  const audiblePracticeIds = new Set((context?.practiceTracks || []).map((track) => String(track.id)));
+  const audibleDescendantOutsideUnit = descendantTrackIds.some((id) => {
+    const trackId = String(id);
+    return audiblePracticeIds.has(trackId) && !unitTrackSet.has(trackId);
+  });
+  if (audibleDescendantOutsideUnit) {
+    return normalizeAdvancedMixFocus({ highlightedTrackIds: trackIds });
+  }
+
+  return normalizeAdvancedMixFocus({ highlightedGroupIds: [groupId] });
+}
+
 function createHighlightedGroupMixSource(baseSnapshot, context, shouldHighlightTrack) {
   const selectedTrackIds = new Set(context.allPracticeTracks
     .filter((track) => shouldHighlightTrack(track))
@@ -542,9 +580,7 @@ export function createEditableMixSource(project, mix) {
 
   if (isPracticePresetId(presetId)) {
     const selectedUnit = getSelectedPresetUnit(context, presetId, mix?.presetVariantKey);
-    const focus = normalizeAdvancedMixFocus({
-      highlightedTrackIds: selectedUnit?.trackIds || [],
-    });
+    const focus = createPracticeUnitFocus(baseSnapshot, context, selectedUnit);
     const controls = isPracticeOmittedPresetId(presetId)
       ? { practiceFocusControl: ADVANCED_MIX_PRACTICE_FOCUS_MIN_INDEX }
       : null;
