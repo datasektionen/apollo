@@ -8,7 +8,10 @@ import {
   PERMISSION_PROJECT_READER,
   PERMISSION_TRACK_CREATOR,
   PERMISSION_TRACK_READER,
+  WRITE_REJECTED_CODE,
   extractProjectAccessTags,
+  grantFieldsFromBody,
+  isProjectWriteRejectedError,
   resolveProjectAccessFromGrantRows,
   validateAndTransformProjectWrite,
 } from '../rbac.js';
@@ -642,5 +645,79 @@ describe('validateAndTransformProjectWrite', () => {
         )),
       },
     })).rejects.toThrow('cannot remove yourself as track artist');
+  });
+
+  describe('track-level writers editing an existing editable track', () => {
+    const ownTrack = {
+      id: 'track-1',
+      name: 'Lead',
+      role: 'lead',
+      icon: 'mic',
+      volume: 100,
+      pan: 0,
+      muted: false,
+      soloed: false,
+      clips: [{ id: 'clip-1', blobId: 'blob-1', timelineStartMs: 0, cropStartMs: 0, cropEndMs: 1000, gainDb: 0, muted: false }],
+      createdByUserId: 'user-5',
+    };
+    const currentSnapshot = {
+      projectId: 'project-1',
+      projectName: 'Test',
+      musicalNumber: '1.1',
+      published: false,
+      sampleRate: 44100,
+      masterVolume: 100,
+      showId: 'show-1',
+      tracks: [ownTrack],
+      trackTree: [{ id: 'node-1', kind: 'track', trackId: 'track-1', order: 0 }],
+      loop: { enabled: false, startMs: 0, endMs: 0 },
+    };
+    const write = (patch) => validateAndTransformProjectWrite({
+      userId: 'user-5',
+      project: { id: 'project-1', createdByUserId: 'owner-1', showId: 'show-1' },
+      access: { canCreateTracks: true, creatableTrackScopes: [{ type: 'all', label: 'All' }] },
+      currentSnapshot,
+      nextSnapshot: {
+        ...currentSnapshot,
+        tracks: [{ ...ownTrack, ...patch }],
+      },
+    });
+
+    it('accepts name, mix and clip edits', async () => {
+      await expect(write({ name: 'Lead vocal' })).resolves.toBeTruthy();
+      await expect(write({ volume: 80, pan: -20, muted: true })).resolves.toBeTruthy();
+      await expect(write({ clips: [{ ...ownTrack.clips[0], timelineStartMs: 500 }] })).resolves.toBeTruthy();
+      await expect(write({ clips: [] })).resolves.toBeTruthy();
+    });
+
+    it('rejects role and access-stamp changes', async () => {
+      await expect(write({ role: 'instrument' })).rejects.toThrow('Track role and scope changes require project manager access');
+      // Handing the track to someone else also drops the writer's own access, which trips the scope check first.
+      await expect(write({ createdByUserId: 'someone-else' })).rejects.toSatisfy(isProjectWriteRejectedError);
+      await expect(write({ accessScopeType: 'group_name', accessScopeValue: 'choir' })).rejects.toThrow('Track role and scope changes require project manager access');
+    });
+
+    it('rejects with a typed error carrying the WRITE_REJECTED code', async () => {
+      await expect(write({ role: 'instrument' })).rejects.toMatchObject({ code: WRITE_REJECTED_CODE });
+      await expect(write({ role: 'instrument' })).rejects.toSatisfy(isProjectWriteRejectedError);
+    });
+  });
+});
+
+describe('grantFieldsFromBody', () => {
+  it('keeps group and part filters with the rest of the grant', () => {
+    expect(grantFieldsFromBody({
+      permissionKey: 'track_manager',
+      scopeType: 'show',
+      scopeShowId: 'show-1',
+      scopeGroupNameValue: 'choir',
+      scopePartNameValue: 'soprano',
+    })).toMatchObject({
+      permissionKey: 'track_manager',
+      scopeType: 'show',
+      scopeShowId: 'show-1',
+      scopeGroupNameValue: 'choir',
+      scopePartNameValue: 'soprano',
+    });
   });
 });

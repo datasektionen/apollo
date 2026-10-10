@@ -390,7 +390,16 @@ async function saveExportFiles(files, { directoryHandle = null, signal = null, o
   }
 }
 
-function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExportSettings }) {
+function ExportDialog({
+  project,
+  onClose,
+  audioBuffers,
+  mediaMap,
+  onUpdateExportSettings,
+  // When false, settings changes only affect this export run and are not
+  // persisted to the project (persisting exportSettings is manager-only).
+  canEditExportSettings = true,
+}) {
   const abortControllerRef = useRef(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportType, setExportType] = useState(EXPORT_TYPES.RENDERED_MIXES);
@@ -1106,6 +1115,7 @@ function ExportDialog({ project, onClose, audioBuffers, mediaMap, onUpdateExport
     if (typeof updates.forceMonoOutput !== 'undefined') {
       setExportForceMonoOutput(normalized.forceMonoOutput);
     }
+    if (!canEditExportSettings) return;
     onUpdateExportSettings?.({
       transformedPanRange: normalized.transformedPanRange,
       practiceFocusDiffDb: normalized.practiceFocusDiffDb,

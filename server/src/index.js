@@ -76,6 +76,7 @@ import {
   deleteRoleOidcLink,
   deleteGrant,
   deleteRole,
+  grantFieldsFromBody,
   ensureDefaultUserRoleMembership,
   getProjectAccess,
   getProjectAccessCatalog,
@@ -97,11 +98,15 @@ import {
   syncAllProjectAccessTags,
   syncLegacyProjectPermission,
   updateRole,
+  replaceGrant,
   upsertRoleGrant,
   upsertUserGrant,
   userHasAdminRole,
   validateAndTransformProjectWrite,
+  isProjectWriteRejectedError,
+  WRITE_REJECTED_CODE,
 } from './rbac.js';
+import { trackAccessStampsDiffer, collectTrackAccessStamps } from '../../shared/accessRules.js';
 import { snapshotDurationMsSql } from './projectDuration.js';
 import { collectCreditInvolvements, groupInvolvementsByArtist } from './playerSearch.js';
 
@@ -318,8 +323,11 @@ function attachProjectAccess(row, permissionMap) {
   return {
     ...row,
     access,
+    // Legacy pair kept for older clients: canRead == "can open in DAW",
+    // canWrite == "project manager". Prefer the explicit flags below.
     canRead: Boolean(access?.canOpenProject),
     canWrite: Boolean(access?.compatibility?.canWrite),
+    canExportProject: Boolean(access?.canExportProject),
     canSeeShow: Boolean(access?.canSeeShow),
     canManageShow: Boolean(access?.canManageShow),
     canCreateShows: Boolean(access?.canCreateShows),
@@ -667,11 +675,19 @@ async function appendProjectOp({ projectId, userId, clientOpId, op }) {
 
     await client.query('COMMIT');
 
+    // When validation stamped access fields onto tracks (createdByUserId /
+    // accessScope*) the submitting client's local copy is now out of date.
+    // Report the stamps so it can merge them without rewinding newer edits.
+    const trackAccessStamps = trackAccessStampsDiffer(provisionalNextSnapshot, nextSnapshot)
+      ? collectTrackAccessStamps(nextSnapshot)
+      : null;
+
     return {
       serverSeq: nextSeq,
       snapshot: nextSnapshot,
       op: storedOp,
       checkpointed: shouldCheckpoint,
+      trackAccessStamps,
     };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -679,6 +695,20 @@ async function appendProjectOp({ projectId, userId, clientOpId, op }) {
   } finally {
     client.release();
   }
+}
+
+// Map a project-write failure to a transport payload. Fine-grained RBAC
+// rejections are reported with a stable code so clients do not have to parse
+// human-readable messages; anything else is treated as an internal error.
+function describeProjectWriteError(error) {
+  if (isProjectWriteRejectedError(error)) {
+    return {
+      status: 403,
+      code: WRITE_REJECTED_CODE,
+      message: String(error.message || 'Change rejected by project permissions'),
+    };
+  }
+  return null;
 }
 
 async function fetchProjectBootstrap(projectId, knownSeq = 0) {
@@ -2387,22 +2417,7 @@ app.delete('/api/admin/roles/:roleId/members/:userId', requireAuth, requireAdmin
 
 app.post('/api/admin/roles/:id/grants', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const grant = await upsertRoleGrant(req.params.id, {
-      permissionKey: req.body?.permissionKey ?? req.body?.permission,
-      scopeType: req.body?.scopeType,
-      scopeShowId: req.body?.scopeShowId,
-      scopeProjectId: req.body?.scopeProjectId,
-      scopeTrackId: req.body?.scopeTrackId,
-      scopeNameValue: req.body?.scopeNameValue,
-      capability: req.body?.capability,
-      showTargetType: req.body?.showTargetType,
-      showTargetShowId: req.body?.showTargetShowId,
-      projectTargetType: req.body?.projectTargetType ?? req.body?.scopeType,
-      projectTargetProjectId: req.body?.projectTargetProjectId ?? req.body?.scopeProjectId,
-      projectTargetValue: req.body?.projectTargetValue ?? req.body?.scopeValue,
-      trackScopeType: req.body?.trackScopeType,
-      trackScopeValue: req.body?.trackScopeValue,
-    }, req.user.id);
+    const grant = await upsertRoleGrant(req.params.id, grantFieldsFromBody(req.body), req.user.id);
     res.status(201).json({ grant });
   } catch (error) {
     const message = String(error?.message || 'Failed to save role grant');
@@ -2416,6 +2431,30 @@ app.post('/api/admin/roles/:id/grants', requireAuth, requireAdmin, async (req, r
     }
     console.error(error);
     res.status(500).json({ error: 'Failed to save role grant' });
+  }
+});
+
+app.put('/api/admin/roles/:roleId/grants/:grantId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const grant = await replaceGrant(
+      req.params.grantId,
+      grantFieldsFromBody(req.body),
+      req.user.id,
+      { roleId: req.params.roleId }
+    );
+    res.json({ grant });
+  } catch (error) {
+    const message = String(error?.message || 'Failed to update role grant');
+    if (/not found/i.test(message)) {
+      res.status(404).json({ error: message });
+      return;
+    }
+    if (/invalid/i.test(message) || /required/i.test(message) || /grants cannot be modified/i.test(message) || /selected/i.test(message)) {
+      res.status(400).json({ error: message });
+      return;
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Failed to update role grant' });
   }
 });
 
@@ -2491,22 +2530,7 @@ app.delete('/api/admin/users/:userId/roles/:roleId', requireAuth, requireAdmin, 
 
 app.post('/api/admin/users/:id/grants', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const grant = await upsertUserGrant(req.params.id, {
-      permissionKey: req.body?.permissionKey ?? req.body?.permission,
-      scopeType: req.body?.scopeType,
-      scopeShowId: req.body?.scopeShowId,
-      scopeProjectId: req.body?.scopeProjectId,
-      scopeTrackId: req.body?.scopeTrackId,
-      scopeNameValue: req.body?.scopeNameValue,
-      capability: req.body?.capability,
-      showTargetType: req.body?.showTargetType,
-      showTargetShowId: req.body?.showTargetShowId,
-      projectTargetType: req.body?.projectTargetType ?? req.body?.scopeType,
-      projectTargetProjectId: req.body?.projectTargetProjectId ?? req.body?.scopeProjectId,
-      projectTargetValue: req.body?.projectTargetValue ?? req.body?.scopeValue,
-      trackScopeType: req.body?.trackScopeType,
-      trackScopeValue: req.body?.trackScopeValue,
-    }, req.user.id);
+    const grant = await upsertUserGrant(req.params.id, grantFieldsFromBody(req.body), req.user.id);
     res.status(201).json({ grant });
   } catch (error) {
     const message = String(error?.message || 'Failed to save direct grant');
@@ -2520,6 +2544,30 @@ app.post('/api/admin/users/:id/grants', requireAuth, requireAdmin, async (req, r
     }
     console.error(error);
     res.status(500).json({ error: 'Failed to save direct grant' });
+  }
+});
+
+app.put('/api/admin/users/:userId/grants/:grantId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const grant = await replaceGrant(
+      req.params.grantId,
+      grantFieldsFromBody(req.body),
+      req.user.id,
+      { userId: req.params.userId }
+    );
+    res.json({ grant });
+  } catch (error) {
+    const message = String(error?.message || 'Failed to update direct grant');
+    if (/not found/i.test(message)) {
+      res.status(404).json({ error: message });
+      return;
+    }
+    if (/invalid/i.test(message) || /required/i.test(message) || /selected/i.test(message)) {
+      res.status(400).json({ error: message });
+      return;
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Failed to update direct grant' });
   }
 });
 
@@ -3080,9 +3128,9 @@ app.patch('/api/projects/:id/tracks/:trackId/artists', requireAuth, async (req, 
     });
     res.json({ artistRefs, latestSeq: result.serverSeq });
   } catch (error) {
-    const message = String(error?.message || 'Failed to save track artists');
-    if (/permission|scope|edit|create|manage/i.test(message)) {
-      res.status(403).json({ error: message });
+    const rejection = describeProjectWriteError(error);
+    if (rejection) {
+      res.status(rejection.status).json({ error: rejection.message, code: rejection.code });
       return;
     }
     console.error(error);
@@ -3090,8 +3138,25 @@ app.patch('/api/projects/:id/tracks/:trackId/artists', requireAuth, async (req, 
   }
 });
 
+// Resolve a project write gate using the same rule as WS `op.submit`
+// (track-level write access); the fine-grained validation inside
+// appendProjectOp protects the actual content of the change.
+async function requireProjectTrackWriteAccess(req, res) {
+  const projectId = String(req.params.id || req.params.projectId || '');
+  if (!projectId) {
+    res.status(400).json({ error: 'Missing project id' });
+    return null;
+  }
+  const access = await getProjectAccess(req.user.id, projectId);
+  if (!canWriteProjectTracks(access)) {
+    res.status(403).json({ error: 'No write permission for this project', code: 'NO_WRITE_PERMISSION' });
+    return null;
+  }
+  return { projectId, access };
+}
+
 app.post('/api/projects/:id/checkpoint', requireAuth, async (req, res) => {
-  const permission = await requireProjectPermission(req, res, 'write');
+  const permission = await requireProjectTrackWriteAccess(req, res);
   if (!permission) return;
 
   const headResult = await pool.query(
@@ -3124,7 +3189,7 @@ app.post('/api/projects/:id/checkpoint', requireAuth, async (req, res) => {
 
 app.post('/api/projects/:id/local-session', requireAuth, async (req, res) => {
   try {
-    const permission = await requireProjectPermission(req, res, 'write');
+    const permission = await requireProjectTrackWriteAccess(req, res);
     if (!permission) return;
 
     const snapshot = req.body?.snapshot;
@@ -3158,11 +3223,12 @@ app.post('/api/projects/:id/local-session', requireAuth, async (req, res) => {
     res.json({
       latestSeq: result.serverSeq,
       snapshot: result.snapshot,
+      trackAccessStamps: result.trackAccessStamps,
     });
   } catch (error) {
-    const message = String(error?.message || 'Failed to save local session');
-    if (/permission|scope|edit|create|manage/i.test(message)) {
-      res.status(403).json({ error: message });
+    const rejection = describeProjectWriteError(error);
+    if (rejection) {
+      res.status(rejection.status).json({ error: rejection.message, code: rejection.code });
       return;
     }
     console.error(error);
@@ -4927,21 +4993,42 @@ wsServer.on('connection', (ws, req) => {
 
           const access = await getProjectAccess(ws.session.userId, projectId);
           if (!canWriteProjectTracks(access)) {
-            sendWs(ws, 'error', { code: 'NO_WRITE_PERMISSION', message: 'No write permission', retryable: false });
+            sendWs(ws, 'error', {
+              code: 'NO_WRITE_PERMISSION',
+              message: 'No write permission',
+              retryable: false,
+              projectId,
+              clientOpId,
+            });
             return;
           }
 
-          const result = await appendProjectOp({
-            projectId,
-            userId: ws.session.userId,
-            clientOpId,
-            op,
-          });
+          let result;
+          try {
+            result = await appendProjectOp({
+              projectId,
+              userId: ws.session.userId,
+              clientOpId,
+              op,
+            });
+          } catch (error) {
+            const rejection = describeProjectWriteError(error);
+            if (!rejection) throw error;
+            sendWs(ws, 'error', {
+              code: rejection.code,
+              message: rejection.message,
+              retryable: false,
+              projectId,
+              clientOpId,
+            });
+            return;
+          }
 
           sendWs(ws, 'op.ack', {
             projectId,
             clientOpId,
             serverSeq: result.serverSeq,
+            trackAccessStamps: result.trackAccessStamps || null,
           });
 
           broadcastToProject(projectId, 'op.broadcast', {
@@ -4971,7 +5058,13 @@ wsServer.on('connection', (ws, req) => {
 
           const access = await getProjectAccess(ws.session.userId, projectId);
           if (!canWriteProjectTracks(access)) {
-            sendWs(ws, 'error', { code: 'NO_WRITE_PERMISSION', message: 'No write permission', retryable: false });
+            sendWs(ws, 'error', {
+              code: 'NO_WRITE_PERMISSION',
+              message: 'You do not have write access to this project',
+              retryable: false,
+              projectId,
+              trackId,
+            });
             return;
           }
           if (!(await canUserEditTrackInProject(ws.session.userId, projectId, trackId))) {
@@ -4979,6 +5072,8 @@ wsServer.on('connection', (ws, req) => {
               code: 'NO_TRACK_WRITE_PERMISSION',
               message: 'You cannot edit that track',
               retryable: false,
+              projectId,
+              trackId,
             });
             return;
           }

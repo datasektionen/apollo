@@ -26,7 +26,7 @@ jobs:
           nomad-token: ${{ secrets.NOMAD_TOKEN }}
           nomad-addr: ${{ vars.NOMAD_ADDR }}
           package-variant: api
-          build-context: ./server
+          build-context: .
           build-dockerfile: ./server/Dockerfile
           deploy-image-ref-var: api_image_tag
           deploy-args: "-var=web_image_tag=${{ steps.build-web.outputs.built-image-ref }}"

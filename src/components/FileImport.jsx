@@ -27,6 +27,9 @@ function FileImport({
   onClose,
   project = null,
   manualChoirPartsEnabled = false,
+  canCreateTracks = true,
+  canEditTrack = null,
+  canCreateTrackForDestination = null,
 }) {
   const [files, setFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -162,6 +165,22 @@ function FileImport({
   };
 
   const replaceEntries = files.filter((entry) => destinationReplacesAudio(entry.destination, project));
+
+  // Permission check mirroring Editor.handleFileImport / server write rules:
+  // importing into an existing track needs edit access to that track, any
+  // other destination creates a new track.
+  const destinationAllowed = (destination) => {
+    const targetsExisting = destination?.mode === IMPORT_DESTINATION_MODES.EXISTING
+      || destination?.mode === IMPORT_DESTINATION_MODES.APPEND;
+    if (targetsExisting && destination?.trackId) {
+      return typeof canEditTrack === 'function' ? Boolean(canEditTrack(destination.trackId)) : true;
+    }
+    if (typeof canCreateTrackForDestination === 'function') {
+      return Boolean(canCreateTrackForDestination(destination));
+    }
+    return Boolean(canCreateTracks);
+  };
+  const blockedEntries = files.filter((entry) => !destinationAllowed(entry.destination));
 
   const runImport = async () => {
     if (files.length === 0) return;
@@ -345,10 +364,12 @@ function FileImport({
         </div>
 
         <div className="px-6 py-4 border-t border-gray-700 flex items-center justify-between">
-          <p className="text-sm text-gray-400">
-            {files.length > 0
-              ? `${files.length} file${files.length > 1 ? 's' : ''} ready to import`
-              : 'No files selected'}
+          <p className={`text-sm ${blockedEntries.length ? 'text-amber-300' : 'text-gray-400'}`}>
+            {blockedEntries.length
+              ? `${blockedEntries.length} file${blockedEntries.length > 1 ? 's' : ''} target${blockedEntries.length > 1 ? '' : 's'} a track you cannot ${canCreateTracks ? 'edit' : 'create or edit'}`
+              : files.length > 0
+                ? `${files.length} file${files.length > 1 ? 's' : ''} ready to import`
+                : 'No files selected'}
           </p>
           <div className="flex gap-2">
             <button
@@ -361,7 +382,8 @@ function FileImport({
             <button
               onClick={handleImport}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={files.length === 0 || isProcessing}
+              disabled={files.length === 0 || isProcessing || blockedEntries.length > 0}
+              title={blockedEntries.length ? 'Change the destination of the highlighted files first' : undefined}
             >
               {isProcessing ? 'Importing...' : 'Import'}
             </button>

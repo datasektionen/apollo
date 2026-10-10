@@ -3,6 +3,20 @@ import { ArrowLeft, CircleUserRound, MoreHorizontal, Plus, Search } from 'lucide
 import { BrandWordmark } from './BrandLogo';
 import AdminShowsPanel from './AdminShowsPanel';
 import AdminStoragePanel from './AdminStoragePanel';
+import { AccessTypeInfoButton, GrantRulesTable } from './GrantRulesTable';
+import { UnsavedAccessBar } from './UnsavedAccessBar';
+import {
+  accessDraftDirty,
+  cloneGrants,
+  createDraftGrant,
+  grantSignature,
+  grantWriteBody,
+  grantsDraftDirty,
+  isDraftGrantId,
+  replaceGrant,
+  sameIdList,
+} from './accessDraft';
+import { PERMISSION_COVERAGE } from './grantAccess';
 import {
   addRbacRoleMember,
   addUserRole,
@@ -25,6 +39,8 @@ import {
   saveRbacRoleGrant,
   saveUserGrant,
   transferUserOwnership,
+  updateRbacRoleGrant,
+  updateUserGrant,
   updateAdminArtist,
   updateRbacRole,
 } from '../lib/serverApi';
@@ -122,6 +138,7 @@ function CompactAccessSection({
   children,
   count = null,
   title,
+  titleExtra = null,
 }) {
   return (
     <section className="overflow-hidden rounded-xl border border-gray-800 bg-gray-950/50">
@@ -133,6 +150,7 @@ function CompactAccessSection({
               {count}
             </span>
           ) : null}
+          {titleExtra}
         </div>
         {actions}
       </div>
@@ -166,53 +184,6 @@ function CompactAccessRow({
       <div className="flex items-center justify-end gap-2">{actions}</div>
     </div>
   );
-}
-
-const PERMISSION_HELP = {
-  show_manager: 'Full control inside the selected show, including its musical numbers and tracks. Does not create new shows.',
-  show_creator: 'Can create new shows. Shows you create become fully manageable by you.',
-  show_reader: 'Can only see that a show exists.',
-  project_manager: 'Full control of the selected musical numbers and everything inside them.',
-  project_creator: 'Can create new musical numbers inside the selected shows.',
-  project_reader: 'Can see musical numbers in the DAW dashboard and listen to their tutti mixes, but cannot open them.',
-  track_manager: 'Full control of tracks in the selected scope, including descendant subtracks.',
-  track_creator: 'Can create tracks or subtracks in the selected scope. Created tracks become fully manageable by you.',
-  track_reader: 'Can open musical numbers in the DAW and create mixes.',
-};
-
-const PERMISSION_COVERAGE = {
-  show_manager: ['show_manager', 'show_reader', 'project_manager', 'project_creator', 'project_reader', 'track_manager', 'track_creator', 'track_reader'],
-  show_creator: ['show_creator'],
-  show_reader: ['show_reader'],
-  project_manager: ['project_manager', 'project_reader', 'track_manager', 'track_creator', 'track_reader'],
-  project_creator: ['project_creator'],
-  project_reader: ['project_reader'],
-  track_manager: ['track_manager', 'track_creator', 'track_reader', 'project_reader'],
-  track_creator: ['track_creator'],
-  track_reader: ['track_reader', 'project_reader'],
-};
-
-const PERMISSION_SCOPE_FLOW = {
-  show_manager: ['show'],
-  show_creator: [],
-  show_reader: ['show'],
-  project_manager: ['show', 'project', 'group', 'part'],
-  project_creator: ['show'],
-  project_reader: ['show', 'project', 'group', 'part'],
-  track_manager: ['show', 'project', 'group', 'part', 'track'],
-  track_creator: ['show', 'project', 'group', 'part'],
-  track_reader: ['show', 'project', 'group', 'part', 'track'],
-};
-
-const ALL_SCOPE_VALUE = '__all__';
-
-function getPermissionHelp(permissionKey) {
-  return PERMISSION_HELP[permissionKey] || 'This permission controls what the user can do in Apollo.';
-}
-
-function getPermissionLabel(catalog, permissionKey) {
-  const option = (catalog?.permissions || []).find((candidate) => candidate.value === permissionKey);
-  return option?.label || permissionKey || 'Permission';
 }
 
 function getRoleDisplayName(role) {
@@ -260,421 +231,6 @@ function isGrantRedundant(grant, allGrants) {
   ));
 }
 
-function getGrantHoverTitle(grant) {
-  const parts = [getPermissionHelp(grant.permissionKey)];
-  if (grant.sourceType === 'inherited' && grant.sourceRoleName) {
-    parts.push(`Inherited from ${grant.sourceRoleName}.`);
-  }
-  if (grant.isRedundant) {
-    parts.push('Redundant because a broader access already covers this.');
-  }
-  return parts.filter(Boolean).join(' ');
-}
-
-function formatGrantLabel(grant) {
-  const permissionLabel = grant.permissionLabel || grant.permissionKey || 'Permission';
-  const parts = [permissionLabel];
-  if (grant.scopeType === 'all') parts.push('All');
-  if (grant.scopeType === 'show') parts.push(`Show: ${grant.scopeLabel || 'Unknown show'}`);
-  if (grant.scopeType === 'project') parts.push(`Musical number: ${grant.scopeLabel || 'Unknown project'}`);
-  if (grant.scopeType === 'track') parts.push(`Track: ${grant.scopeLabel || 'Unknown track'}`);
-  if (grant.scopeType === 'group_name') parts.push(`Group: ${grant.scopeLabel || grant.scopeNameValue || ''}`);
-  if (grant.scopeType === 'part_name') parts.push(`Part: ${grant.scopeLabel || grant.scopeNameValue || ''}`);
-  if (grant.scopeGroupNameValue && grant.scopeType !== 'group_name') {
-    parts.push(`Group: ${grant.scopeGroupLabel || grant.scopeGroupNameValue}`);
-  }
-  if (grant.scopePartNameValue && grant.scopeType !== 'part_name') {
-    parts.push(`Part: ${grant.scopePartLabel || grant.scopePartNameValue}`);
-  }
-  return parts.join(' • ');
-}
-
-function GrantList({ grants = [], canRemove = true, onRemove }) {
-  if (!grants.length) {
-    return (
-      <div className="p-4">
-        <Empty>No access rules.</Empty>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {grants.map((grant) => {
-        const inherited = grant.sourceType === 'inherited';
-        const removable = canRemove && !inherited;
-        const badges = (inherited || grant.isRedundant) ? (
-          <>
-            {inherited && grant.sourceRoleName ? (
-              <Badge tone="amber">Inherited from {grant.sourceRoleName}</Badge>
-            ) : null}
-            {grant.isRedundant ? <Badge>Redundant</Badge> : null}
-          </>
-        ) : null;
-        return (
-          <CompactAccessRow
-            key={grant.id}
-            title={formatGrantLabel(grant)}
-            titleAttr={getGrantHoverTitle(grant)}
-            badges={badges}
-            muted={grant.isRedundant}
-            actions={removable ? (
-              <button
-                type="button"
-                onClick={() => onRemove?.(grant)}
-                className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-100 hover:bg-gray-700"
-              >
-                Remove
-              </button>
-            ) : null}
-          />
-        );
-      })}
-    </>
-  );
-}
-
-function GrantEditor({
-  catalog,
-  disabled = false,
-  excludedPermissions = [],
-  onSave,
-}) {
-  const excludedPermissionSet = new Set(excludedPermissions);
-  const permissionOptions = (catalog?.permissions || []).filter((option) => (
-    !excludedPermissionSet.has(option.value)
-  ));
-
-  const [permissionKey, setPermissionKey] = useState(permissionOptions[0]?.value || 'project_reader');
-  const [scopeShowId, setScopeShowId] = useState(ALL_SCOPE_VALUE);
-  const [scopeProjectId, setScopeProjectId] = useState(ALL_SCOPE_VALUE);
-  const [groupScopeValue, setGroupScopeValue] = useState(ALL_SCOPE_VALUE);
-  const [partScopeValue, setPartScopeValue] = useState(ALL_SCOPE_VALUE);
-  const [scopeTrackId, setScopeTrackId] = useState(ALL_SCOPE_VALUE);
-
-  const scopeFlow = PERMISSION_SCOPE_FLOW[permissionKey] || [];
-  const hasShowScope = scopeFlow.includes('show');
-  const hasProjectScope = scopeFlow.includes('project');
-  const hasGroupScope = scopeFlow.includes('group');
-  const hasPartScope = scopeFlow.includes('part');
-  const hasTrackScope = scopeFlow.includes('track');
-
-  const showOptions = catalog?.shows || [];
-  const tracks = catalog?.tracks || [];
-  const groupLabelByValue = new Map((catalog?.groupNames || []).map((option) => [option.value, option.label]));
-  const partLabelByValue = new Map((catalog?.partNames || []).map((option) => [option.value, option.label]));
-
-  const applyPermissionDefaults = (nextPermissionKey) => {
-    setPermissionKey(nextPermissionKey);
-    setScopeShowId(ALL_SCOPE_VALUE);
-    setScopeProjectId(ALL_SCOPE_VALUE);
-    setGroupScopeValue(ALL_SCOPE_VALUE);
-    setPartScopeValue(ALL_SCOPE_VALUE);
-    setScopeTrackId(ALL_SCOPE_VALUE);
-  };
-
-  useEffect(() => {
-    if (!permissionOptions.some((option) => option.value === permissionKey)) {
-      applyPermissionDefaults(permissionOptions[0]?.value || 'project_reader');
-    }
-  }, [permissionKey, permissionOptions]);
-
-  const projectOptions = (catalog?.projects || []).filter((project) => (
-    scopeShowId === ALL_SCOPE_VALUE || project.showId === scopeShowId
-  ));
-  const scopedTrackOptions = tracks.filter((track) => (
-    (scopeShowId === ALL_SCOPE_VALUE || track.showId === scopeShowId)
-    && (scopeProjectId === ALL_SCOPE_VALUE || track.projectId === scopeProjectId)
-  ));
-  const groupOptions = Array.from(new Set(
-    scopedTrackOptions.flatMap((track) => Array.isArray(track.groupValues) ? track.groupValues : [])
-  ))
-    .sort((left, right) => (groupLabelByValue.get(left) || left).localeCompare(groupLabelByValue.get(right) || right, undefined, {
-      sensitivity: 'base',
-      numeric: true,
-    }))
-    .map((value) => ({ value, label: groupLabelByValue.get(value) || value }));
-  const partOptions = Array.from(new Set(
-    scopedTrackOptions
-      .filter((track) => groupScopeValue === ALL_SCOPE_VALUE || (track.groupValues || []).includes(groupScopeValue))
-      .flatMap((track) => Array.isArray(track.partValues) ? track.partValues : [])
-  ))
-    .sort((left, right) => (partLabelByValue.get(left) || left).localeCompare(partLabelByValue.get(right) || right, undefined, {
-      sensitivity: 'base',
-      numeric: true,
-    }))
-    .map((value) => ({ value, label: partLabelByValue.get(value) || value }));
-  const trackOptions = scopedTrackOptions.filter((track) => (
-    (groupScopeValue === ALL_SCOPE_VALUE || (track.groupValues || []).includes(groupScopeValue))
-    && (partScopeValue === ALL_SCOPE_VALUE || (track.partValues || []).includes(partScopeValue))
-  ));
-
-  useEffect(() => {
-    if (!hasShowScope) {
-      setScopeShowId(ALL_SCOPE_VALUE);
-    }
-  }, [hasShowScope]);
-
-  useEffect(() => {
-    if (!hasProjectScope) {
-      setScopeProjectId(ALL_SCOPE_VALUE);
-    }
-  }, [hasProjectScope]);
-
-  useEffect(() => {
-    if (!hasGroupScope) {
-      setGroupScopeValue(ALL_SCOPE_VALUE);
-    }
-  }, [hasGroupScope]);
-
-  useEffect(() => {
-    if (!hasPartScope) {
-      setPartScopeValue(ALL_SCOPE_VALUE);
-    }
-  }, [hasPartScope]);
-
-  useEffect(() => {
-    if (!hasTrackScope) {
-      setScopeTrackId(ALL_SCOPE_VALUE);
-    }
-  }, [hasTrackScope]);
-
-  useEffect(() => {
-    if (scopeShowId === ALL_SCOPE_VALUE) {
-      setScopeProjectId(ALL_SCOPE_VALUE);
-      setScopeTrackId(ALL_SCOPE_VALUE);
-    }
-  }, [scopeShowId]);
-
-  useEffect(() => {
-    if (scopeProjectId === ALL_SCOPE_VALUE) {
-      setScopeTrackId(ALL_SCOPE_VALUE);
-    }
-  }, [scopeProjectId]);
-
-  useEffect(() => {
-    if (
-      scopeShowId !== ALL_SCOPE_VALUE
-      && !showOptions.some((show) => show.id === scopeShowId)
-    ) {
-      setScopeShowId(ALL_SCOPE_VALUE);
-    }
-  }, [scopeShowId, showOptions]);
-
-  useEffect(() => {
-    if (
-      scopeProjectId !== ALL_SCOPE_VALUE
-      && !projectOptions.some((project) => project.id === scopeProjectId)
-    ) {
-      setScopeProjectId(ALL_SCOPE_VALUE);
-      setGroupScopeValue(ALL_SCOPE_VALUE);
-      setPartScopeValue(ALL_SCOPE_VALUE);
-      setScopeTrackId(ALL_SCOPE_VALUE);
-    }
-  }, [projectOptions, scopeProjectId]);
-
-  useEffect(() => {
-    if (
-      groupScopeValue !== ALL_SCOPE_VALUE
-      && !groupOptions.some((option) => option.value === groupScopeValue)
-    ) {
-      setGroupScopeValue(ALL_SCOPE_VALUE);
-      setPartScopeValue(ALL_SCOPE_VALUE);
-      setScopeTrackId(ALL_SCOPE_VALUE);
-    }
-  }, [groupOptions, groupScopeValue]);
-
-  useEffect(() => {
-    if (
-      partScopeValue !== ALL_SCOPE_VALUE
-      && !partOptions.some((option) => option.value === partScopeValue)
-    ) {
-      setPartScopeValue(ALL_SCOPE_VALUE);
-      setScopeTrackId(ALL_SCOPE_VALUE);
-    }
-  }, [partOptions, partScopeValue]);
-
-  useEffect(() => {
-    if (
-      scopeTrackId !== ALL_SCOPE_VALUE
-      && !trackOptions.some((track) => track.id === scopeTrackId)
-    ) {
-      setScopeTrackId(ALL_SCOPE_VALUE);
-    }
-  }, [scopeTrackId, trackOptions]);
-
-  const effectiveScopeType = (() => {
-    if (hasTrackScope && scopeTrackId !== ALL_SCOPE_VALUE) return 'track';
-    if (hasProjectScope && scopeProjectId !== ALL_SCOPE_VALUE) return 'project';
-    if (hasShowScope && scopeShowId !== ALL_SCOPE_VALUE) return 'show';
-    return 'all';
-  })();
-
-  const canSubmit = !disabled && (() => {
-    if (effectiveScopeType === 'all') return true;
-    if (effectiveScopeType === 'show') return scopeShowId !== ALL_SCOPE_VALUE;
-    if (effectiveScopeType === 'project') return scopeShowId !== ALL_SCOPE_VALUE && scopeProjectId !== ALL_SCOPE_VALUE;
-    if (effectiveScopeType === 'track') return scopeTrackId !== ALL_SCOPE_VALUE;
-    return false;
-  })();
-
-  const reset = () => {
-    applyPermissionDefaults(permissionOptions[0]?.value || permissionKey || 'project_reader');
-  };
-
-  const handleSubmit = async () => {
-    if (!canSubmit) return;
-    await onSave?.({
-      permissionKey,
-      scopeType: effectiveScopeType,
-      scopeShowId: effectiveScopeType === 'show' || effectiveScopeType === 'project' || effectiveScopeType === 'track'
-        ? scopeShowId
-        : null,
-      scopeProjectId: effectiveScopeType === 'project' || effectiveScopeType === 'track'
-        ? scopeProjectId
-        : null,
-      scopeTrackId: effectiveScopeType === 'track' ? scopeTrackId : null,
-      scopeNameValue: null,
-      scopeGroupNameValue: hasGroupScope && groupScopeValue !== ALL_SCOPE_VALUE ? groupScopeValue : null,
-      scopePartNameValue: hasPartScope && partScopeValue !== ALL_SCOPE_VALUE ? partScopeValue : null,
-    });
-    reset();
-  };
-
-  return (
-    <div className="space-y-3 rounded-lg border border-gray-700 bg-gray-950/60 p-4">
-      <label className="space-y-2">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Access type</div>
-        <select
-          value={permissionKey}
-          disabled={disabled}
-          title={getPermissionHelp(permissionKey)}
-          onChange={(event) => applyPermissionDefaults(event.target.value)}
-          className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
-        >
-          {permissionOptions.map((option) => (
-            <option
-              key={option.value}
-              value={option.value}
-              title={getPermissionHelp(option.value)}
-            >
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {hasShowScope ? (
-        <>
-          <label className="space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Scope: show</div>
-            <select
-              value={scopeShowId}
-              disabled={disabled}
-              onChange={(event) => setScopeShowId(event.target.value)}
-              className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
-            >
-              <option value={ALL_SCOPE_VALUE}>All</option>
-              {showOptions.map((show) => (
-                <option key={show.id} value={show.id}>
-                  {show.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {scopeShowId !== ALL_SCOPE_VALUE && hasProjectScope ? (
-            <label className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Scope: musical number</div>
-              <select
-                value={scopeProjectId}
-                disabled={disabled}
-                onChange={(event) => setScopeProjectId(event.target.value)}
-                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
-              >
-                <option value={ALL_SCOPE_VALUE}>All</option>
-                {projectOptions.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.musicalNumber ? `${project.musicalNumber} - ` : ''}{project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          {hasGroupScope ? (
-            <label className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Scope: group track</div>
-              <select
-                value={groupScopeValue}
-                disabled={disabled}
-                onChange={(event) => setGroupScopeValue(event.target.value)}
-                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
-              >
-                <option value={ALL_SCOPE_VALUE}>All</option>
-                {groupOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          {hasPartScope ? (
-            <label className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Scope: part track</div>
-              <select
-                value={partScopeValue}
-                disabled={disabled}
-                onChange={(event) => setPartScopeValue(event.target.value)}
-                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
-              >
-                <option value={ALL_SCOPE_VALUE}>All</option>
-                {partOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          {scopeProjectId !== ALL_SCOPE_VALUE && hasTrackScope ? (
-            <label className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Scope: track</div>
-              <select
-                value={scopeTrackId}
-                disabled={disabled}
-                onChange={(event) => setScopeTrackId(event.target.value)}
-                className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
-              >
-                <option value={ALL_SCOPE_VALUE}>All</option>
-                {trackOptions.map((track) => (
-                  <option key={track.id} value={track.id}>
-                    {track.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-        </>
-      ) : null}
-
-      <div className="flex justify-end">
-        <button
-          type="button"
-          disabled={!canSubmit}
-          onClick={handleSubmit}
-          className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500 disabled:bg-gray-700"
-        >
-          Add access
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function AdminPanel({
   session = null,
   onClose,
@@ -697,6 +253,14 @@ export default function AdminPanel({
   const [roleDetailTab, setRoleDetailTab] = useState('permissions');
   const [roleNameDraft, setRoleNameDraft] = useState('');
   const [parentRoleIdsDraft, setParentRoleIdsDraft] = useState([]);
+  const [parentRoleBaseline, setParentRoleBaseline] = useState([]);
+  const [roleGrantDraft, setRoleGrantDraft] = useState([]);
+  const [roleGrantBaseline, setRoleGrantBaseline] = useState([]);
+  const [userGrantDraft, setUserGrantDraft] = useState([]);
+  const [userGrantBaseline, setUserGrantBaseline] = useState([]);
+  const [accessBarAttention, setAccessBarAttention] = useState(0);
+  const [roleEditorReset, setRoleEditorReset] = useState(0);
+  const [userEditorReset, setUserEditorReset] = useState(0);
   const [pendingRoleMemberId, setPendingRoleMemberId] = useState('');
   const [pendingChildRoleId, setPendingChildRoleId] = useState('');
   const [oidcClaimPathDraft, setOidcClaimPathDraft] = useState('');
@@ -750,12 +314,21 @@ export default function AdminPanel({
   const loadRole = async (roleId = selectedRoleId) => {
     if (!roleId) {
       setSelectedRole(null);
+      setRoleGrantDraft([]);
+      setRoleGrantBaseline([]);
+      setParentRoleIdsDraft([]);
+      setParentRoleBaseline([]);
       return;
     }
     const role = await getRbacRole(roleId, session);
+    const parentIds = (role?.parents || []).map((parent) => parent.id);
     setSelectedRole(role);
     setRoleNameDraft(role?.name || '');
-    setParentRoleIdsDraft((role?.parents || []).map((parent) => parent.id));
+    setParentRoleIdsDraft(parentIds);
+    setParentRoleBaseline(parentIds);
+    setRoleGrantDraft(cloneGrants(role?.grants));
+    setRoleGrantBaseline(cloneGrants(role?.grants));
+    setRoleEditorReset((current) => current + 1);
   };
 
   useEffect(() => {
@@ -788,6 +361,9 @@ export default function AdminPanel({
       setSelectedRole(null);
       setRoleNameDraft('');
       setParentRoleIdsDraft([]);
+      setParentRoleBaseline([]);
+      setRoleGrantDraft([]);
+      setRoleGrantBaseline([]);
       return;
     }
     loadRole(selectedRoleId).catch((loadError) => {
@@ -906,7 +482,7 @@ export default function AdminPanel({
 
   const expandedUserRoleIdSet = useMemo(() => new Set(expandedUserRoleIds), [expandedUserRoleIds]);
 
-  const roleGrants = useMemo(() => (selectedRole?.grants || []), [selectedRole]);
+  const roleGrants = roleGrantDraft;
   const inheritedRoleGrants = useMemo(() => (selectedRole?.inheritedGrants || []), [selectedRole]);
   const allRoleGrants = useMemo(() => ([
     ...roleGrants,
@@ -914,25 +490,54 @@ export default function AdminPanel({
   ]), [roleGrants, inheritedRoleGrants]);
 
   const visibleRoleGrants = useMemo(() => {
+    const baselineById = new Map(roleGrantBaseline.map((grant) => [grant.id, grant]));
     const grants = allRoleGrants
       .map((grant) => ({
         ...grant,
         isRedundant: isGrantRedundant(grant, allRoleGrants),
       }));
-    return showRedundantAccesses ? grants : grants.filter((grant) => !grant.isRedundant);
-  }, [allRoleGrants, showRedundantAccesses]);
+    return showRedundantAccesses
+      ? grants
+      : grants.filter((grant) => {
+        if (!grant.isRedundant || isDraftGrantId(grant.id)) return true;
+        const saved = baselineById.get(grant.id);
+        return !saved || grantSignature(saved) !== grantSignature(grant);
+      });
+  }, [allRoleGrants, roleGrantBaseline, showRedundantAccesses]);
 
-  const userDirectGrants = useMemo(() => (
-    userAccessModal?.detail?.directGrants || []
-  ), [userAccessModal]);
+  const userDirectGrants = userGrantDraft;
 
   const visibleUserDirectGrants = useMemo(() => {
+    const baselineById = new Map(userGrantBaseline.map((grant) => [grant.id, grant]));
     const grants = userDirectGrants.map((grant) => ({
       ...grant,
       isRedundant: isGrantRedundant(grant, userDirectGrants),
     }));
-    return showRedundantUserAccesses ? grants : grants.filter((grant) => !grant.isRedundant);
-  }, [showRedundantUserAccesses, userDirectGrants]);
+    return showRedundantUserAccesses
+      ? grants
+      : grants.filter((grant) => {
+        if (!grant.isRedundant || isDraftGrantId(grant.id)) return true;
+        const saved = baselineById.get(grant.id);
+        return !saved || grantSignature(saved) !== grantSignature(grant);
+      });
+  }, [showRedundantUserAccesses, userDirectGrants, userGrantBaseline]);
+
+  const roleAccessDirty = Boolean(selectedRole) && accessDraftDirty({
+    baselineGrants: roleGrantBaseline,
+    draftGrants: roleGrantDraft,
+    baselineParentIds: parentRoleBaseline,
+    draftParentIds: parentRoleIdsDraft,
+  });
+  const userAccessDirty = Boolean(userAccessModal) && grantsDraftDirty(userGrantBaseline, userGrantDraft);
+  const accessDirty = roleAccessDirty || userAccessDirty;
+
+  const leaveAdmin = (action) => {
+    if (accessDirty) {
+      setAccessBarAttention((current) => current + 1);
+      return;
+    }
+    action();
+  };
 
   const runAction = async (action, fallbackMessage) => {
     setSaving(true);
@@ -948,41 +553,41 @@ export default function AdminPanel({
   };
 
   const handleCreateRole = async () => {
-    await runAction(async () => {
-      const createdRole = await createRbacRole({ name: 'New role' }, session);
-      await loadBaseData();
-      setNewlyCreatedRoleId(createdRole.id);
-      setSelectedRoleId(createdRole.id);
-    }, 'Failed to create role.');
+    leaveAdmin(async () => {
+      await runAction(async () => {
+        const createdRole = await createRbacRole({ name: 'New role' }, session);
+        await loadBaseData();
+        setNewlyCreatedRoleId(createdRole.id);
+        setSelectedRoleId(createdRole.id);
+      }, 'Failed to create role.');
+    });
   };
 
-  const handleSaveRole = async () => {
-    if (!selectedRole) return;
-    await runAction(async () => {
-      if (!selectedRole.isSystem) {
-        await updateRbacRole(selectedRole.id, {
-          name: roleNameDraft.trim(),
-          parentRoleIds: parentRoleIdsDraft,
-        }, session);
-      }
-      await loadBaseData();
-      await loadRole(selectedRole.id);
-    }, 'Failed to save role.');
-  };
-
-  const handleSaveIncludedRoles = async () => {
+  const handleRoleNameCommit = async () => {
     if (!selectedRole || selectedRole.isSystem) return;
+    const nextName = roleNameDraft.trim();
+    if (!nextName) {
+      setRoleNameDraft(selectedRole.name || '');
+      return;
+    }
+    if (nextName === selectedRole.name) return;
+    const previousName = selectedRole.name || '';
+    let saved = false;
     await runAction(async () => {
-      await updateRbacRole(selectedRole.id, {
-        parentRoleIds: parentRoleIdsDraft,
-      }, session);
+      await updateRbacRole(selectedRole.id, { name: nextName }, session);
+      saved = true;
+      setSelectedRole((current) => (current ? { ...current, name: nextName } : current));
       await loadBaseData();
-      await loadRole(selectedRole.id);
-    }, 'Failed to save included roles.');
+    }, 'Failed to save role.');
+    if (!saved) setRoleNameDraft(previousName);
   };
 
   const handleDeleteRole = async () => {
     if (!selectedRole || selectedRole.isSystem) return;
+    if (accessDirty) {
+      setAccessBarAttention((current) => current + 1);
+      return;
+    }
     if (!window.confirm(`Delete "${selectedRole.name}"?`)) return;
     await runAction(async () => {
       await deleteRbacRole(selectedRole.id, session);
@@ -1009,22 +614,64 @@ export default function AdminPanel({
     }, 'Failed to remove member.');
   };
 
-  const handleSaveRoleGrant = async (grant) => {
-    if (!selectedRole) return;
+  const handleRoleGrantChange = (grant) => {
+    setRoleGrantDraft((current) => replaceGrant(current, grant, catalog));
+  };
+
+  const handleAddRoleGrant = () => {
+    const grant = createDraftGrant(catalog);
+    setRoleGrantDraft((current) => [...current, grant]);
+    return grant.id;
+  };
+
+  const handleRemoveRoleGrant = (grant) => {
+    if (!grant?.id) return;
+    setRoleGrantDraft((current) => current.filter((item) => item.id !== grant.id));
+  };
+
+  const discardRoleAccess = () => {
+    setRoleGrantDraft(cloneGrants(roleGrantBaseline));
+    setParentRoleIdsDraft([...parentRoleBaseline]);
+    setRoleEditorReset((current) => current + 1);
+  };
+
+  const handleSaveRoleAccess = async () => {
+    if (!selectedRole || !roleAccessDirty) return;
+    const baselineById = new Map(roleGrantBaseline.map((grant) => [grant.id, grant]));
+    const draftIds = new Set(roleGrantDraft.map((grant) => grant.id));
     await runAction(async () => {
-      await saveRbacRoleGrant(selectedRole.id, grant, session);
+      if (!sameIdList(parentRoleBaseline, parentRoleIdsDraft)) {
+        await updateRbacRole(selectedRole.id, { parentRoleIds: parentRoleIdsDraft }, session);
+        setParentRoleBaseline([...parentRoleIdsDraft]);
+      }
+      for (const saved of roleGrantBaseline) {
+        if (!draftIds.has(saved.id)) {
+          await deleteRbacRoleGrant(selectedRole.id, saved.id, session);
+          setRoleGrantBaseline((current) => current.filter((item) => item.id !== saved.id));
+        }
+      }
+      for (const grant of roleGrantDraft) {
+        const saved = baselineById.get(grant.id);
+        const body = grantWriteBody(grant);
+        if (!saved || isDraftGrantId(grant.id)) {
+          const created = await saveRbacRoleGrant(selectedRole.id, body, session);
+          const createdId = created?.id;
+          if (createdId) {
+            setRoleGrantDraft((current) => current.map((item) => (
+              item.id === grant.id ? { ...item, ...created, id: createdId } : item
+            )));
+            setRoleGrantBaseline((current) => [...current.filter((item) => item.id !== grant.id), created]);
+          }
+        } else if (grantSignature(saved) !== grantSignature(grant)) {
+          await updateRbacRoleGrant(selectedRole.id, grant.id, body, session);
+          setRoleGrantBaseline((current) => current.map((item) => (
+            item.id === grant.id ? { ...item, ...body } : item
+          )));
+        }
+      }
       await loadBaseData();
       await loadRole(selectedRole.id);
     }, 'Failed to save role access.');
-  };
-
-  const handleDeleteRoleGrant = async (grant) => {
-    if (!selectedRole) return;
-    await runAction(async () => {
-      await deleteRbacRoleGrant(selectedRole.id, grant.id, session);
-      await loadBaseData();
-      await loadRole(selectedRole.id);
-    }, 'Failed to remove role access.');
   };
 
   const handleEditArtistDescription = async (artist) => {
@@ -1127,6 +774,10 @@ export default function AdminPanel({
 
   const loadUserAccess = async (userId) => {
     const detail = await getUserAccessDetail(userId, session);
+    const directGrants = cloneGrants(detail?.directGrants);
+    setUserGrantBaseline(directGrants);
+    setUserGrantDraft(cloneGrants(directGrants));
+    setUserEditorReset((current) => current + 1);
     setUserAccessModal((current) => (
       current?.userId === userId
         ? {
@@ -1159,24 +810,68 @@ export default function AdminPanel({
     }
   };
 
-  const handleSaveUserGrant = async (grant) => {
-    if (!userAccessModal?.userId) return;
+  const handleUserGrantChange = (grant) => {
+    setUserGrantDraft((current) => replaceGrant(current, grant, catalog));
+  };
+
+  const handleAddUserGrant = () => {
+    const grant = createDraftGrant(catalog);
+    setUserGrantDraft((current) => [...current, grant]);
+    return grant.id;
+  };
+
+  const handleRemoveUserGrant = (grant) => {
+    if (!grant?.id) return;
+    setUserGrantDraft((current) => current.filter((item) => item.id !== grant.id));
+  };
+
+  const discardUserAccess = () => {
+    setUserGrantDraft(cloneGrants(userGrantBaseline));
+    setUserEditorReset((current) => current + 1);
+  };
+
+  const handleSaveUserAccess = async () => {
+    if (!userAccessModal?.userId || !userAccessDirty) return;
     const userId = userAccessModal.userId;
+    const baselineById = new Map(userGrantBaseline.map((grant) => [grant.id, grant]));
+    const draftIds = new Set(userGrantDraft.map((grant) => grant.id));
     await runAction(async () => {
-      await saveUserGrant(userId, grant, session);
+      for (const saved of userGrantBaseline) {
+        if (!draftIds.has(saved.id)) {
+          await deleteUserGrant(userId, saved.id, session);
+          setUserGrantBaseline((current) => current.filter((item) => item.id !== saved.id));
+        }
+      }
+      for (const grant of userGrantDraft) {
+        const saved = baselineById.get(grant.id);
+        const body = grantWriteBody(grant);
+        if (!saved || isDraftGrantId(grant.id)) {
+          const created = await saveUserGrant(userId, body, session);
+          const createdId = created?.id;
+          if (createdId) {
+            setUserGrantDraft((current) => current.map((item) => (
+              item.id === grant.id ? { ...item, ...created, id: createdId } : item
+            )));
+            setUserGrantBaseline((current) => [...current.filter((item) => item.id !== grant.id), created]);
+          }
+        } else if (grantSignature(saved) !== grantSignature(grant)) {
+          await updateUserGrant(userId, grant.id, body, session);
+          setUserGrantBaseline((current) => current.map((item) => (
+            item.id === grant.id ? { ...item, ...body } : item
+          )));
+        }
+      }
       await loadBaseData();
       await loadUserAccess(userId);
     }, 'Failed to save user access.');
   };
 
-  const handleDeleteUserGrant = async (grant) => {
-    if (!userAccessModal?.userId || !grant?.id) return;
-    const userId = userAccessModal.userId;
-    await runAction(async () => {
-      await deleteUserGrant(userId, grant.id, session);
-      await loadBaseData();
-      await loadUserAccess(userId);
-    }, 'Failed to remove user access.');
+  const closeUserAccessModal = () => {
+    leaveAdmin(() => {
+      setUserAccessModal(null);
+      setUserGrantDraft([]);
+      setUserGrantBaseline([]);
+    });
   };
 
   const openUserActionModal = (type, user) => {
@@ -1287,20 +982,20 @@ export default function AdminPanel({
                   ) : null}
                   <button
                     type="button"
-                    onClick={() => {
-                      setProfileMenuOpen(false);
-                      onClose?.();
-                    }}
+                      onClick={() => {
+                        setProfileMenuOpen(false);
+                        leaveAdmin(() => onClose?.());
+                      }}
                     className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
                   >
                     Go to app
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setProfileMenuOpen(false);
-                      onLogout?.();
-                    }}
+                      onClick={() => {
+                        setProfileMenuOpen(false);
+                        leaveAdmin(() => onLogout?.());
+                      }}
                     className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
                   >
                     Log out
@@ -1319,15 +1014,17 @@ export default function AdminPanel({
 
         <div className="min-h-0 flex-1 overflow-hidden">
           <div className="flex h-full flex-col overflow-hidden md:flex-row">
-            <aside className="shrink-0 border-b border-gray-800 bg-gray-950 p-3 md:w-60 md:border-b-0 md:border-r">
-              <nav className="flex gap-2 overflow-x-auto md:block md:space-y-2 md:overflow-visible">
+            <aside className="shrink-0 border-b border-gray-800 bg-gray-950 p-2 md:w-44 md:border-b-0 md:border-r">
+              <nav className="flex gap-1.5 overflow-x-auto md:block md:space-y-1 md:overflow-visible">
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedRoleId('');
-                    setTab('artists');
+                    leaveAdmin(() => {
+                      setSelectedRoleId('');
+                      setTab('artists');
+                    });
                   }}
-                  className={`relative flex min-w-36 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition md:w-full ${
+                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
                     tab === 'artists'
                       ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
                       : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
@@ -1344,10 +1041,12 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedRoleId('');
-                    setTab('users');
+                    leaveAdmin(() => {
+                      setSelectedRoleId('');
+                      setTab('users');
+                    });
                   }}
-                  className={`relative flex min-w-36 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition md:w-full ${
+                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
                     tab === 'users'
                       ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
                       : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
@@ -1364,10 +1063,12 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedRoleId('');
-                    setTab('shows');
+                    leaveAdmin(() => {
+                      setSelectedRoleId('');
+                      setTab('shows');
+                    });
                   }}
-                  className={`relative flex min-w-36 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition md:w-full ${
+                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
                     tab === 'shows'
                       ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
                       : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
@@ -1384,10 +1085,12 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedRoleId('');
-                    setTab('roles');
+                    leaveAdmin(() => {
+                      setSelectedRoleId('');
+                      setTab('roles');
+                    });
                   }}
-                  className={`relative flex min-w-36 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition md:w-full ${
+                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
                     tab === 'roles'
                       ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
                       : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
@@ -1404,10 +1107,12 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedRoleId('');
-                    setTab('storage');
+                    leaveAdmin(() => {
+                      setSelectedRoleId('');
+                      setTab('storage');
+                    });
                   }}
-                  className={`relative flex min-w-36 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition md:w-full ${
+                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
                     tab === 'storage'
                       ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
                       : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
@@ -1421,7 +1126,7 @@ export default function AdminPanel({
               </nav>
             </aside>
 
-            <div className="min-w-0 flex-1 overflow-auto p-5">
+            <div className={`min-w-0 flex-1 overflow-auto p-3 ${accessDirty ? 'pb-24' : ''}`}>
               {loading ? (
                 <Empty>Loading...</Empty>
               ) : tab === 'artists' ? (
@@ -1476,13 +1181,13 @@ export default function AdminPanel({
                 />
               ) : tab === 'roles' ? (
                 selectedRole ? (
-                  <div className="grid gap-5 xl:grid-cols-[280px,1fr]">
-                    <aside className="space-y-3 rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                  <div className="grid gap-3 lg:grid-cols-[12.5rem,minmax(0,1fr)]">
+                    <aside className="space-y-2 rounded-xl border border-gray-800 bg-gray-950/60 p-2">
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => setSelectedRoleId('')}
-                          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-800 bg-gray-950/80 px-3 py-2 text-left text-sm font-medium text-gray-200 transition hover:border-gray-700 hover:bg-gray-900"
+                          onClick={() => leaveAdmin(() => setSelectedRoleId(''))}
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-gray-800 bg-gray-950/80 px-2 py-1.5 text-left text-sm font-medium text-gray-200 transition hover:border-gray-700 hover:bg-gray-900"
                         >
                           <ArrowLeft size={16} className="shrink-0" />
                           <span className="truncate">Back</span>
@@ -1492,7 +1197,7 @@ export default function AdminPanel({
                           disabled={saving}
                           onClick={handleCreateRole}
                           title="Create role"
-                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-800 bg-gray-950/80 text-gray-200 transition hover:border-gray-700 hover:bg-gray-900 disabled:opacity-50"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-800 bg-gray-950/80 text-gray-200 transition hover:border-gray-700 hover:bg-gray-900 disabled:opacity-50"
                         >
                           <Plus size={16} />
                         </button>
@@ -1502,8 +1207,11 @@ export default function AdminPanel({
                           <button
                             key={role.id}
                             type="button"
-                            onClick={() => setSelectedRoleId(role.id)}
-                            className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
+                            onClick={() => {
+                              if (role.id === selectedRoleId) return;
+                              leaveAdmin(() => setSelectedRoleId(role.id));
+                            }}
+                            className={`w-full rounded-lg px-2 py-1.5 text-left text-sm ${
                               role.id === selectedRoleId
                                 ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
                                 : 'text-gray-300 hover:bg-gray-900 hover:text-white'
@@ -1515,7 +1223,7 @@ export default function AdminPanel({
                       </div>
                     </aside>
 
-                    <div className="space-y-5">
+                    <div className="min-w-0 space-y-4">
                       <Panel title={null} actions={null}>
                         <div className="space-y-4">
                           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1523,21 +1231,18 @@ export default function AdminPanel({
                               ref={roleNameInputRef}
                               type="text"
                               value={canEditRoleName ? roleNameDraft : getRoleDisplayName(selectedRole)}
-                              disabled={!canEditRoleName}
+                              disabled={!canEditRoleName || saving}
                               onChange={(event) => setRoleNameDraft(event.target.value)}
+                              onBlur={handleRoleNameCommit}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  event.currentTarget.blur();
+                                }
+                              }}
                               className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-900 px-3 py-2 text-xl font-semibold text-gray-100 disabled:cursor-default disabled:opacity-100"
                             />
                             <div className="flex flex-wrap items-center gap-2">
-                              {canEditRoleName ? (
-                                <button
-                                  type="button"
-                                  disabled={saving || (canEditRoleName ? !roleNameDraft.trim() : false)}
-                                  onClick={handleSaveRole}
-                                  className="rounded bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-500 disabled:bg-gray-700"
-                                >
-                                  Save
-                                </button>
-                              ) : null}
                               {!selectedRole.isSystem ? (
                                 <button
                                   type="button"
@@ -1561,7 +1266,8 @@ export default function AdminPanel({
                             type="button"
                             disabled={disabled}
                             onClick={() => {
-                              if (!disabled) setRoleDetailTab(value);
+                              if (disabled || value === roleDetailTab) return;
+                              leaveAdmin(() => setRoleDetailTab(value));
                             }}
                             className={`border-b-2 px-3 py-2 text-sm font-semibold ${
                               roleDetailTab === value
@@ -1580,20 +1286,10 @@ export default function AdminPanel({
                         selectedRole.systemKey === 'admin' ? (
                           <Empty>Admin has full access automatically.</Empty>
                         ) : (
-                          <div className="space-y-5">
+                          <div className="space-y-4">
                             <CompactAccessSection
                               title="Included roles"
                               count={parentRoleIdsDraft.length}
-                              actions={canEditRoleParents ? (
-                                <button
-                                  type="button"
-                                  disabled={saving}
-                                  onClick={handleSaveIncludedRoles}
-                                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:bg-gray-700"
-                                >
-                                  Save
-                                </button>
-                              ) : null}
                             >
                               {canEditRoleParents ? (
                                 <>
@@ -1636,6 +1332,7 @@ export default function AdminPanel({
                             <CompactAccessSection
                               title="Access rules"
                               count={visibleRoleGrants.length}
+                              titleExtra={<AccessTypeInfoButton />}
                               actions={(
                                 <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-gray-300">
                                   <input
@@ -1648,20 +1345,15 @@ export default function AdminPanel({
                                 </label>
                               )}
                             >
-                              {canEditRoleGrants ? (
-                                <div className="border-b border-gray-800 p-4">
-                                  <GrantEditor
-                                    catalog={catalog}
-                                    disabled={saving}
-                                    excludedPermissions={[]}
-                                    onSave={handleSaveRoleGrant}
-                                  />
-                                </div>
-                              ) : null}
-                              <GrantList
+                              <GrantRulesTable
                                 grants={visibleRoleGrants}
-                                canRemove={Boolean(canEditRoleGrants)}
-                                onRemove={handleDeleteRoleGrant}
+                                catalog={catalog}
+                                canEdit={Boolean(canEditRoleGrants)}
+                                disabled={saving}
+                                onChange={handleRoleGrantChange}
+                                onAdd={handleAddRoleGrant}
+                                onRemove={handleRemoveRoleGrant}
+                                resetKey={roleEditorReset}
                               />
                             </CompactAccessSection>
                           </div>
@@ -2070,7 +1762,7 @@ export default function AdminPanel({
       </div>
       {userAccessModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-gray-700 px-5 py-4">
               <div className="min-w-0">
                 <h2 className="truncate text-lg font-semibold text-white">
@@ -2082,14 +1774,14 @@ export default function AdminPanel({
               </div>
               <button
                 type="button"
-                onClick={() => setUserAccessModal(null)}
+                onClick={closeUserAccessModal}
                 className="rounded bg-gray-800 px-3 py-1.5 text-sm text-gray-100 hover:bg-gray-700"
               >
                 Close
               </button>
             </div>
 
-            <div className="max-h-[calc(90vh-78px)] overflow-auto p-5">
+            <div className={`max-h-[calc(90vh-78px)] overflow-auto p-3 ${userAccessDirty ? 'pb-24' : ''}`}>
               {userAccessModal.loading ? (
                 <Empty>Loading access...</Empty>
               ) : (
@@ -2116,6 +1808,7 @@ export default function AdminPanel({
                   <CompactAccessSection
                     title="Direct access rules"
                     count={visibleUserDirectGrants.length}
+                    titleExtra={<AccessTypeInfoButton />}
                     actions={(
                       <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-gray-300">
                         <input
@@ -2128,18 +1821,15 @@ export default function AdminPanel({
                       </label>
                     )}
                   >
-                    <div className="border-b border-gray-800 p-4">
-                      <GrantEditor
-                        catalog={catalog}
-                        disabled={saving}
-                        excludedPermissions={[]}
-                        onSave={handleSaveUserGrant}
-                      />
-                    </div>
-                    <GrantList
+                    <GrantRulesTable
                       grants={visibleUserDirectGrants}
-                      canRemove
-                      onRemove={handleDeleteUserGrant}
+                      catalog={catalog}
+                      canEdit
+                      disabled={saving}
+                      onChange={handleUserGrantChange}
+                      onAdd={handleAddUserGrant}
+                      onRemove={handleRemoveUserGrant}
+                      resetKey={userEditorReset}
                     />
                   </CompactAccessSection>
                 </div>
@@ -2207,6 +1897,19 @@ export default function AdminPanel({
           </div>
         </div>
       ) : null}
+      <UnsavedAccessBar
+        open={accessDirty}
+        attention={accessBarAttention}
+        saving={saving}
+        onDiscard={() => {
+          if (userAccessDirty) discardUserAccess();
+          if (roleAccessDirty) discardRoleAccess();
+        }}
+        onSave={() => {
+          if (userAccessDirty) handleSaveUserAccess();
+          if (roleAccessDirty) handleSaveRoleAccess();
+        }}
+      />
     </div>
   );
 }

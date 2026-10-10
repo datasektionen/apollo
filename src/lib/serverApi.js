@@ -554,6 +554,15 @@ export async function saveRbacRoleGrant(roleId, grant, session) {
   return payload.grant || null;
 }
 
+export async function updateRbacRoleGrant(roleId, grantId, grant, session) {
+  const payload = await apiFetch(
+    `/api/admin/roles/${encodeURIComponent(roleId)}/grants/${encodeURIComponent(grantId)}`,
+    { method: 'PUT', body: grant },
+    session
+  );
+  return payload.grant || null;
+}
+
 export async function deleteRbacRoleGrant(roleId, grantId, session) {
   return await apiFetch(
     `/api/admin/roles/${encodeURIComponent(roleId)}/grants/${encodeURIComponent(grantId)}`,
@@ -587,6 +596,15 @@ export async function saveUserGrant(userId, grant, session) {
     method: 'POST',
     body: grant,
   }, session);
+  return payload.grant || null;
+}
+
+export async function updateUserGrant(userId, grantId, grant, session) {
+  const payload = await apiFetch(
+    `/api/admin/users/${encodeURIComponent(userId)}/grants/${encodeURIComponent(grantId)}`,
+    { method: 'PUT', body: grant },
+    session
+  );
   return payload.grant || null;
 }
 

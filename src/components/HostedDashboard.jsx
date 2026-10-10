@@ -557,10 +557,11 @@ function HostedDashboard({
                           project,
                         });
                       }}
+                      title={project?.canOpenProject ? undefined : 'You do not have access to open this'}
                       className={`grid grid-cols-[68px_minmax(150px,1fr)_96px_70px_106px] items-center px-2 py-2.5 transition-colors ${
                         project?.canOpenProject
                           ? 'bg-gray-900 hover:bg-gray-800 cursor-pointer'
-                          : 'bg-gray-900/70 text-gray-500 cursor-default'
+                          : 'bg-gray-900/70 opacity-50 cursor-not-allowed'
                       }`}
                     >
                       <div className="text-lg text-gray-300 font-mono truncate">
@@ -587,7 +588,6 @@ function HostedDashboard({
                         ) : (
                           <h3 className="flex min-w-0 items-baseline gap-2 text-xl font-semibold">
                             <span className="truncate">{project.name}</span>
-                            {!project?.canOpenProject ? <span className="shrink-0 text-xs font-medium text-gray-500">Read only in dashboard</span> : null}
                           </h3>
                         )}
                       </div>

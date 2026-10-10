@@ -81,6 +81,11 @@ function TrackList({
   advancedMixLocked = false,
   localSessionMode = false,
   canSoloTracks = true,
+  canEditTrack = null,
+  canCreateTrackUnder = null,
+  canManageGroups = true,
+  canChangeTrackRoles = true,
+  explainTrackAccess = null,
   emptyContextMenu,
   onClearEmptyContextMenu,
 }) {
@@ -137,6 +142,33 @@ function TrackList({
   const advancedMixGroupEnabled = typeof onToggleAdvancedGroupFocus === 'function';
   const metadataLocked = advancedMixLocked || localSessionMode;
   const structureMenuLocked = advancedMixLocked || localSessionMode;
+  // Permission gates (hosted projects). `canEditTrack` is per track; group
+  // nodes (mute/solo/volume/pan/name/type) are project-manager only on the
+  // server, so they share one flag.
+  const trackEditable = useCallback(
+    (trackId) => (typeof canEditTrack === 'function' ? Boolean(canEditTrack(trackId)) : true),
+    [canEditTrack]
+  );
+  const trackLocked = (trackId) => metadataLocked || !trackEditable(trackId);
+  const canAddTrackUnder = (parentNodeId) => (
+    Boolean(onAddTrack)
+    && (typeof canCreateTrackUnder === 'function' ? Boolean(canCreateTrackUnder(parentNodeId || null)) : true)
+  );
+  const trackRoleLocked = (trackId) => trackLocked(trackId) || !canChangeTrackRoles;
+  const groupLocked = metadataLocked || !canManageGroups;
+  const TRACK_NO_ACCESS_TITLE = 'You do not have permission to edit this track';
+  const GROUP_NO_ACCESS_TITLE = 'Groups can only be changed by a project manager';
+  // Precise reason for a disabled track control, falling back to the generic text.
+  const trackNoAccessTitle = (trackId) => (
+    (typeof explainTrackAccess === 'function' && explainTrackAccess(trackId)) || TRACK_NO_ACCESS_TITLE
+  );
+  // Gesture gate for volume/pan drags and numeric edits: refuse to start when
+  // the entity (track id or group node id) is not editable.
+  const entityEditable = (entityId) => {
+    if (rowByNodeId.get(entityId)?.kind === 'group') return canManageGroups;
+    if (trackMap.has(entityId)) return trackEditable(entityId);
+    return true;
+  };
   const getTrackFocusMode = useCallback((trackId) => (
     advancedMixEnabled ? getAdvancedMixFocusMode(advancedMixFocus, trackId) : null
   ), [advancedMixEnabled, advancedMixFocus, getAdvancedMixFocusMode]);
@@ -586,8 +618,8 @@ function TrackList({
   };
 
   const cycleStemIcon = (track) => {
-    if (metadataLocked) return;
     if (!track?.id) return;
+    if (trackLocked(track.id)) return;
     const pendingKey = `track:${track.id}`;
     const currentIcon = getPendingIconState(pendingKey)?.icon ?? track.icon;
     const nextIcon = getNextStemIcon(currentIcon);
@@ -596,9 +628,9 @@ function TrackList({
   };
 
   const cycleTrackType = (track, row) => {
-    if (metadataLocked) return;
-    if (hasDirectParentTypeLock(row)) return;
     if (!track?.id) return;
+    if (trackRoleLocked(track.id)) return;
+    if (hasDirectParentTypeLock(row)) return;
     const pendingKey = `track:${track.id}`;
     const currentRole = getPendingIconState(pendingKey)?.role
       ?? trackEffectiveRoleById[track.id]
@@ -652,8 +684,8 @@ function TrackList({
   );
 
   const applyTrackType = (row, track, nextType) => {
-    if (metadataLocked) return;
     if (!track?.id) return;
+    if (trackRoleLocked(track.id)) return;
     onUpdateTrack?.(track.id, {
       role: nextType,
       icon: getDefaultIconByRole(nextType),
@@ -661,7 +693,7 @@ function TrackList({
   };
 
   const applyGroupType = (groupRow, nextType) => {
-    if (metadataLocked) return;
+    if (groupLocked) return;
     if (!groupRow?.nodeId) return;
     const option = trackTypeOptions.find((candidate) => candidate.value === nextType);
     const nextPart = Boolean(groupRow.part);
@@ -670,14 +702,14 @@ function TrackList({
   };
 
   const toggleTrackPart = (row, track) => {
-    if (metadataLocked) return;
     if (!track?.id) return;
+    if (trackLocked(track.id)) return;
     if (hasPartTrackAncestor(row)) return;
     onUpdateTrack?.(track.id, { part: !Boolean(row?.part || track.part) });
   };
 
   const toggleGroupPart = (groupRow) => {
-    if (metadataLocked) return;
+    if (groupLocked) return;
     if (!groupRow?.nodeId) return;
     if (hasPartTrackAncestor(groupRow)) return;
     const nextPart = !Boolean(groupRow.part);
@@ -692,7 +724,7 @@ function TrackList({
   };
 
   const cycleGroupRole = (groupRow) => {
-    if (metadataLocked) return;
+    if (groupLocked) return;
     if (hasDirectParentTypeLock(groupRow)) return;
     const pendingKey = `group:${groupRow.nodeId}`;
     const currentType = getPendingIconState(pendingKey)?.role ?? getGroupTypeValue(groupRow);
@@ -740,6 +772,7 @@ function TrackList({
   }, [rowByNodeId, trackMap, pendingIconStateVersion]);
 
   const handleVolumeChange = (trackId, value) => {
+    if (!trackEditable(trackId)) return;
     const next = parseFloat(value);
     const current = trackMap.get(trackId)?.volume;
     if (Number.isFinite(current) && Math.abs(current - next) < 1e-6) return;
@@ -747,6 +780,7 @@ function TrackList({
   };
 
   const handlePanChange = (trackId, value) => {
+    if (!trackEditable(trackId)) return;
     const next = parseFloat(value);
     const current = trackMap.get(trackId)?.pan;
     if (Number.isFinite(current) && Math.abs(current - next) < 1e-6) return;
@@ -754,6 +788,7 @@ function TrackList({
   };
 
   const handleGroupVolumeChange = (groupNodeId, value) => {
+    if (!canManageGroups) return;
     const next = parseFloat(value);
     const current = rowByNodeId.get(groupNodeId)?.volume;
     if (Number.isFinite(current) && Math.abs(current - next) < 1e-6) return;
@@ -761,6 +796,7 @@ function TrackList({
   };
 
   const handleGroupPanChange = (groupNodeId, value) => {
+    if (!canManageGroups) return;
     const next = parseFloat(value);
     const current = rowByNodeId.get(groupNodeId)?.pan;
     if (Number.isFinite(current) && Math.abs(current - next) < 1e-6) return;
@@ -771,6 +807,7 @@ function TrackList({
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    if (!entityEditable(entityId)) return;
     if (editTooltip) setEditTooltip(null);
     const rect = e.currentTarget.getBoundingClientRect();
     setDragTooltip({
@@ -795,6 +832,7 @@ function TrackList({
   const beginRowReorder = (e, row) => {
     if (advancedMixLocked) return;
     if (e.button !== 0) return;
+    if (row?.kind === 'group' ? !canManageGroups : !trackEditable(row?.trackId)) return;
     if (e.target.closest('[data-track-interactive="true"]')) return;
     e.preventDefault();
 
@@ -989,11 +1027,13 @@ function TrackList({
   };
 
   const handleVolumeDoubleClick = (entityId, currentVolume, e) => {
+    if (!entityEditable(entityId)) return;
     const display = currentVolume <= 0 ? '-∞' : volumeToDb(currentVolume).toFixed(1);
     openEditTooltip(entityId, 'volume', display, e);
   };
 
   const handlePanDoubleClick = (entityId, currentPan, e) => {
+    if (!entityEditable(entityId)) return;
     openEditTooltip(entityId, 'pan', currentPan.toFixed(0), e);
   };
 
@@ -1065,31 +1105,29 @@ function TrackList({
   };
 
   const handleToggleMute = (trackId, currentMuted) => {
+    if (!trackEditable(trackId)) return;
     onUpdateTrack(trackId, { muted: !currentMuted });
   };
 
   const handleToggleSolo = (trackId, currentSoloed) => {
-    if (!canSoloTracks) {
-      window.alert('Solo requires permission to edit every track in the project.');
-      return;
-    }
+    if (!trackEditable(trackId)) return;
+    if (!canSoloTracks) return;
     onUpdateTrack(trackId, { soloed: !currentSoloed });
   };
 
   const handleToggleGroupMute = (groupNodeId, currentMuted) => {
+    if (!canManageGroups) return;
     onUpdateGroup?.(groupNodeId, { muted: !currentMuted });
   };
 
   const handleToggleGroupSolo = (groupNodeId, currentSoloed) => {
-    if (!canSoloTracks) {
-      window.alert('Solo requires permission to edit every track in the project.');
-      return;
-    }
+    if (!canManageGroups) return;
+    if (!canSoloTracks) return;
     onUpdateGroup?.(groupNodeId, { soloed: !currentSoloed });
   };
 
   const handleNameChange = (trackId, newName) => {
-    if (metadataLocked) {
+    if (trackLocked(trackId)) {
       setEditingName(null);
       return;
     }
@@ -1101,7 +1139,7 @@ function TrackList({
   };
 
   const handleRenameGroup = (groupRow) => {
-    if (metadataLocked) return;
+    if (groupLocked) return;
     const nextNameRaw = window.prompt('Rename group', groupRow.name);
     if (nextNameRaw === null) return;
     const normalizedName = normalizeTrackName(nextNameRaw);
@@ -1110,7 +1148,7 @@ function TrackList({
   };
 
   const handleGroupNameChange = (groupNodeId, newName) => {
-    if (metadataLocked) {
+    if (groupLocked) {
       setEditingName(null);
       return;
     }
@@ -1240,12 +1278,12 @@ function TrackList({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (metadataLocked) return;
+                      if (groupLocked) return;
                       if (hasDirectParentTypeLock(row)) return;
                       cycleGroupRole(row);
                     }}
-                    className={`w-14 h-14 rounded-lg ${getRoleColor(displayGroupRole)} text-white flex items-center justify-center overflow-hidden transition-none ${hasDirectParentTypeLock(row) || metadataLocked ? 'opacity-80 cursor-not-allowed' : ''}`}
-                    title={metadataLocked ? 'Group category locked in this session' : 'Click to change type'}
+                    className={`w-14 h-14 rounded-lg ${getRoleColor(displayGroupRole)} text-white flex items-center justify-center overflow-hidden transition-none ${hasDirectParentTypeLock(row) || groupLocked ? 'opacity-80 cursor-not-allowed' : ''}`}
+                    title={metadataLocked ? 'Group category locked in this session' : (!canManageGroups ? GROUP_NO_ACCESS_TITLE : 'Click to change type')}
                   >
                     <GroupIcon key={groupIconKey} size={32} className="shrink-0" />
                   </button>
@@ -1280,12 +1318,12 @@ function TrackList({
 	                    ) : (
 	                      <span
 	                        onDoubleClick={(e) => {
-                          if (metadataLocked) return;
+                          if (groupLocked) return;
                           e.stopPropagation();
                           setEditingName(`group:${row.nodeId}`);
                         }}
                         className="flex-1 text-lg font-semibold truncate min-w-0 h-[28px] flex items-center select-none"
-                        title="Double-click to edit"
+                        title={groupLocked ? (canManageGroups ? row.name : GROUP_NO_ACCESS_TITLE) : 'Double-click to edit'}
                       >
                         {row.name}
                       </span>
@@ -1294,12 +1332,16 @@ function TrackList({
 
                   <div data-track-interactive="true" className="flex w-full items-center gap-2">
                     <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-0">
+                      <div
+                        className={`flex items-center gap-0 ${canManageGroups ? '' : 'opacity-50 cursor-not-allowed'}`}
+                        title={canManageGroups ? undefined : GROUP_NO_ACCESS_TITLE}
+                      >
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleToggleGroupMute(row.nodeId, row.muted);
                           }}
+                          disabled={!canManageGroups}
                           onContextMenu={(e) => {
                             if (!advancedMixGroupEnabled) return;
                             e.preventDefault();
@@ -1318,6 +1360,7 @@ function TrackList({
                             e.stopPropagation();
                             handleToggleGroupSolo(row.nodeId, row.soloed);
                           }}
+                          disabled={!canManageGroups || (!advancedMixGroupEnabled && !canSoloTracks)}
                           onContextMenu={(e) => {
                             if (!advancedMixGroupEnabled) return;
                             e.preventDefault();
@@ -1353,7 +1396,10 @@ function TrackList({
                       </button>
                     </div>
 
-                    <div className="ml-auto flex items-center gap-2">
+                    <div
+                      className={`ml-auto flex items-center gap-2 ${canManageGroups ? '' : 'opacity-50 cursor-not-allowed'}`}
+                      title={canManageGroups ? undefined : GROUP_NO_ACCESS_TITLE}
+                    >
                       <div
                         className="flex items-center relative"
                         style={{ width: `${getVolumeSliderWidth(true)}px` }}
@@ -1502,8 +1548,9 @@ function TrackList({
         const pendingTrackState = getPendingIconState(`track:${track.id}`);
         const displayTrackRole = pendingTrackState?.role || trackEffectiveRoleById[track.id] || track.role;
         const isSubTrack = isSubTrackRow(row);
-        const canEditTrackType = !isSubTrack && !hasDirectParentTypeLock(row);
-        const canEditStemIcon = isSubTrack && !metadataLocked;
+        const thisTrackEditable = trackEditable(track.id);
+        const canEditTrackType = !isSubTrack && !hasDirectParentTypeLock(row) && !trackRoleLocked(track.id);
+        const canEditStemIcon = isSubTrack && !trackLocked(track.id);
         const trackVolumeValue = getDraggedValue(
           track.id,
           'volume',
@@ -1571,7 +1618,7 @@ function TrackList({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (metadataLocked) return;
+                    if (trackLocked(track.id)) return;
                     if (isSubTrack) {
                       cycleStemIcon(track);
                       return;
@@ -1585,7 +1632,11 @@ function TrackList({
                   title={
                     metadataLocked
                       ? 'Track icon locked in this session'
-                      : (isSubTrack ? 'Click to switch recording / file' : 'Click to change type')
+                      : !thisTrackEditable
+                        ? trackNoAccessTitle(track.id)
+                        : (!isSubTrack && !canChangeTrackRoles)
+                          ? 'Changing track type requires project manager access'
+                          : (isSubTrack ? 'Click to switch recording / file' : 'Click to change type')
                   }
                 >
                   <TrackIcon key={trackIconKey} size={32} className="shrink-0" />
@@ -1618,12 +1669,12 @@ function TrackList({
                   ) : (
                     <span
                       onDoubleClick={(e) => {
-                        if (metadataLocked) return;
+                        if (trackLocked(track.id)) return;
                         e.stopPropagation();
                         setEditingName(track.id);
                       }}
                       className="flex-1 text-lg font-semibold truncate min-w-0 h-[28px] flex items-center select-none"
-                      title="Double-click to edit"
+                      title={trackLocked(track.id) ? (thisTrackEditable ? track.name : trackNoAccessTitle(track.id)) : 'Double-click to edit'}
 	                      >
 	                        {track.name}
 	                      </span>
@@ -1632,12 +1683,16 @@ function TrackList({
 
                 <div data-track-interactive="true" className="flex w-full items-center gap-2">
                   <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center gap-0">
+                    <div
+                      className={`flex items-center gap-0 ${thisTrackEditable ? '' : 'opacity-50 cursor-not-allowed'}`}
+                      title={thisTrackEditable ? undefined : trackNoAccessTitle(track.id)}
+                    >
 	                      <button
 	                        onClick={(e) => {
 	                          e.stopPropagation();
 	                          handleToggleMute(track.id, track.muted);
 	                        }}
+	                        disabled={!thisTrackEditable}
 	                        onContextMenu={(e) => {
 	                          if (!advancedMixEnabled) return;
 	                          e.preventDefault();
@@ -1656,6 +1711,7 @@ function TrackList({
 	                          e.stopPropagation();
 	                          handleToggleSolo(track.id, track.soloed);
 	                        }}
+	                        disabled={!thisTrackEditable || (!advancedMixEnabled && !canSoloTracks)}
 	                        onContextMenu={(e) => {
 	                          if (!advancedMixEnabled) return;
 	                          e.preventDefault();
@@ -1678,7 +1734,10 @@ function TrackList({
                     </div>
                   </div>
 
-                  <div className="ml-auto flex items-center gap-2">
+                  <div
+                    className={`ml-auto flex items-center gap-2 ${thisTrackEditable ? '' : 'opacity-50 cursor-not-allowed'}`}
+                    title={thisTrackEditable ? undefined : trackNoAccessTitle(track.id)}
+                  >
                     <div
                       className="flex items-center relative"
                       style={{ width: `${getVolumeSliderWidth(false)}px` }}
@@ -1833,7 +1892,15 @@ function TrackList({
         >
           {contextMenu.type === 'track' && contextMenu.track ? (
             <>
-              {!metadataLocked ? (
+              {trackLocked(contextMenu.track.id) && !metadataLocked ? (
+                <div
+                  className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-500 whitespace-nowrap select-none"
+                  title={trackNoAccessTitle(contextMenu.track.id)}
+                >
+                  No edit access to this track
+                </div>
+              ) : null}
+              {!trackLocked(contextMenu.track.id) ? (
                 <>
                   <button
                     className={menuItemClass}
@@ -1859,6 +1926,13 @@ function TrackList({
                   {hasDirectParentTypeLock(contextMenu.row) ? (
                     <div className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-500 whitespace-nowrap select-none">
                       Change type (inherited)
+                    </div>
+                  ) : !canChangeTrackRoles ? (
+                    <div
+                      className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-500 whitespace-nowrap select-none"
+                      title="Changing track type requires project manager access"
+                    >
+                      Change type (manager only)
                     </div>
                   ) : (
                     <div className="relative">
@@ -1908,7 +1982,7 @@ function TrackList({
 	                </>
               ) : null}
 
-	              {!metadataLocked && isChoirRole(contextMenu.track.role) && (
+	              {!metadataLocked && onSetAutoPanStrategy && isChoirRole(contextMenu.track.role) && (
                 <div className="relative">
                   <div
                     className={`${menuItemClass} select-none cursor-pointer`}
@@ -1928,39 +2002,47 @@ function TrackList({
 
               {!structureMenuLocked ? (
                 <>
-                  <button
-                    className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-red-300 hover:bg-gray-700 whitespace-nowrap"
-                    onClick={() => {
-                      onDeleteTrack?.(contextMenu.track.id);
-                      setContextMenu(null);
-                    }}
-                  >
-                    Delete track
-                  </button>
+                  {onDeleteTrack && trackEditable(contextMenu.track.id) ? (
+                    <button
+                      className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-red-300 hover:bg-gray-700 whitespace-nowrap"
+                      onClick={() => {
+                        onDeleteTrack(contextMenu.track.id);
+                        setContextMenu(null);
+                      }}
+                    >
+                      Delete track
+                    </button>
+                  ) : null}
 
-                  <div className="my-0.5 border-t border-gray-700" />
+                  {(canAddTrackUnder(contextMenu.row?.parentId) || onCreateSubtrack) ? (
+                    <div className="my-0.5 border-t border-gray-700" />
+                  ) : null}
 
-                  <button
-                    className={menuItemClass}
-                    onClick={() => {
-                      onAddTrack?.({
-                        parentId: contextMenu.row?.parentId || null,
-                        afterNodeId: contextMenu.row?.nodeId || null,
-                      });
-                      setContextMenu(null);
-                    }}
-                  >
-                    Create track
-                  </button>
-                  <button
-                    className={menuItemClass}
-                    onClick={() => {
-                      onCreateSubtrack?.(contextMenu.track.id);
-                      setContextMenu(null);
-                    }}
-                  >
-                    Create subtrack
-                  </button>
+                  {canAddTrackUnder(contextMenu.row?.parentId) ? (
+                    <button
+                      className={menuItemClass}
+                      onClick={() => {
+                        onAddTrack({
+                          parentId: contextMenu.row?.parentId || null,
+                          afterNodeId: contextMenu.row?.nodeId || null,
+                        });
+                        setContextMenu(null);
+                      }}
+                    >
+                      Create track
+                    </button>
+                  ) : null}
+                  {onCreateSubtrack ? (
+                    <button
+                      className={menuItemClass}
+                      onClick={() => {
+                        onCreateSubtrack(contextMenu.track.id);
+                        setContextMenu(null);
+                      }}
+                    >
+                      Create subtrack
+                    </button>
+                  ) : null}
                 </>
               ) : null}
             </>
@@ -1968,7 +2050,15 @@ function TrackList({
 
           {contextMenu.type === 'group' && contextMenu.group ? (
             <>
-              {!metadataLocked ? (
+              {groupLocked && !metadataLocked ? (
+                <div
+                  className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-500 whitespace-nowrap select-none"
+                  title={GROUP_NO_ACCESS_TITLE}
+                >
+                  Group is manager only
+                </div>
+              ) : null}
+              {!groupLocked ? (
                 <>
                   <button
                     className={menuItemClass}
@@ -2057,45 +2147,55 @@ function TrackList({
               </button>
               {!structureMenuLocked ? (
                 <>
-                  <button
-                    className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-red-300 hover:bg-gray-700 whitespace-nowrap"
-                    onClick={() => {
-                      onDeleteGroup?.(contextMenu.group.nodeId);
-                      setContextMenu(null);
-                    }}
-                  >
-                    Delete group
-                  </button>
+                  {onDeleteGroup && canManageGroups ? (
+                    <button
+                      className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-red-300 hover:bg-gray-700 whitespace-nowrap"
+                      onClick={() => {
+                        onDeleteGroup(contextMenu.group.nodeId);
+                        setContextMenu(null);
+                      }}
+                    >
+                      Delete group
+                    </button>
+                  ) : null}
 
-                  <div className="my-0.5 border-t border-gray-700" />
+                  {(canAddTrackUnder(contextMenu.group.parentId) || canAddTrackUnder(contextMenu.group.nodeId)) ? (
+                    <>
+                      <div className="my-0.5 border-t border-gray-700" />
 
-                  <button
-                    className={menuItemClass}
-                    onClick={() => {
-                      onAddTrack?.({
-                        parentId: contextMenu.group.parentId || null,
-                        afterNodeId: contextMenu.group.nodeId,
-                      });
-                      setContextMenu(null);
-                    }}
-                  >
-                    Create track
-                  </button>
-                  <button
-                    className={menuItemClass}
-                    onClick={() => {
-                      onAddTrack?.(contextMenu.group.nodeId);
-                      setContextMenu(null);
-                    }}
-                  >
-                    Create subtrack
-                  </button>
+                      {canAddTrackUnder(contextMenu.group.parentId) ? (
+                        <button
+                          className={menuItemClass}
+                          onClick={() => {
+                            onAddTrack({
+                              parentId: contextMenu.group.parentId || null,
+                              afterNodeId: contextMenu.group.nodeId,
+                            });
+                            setContextMenu(null);
+                          }}
+                        >
+                          Create track
+                        </button>
+                      ) : null}
+                      {canAddTrackUnder(contextMenu.group.nodeId) ? (
+                        <button
+                          className={menuItemClass}
+                          onClick={() => {
+                            onAddTrack(contextMenu.group.nodeId);
+                            setContextMenu(null);
+                          }}
+                        >
+                          Create subtrack
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
                 </>
               ) : null}
             </>
           ) : null}
 
-          {contextMenu.type === 'empty' && !structureMenuLocked ? (
+          {contextMenu.type === 'empty' && !structureMenuLocked && canAddTrackUnder(null) ? (
             <>
               <button
                 className={menuItemClass}
@@ -2111,7 +2211,7 @@ function TrackList({
         </div>
       )}
 
-      {contextMenu && contextMenu.type === 'track' && contextMenu.track && typeMenuOpen && !metadataLocked && !hasDirectParentTypeLock(contextMenu.row) && (
+      {contextMenu && contextMenu.type === 'track' && contextMenu.track && typeMenuOpen && !trackRoleLocked(contextMenu.track.id) && !hasDirectParentTypeLock(contextMenu.row) && (
         <div
           className="fixed z-[120] bg-gray-800 border border-gray-700 rounded-md shadow-lg py-0 inline-flex flex-col items-stretch overflow-hidden min-w-[120px]"
           style={{ left: typeMenuPos.x, top: typeMenuPos.y }}
@@ -2141,7 +2241,7 @@ function TrackList({
         </div>
       )}
 
-      {contextMenu && contextMenu.type === 'group' && contextMenu.group && groupTypeMenuOpen && !metadataLocked && !hasDirectParentTypeLock(contextMenu.group) && (
+      {contextMenu && contextMenu.type === 'group' && contextMenu.group && groupTypeMenuOpen && !groupLocked && !hasDirectParentTypeLock(contextMenu.group) && (
         <div
           className="fixed z-[120] bg-gray-800 border border-gray-700 rounded-md shadow-lg py-0 inline-flex flex-col items-stretch overflow-hidden min-w-[140px]"
           style={{ left: groupTypeMenuPos.x, top: groupTypeMenuPos.y }}
@@ -2171,7 +2271,7 @@ function TrackList({
         </div>
       )}
 
-      {contextMenu && contextMenu.type === 'track' && contextMenu.track && autoPanMenuOpen && !metadataLocked && (
+      {contextMenu && contextMenu.type === 'track' && contextMenu.track && autoPanMenuOpen && !metadataLocked && onSetAutoPanStrategy && (
         <div
           className="fixed z-[120] bg-gray-800 border border-gray-700 rounded-md shadow-lg py-0 inline-flex flex-col items-stretch overflow-hidden min-w-[140px]"
           style={{ left: autoPanMenuPos.x, top: autoPanMenuPos.y }}

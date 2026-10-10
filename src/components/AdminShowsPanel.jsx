@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GripVertical, Loader2 } from 'lucide-react';
 import {
   getAdminShowsConfig,
@@ -70,7 +70,7 @@ function ShowSelect({ label, value, shows, onChange }) {
   );
 }
 
-function MessageField({ label, value, onChange, disabled = false }) {
+function MessageField({ label, value, onChange, onBlur, disabled = false }) {
   return (
     <label className="block space-y-2">
       <div className="pt-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">{label}</div>
@@ -78,6 +78,7 @@ function MessageField({ label, value, onChange, disabled = false }) {
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={(event) => onBlur?.(event.target.value)}
         rows={2}
         maxLength={4000}
         className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
@@ -96,6 +97,10 @@ export default function AdminShowsPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [dragIndex, setDragIndex] = useState(null);
+  const savedSettingsRef = useRef(null);
+  const settingsRef = useRef(settings);
+  const saveSeqRef = useRef(0);
+  settingsRef.current = settings;
   const hasPublicShow = shows.some((show) => Number(show.publishedProjectCount || 0) > 0);
 
   useEffect(() => {
@@ -106,8 +111,10 @@ export default function AdminShowsPanel({
       .then((payload) => {
         if (cancelled) return;
         const nextShows = Array.isArray(payload?.shows) ? payload.shows : [];
+        const normalized = normalizeSettings(payload?.settings, nextShows[0]?.id);
         setShows(nextShows);
-        setSettings(normalizeSettings(payload?.settings, nextShows[0]?.id));
+        setSettings(normalized);
+        savedSettingsRef.current = normalized;
       })
       .catch((loadError) => {
         if (!cancelled) {
@@ -122,29 +129,57 @@ export default function AdminShowsPanel({
     };
   }, [session]);
 
-  const handleSaveSettings = async () => {
+  const persistSettings = async (next) => {
+    const seq = saveSeqRef.current + 1;
+    saveSeqRef.current = seq;
     setSaving(true);
     setError('');
     try {
       const payload = await saveAdminShowsConfig({
-        defaultShowId: settings.defaultShowId || shows[0]?.id || null,
-        splitPlayerDawDefaults: settings.splitPlayerDawDefaults,
-        playerDefaultShowId: settings.playerDefaultShowId || shows[0]?.id || null,
-        dawDefaultShowId: settings.dawDefaultShowId || shows[0]?.id || null,
-        noAccessMessage: settings.noAccessMessage,
-        playerNoAccessMessage: settings.playerNoAccessMessage,
-        dawNoAccessMessage: settings.dawNoAccessMessage,
+        defaultShowId: next.defaultShowId || shows[0]?.id || null,
+        splitPlayerDawDefaults: next.splitPlayerDawDefaults,
+        playerDefaultShowId: next.playerDefaultShowId || shows[0]?.id || null,
+        dawDefaultShowId: next.dawDefaultShowId || shows[0]?.id || null,
+        noAccessMessage: next.noAccessMessage,
+        playerNoAccessMessage: next.playerNoAccessMessage,
+        dawNoAccessMessage: next.dawNoAccessMessage,
       }, session);
+      if (seq !== saveSeqRef.current) return;
       const nextShows = Array.isArray(payload?.shows) ? payload.shows : shows;
+      const normalized = normalizeSettings(payload?.settings, nextShows[0]?.id);
       setShows(nextShows);
-      setSettings(normalizeSettings(payload?.settings, nextShows[0]?.id));
+      setSettings(normalized);
+      savedSettingsRef.current = normalized;
       await onSessionRefresh?.();
     } catch (saveError) {
+      if (seq !== saveSeqRef.current) return;
       setError(saveError.message || 'Failed to save show settings.');
+      if (savedSettingsRef.current) setSettings(savedSettingsRef.current);
     } finally {
-      setSaving(false);
+      if (seq === saveSeqRef.current) setSaving(false);
     }
   };
+
+  const commitSettings = (next) => {
+    setSettings(next);
+    if (savedSettingsRef.current && JSON.stringify(savedSettingsRef.current) === JSON.stringify(next)) return;
+    persistSettings(next);
+  };
+
+  useEffect(() => () => {
+    const next = settingsRef.current;
+    const saved = savedSettingsRef.current;
+    if (!saved || JSON.stringify(saved) === JSON.stringify(next)) return;
+    saveAdminShowsConfig({
+      defaultShowId: next.defaultShowId || null,
+      splitPlayerDawDefaults: next.splitPlayerDawDefaults,
+      playerDefaultShowId: next.playerDefaultShowId || null,
+      dawDefaultShowId: next.dawDefaultShowId || null,
+      noAccessMessage: next.noAccessMessage,
+      playerNoAccessMessage: next.playerNoAccessMessage,
+      dawNoAccessMessage: next.dawNoAccessMessage,
+    }, session).catch(() => {});
+  }, [session]);
 
   const handleDrop = async (event, targetIndex) => {
     event.preventDefault();
@@ -249,22 +284,22 @@ export default function AdminShowsPanel({
                 checked={settings.splitPlayerDawDefaults}
                 onChange={(event) => {
                   const split = event.target.checked;
-                  setSettings((current) => ({
-                    ...current,
+                  commitSettings({
+                    ...settings,
                     splitPlayerDawDefaults: split,
                     playerDefaultShowId: split
-                      ? current.defaultShowId
-                      : current.playerDefaultShowId,
+                      ? settings.defaultShowId
+                      : settings.playerDefaultShowId,
                     dawDefaultShowId: split
-                      ? current.defaultShowId
-                      : current.dawDefaultShowId,
+                      ? settings.defaultShowId
+                      : settings.dawDefaultShowId,
                     playerNoAccessMessage: split
-                      ? current.noAccessMessage
-                      : current.playerNoAccessMessage,
+                      ? settings.noAccessMessage
+                      : settings.playerNoAccessMessage,
                     dawNoAccessMessage: split
-                      ? current.noAccessMessage
-                      : current.dawNoAccessMessage,
-                  }));
+                      ? settings.noAccessMessage
+                      : settings.dawNoAccessMessage,
+                  });
                 }}
                 className="mt-0.5 h-4 w-4 rounded border-gray-600 bg-gray-900 accent-blue-600"
               />
@@ -284,13 +319,14 @@ export default function AdminShowsPanel({
                     label="Default show"
                     value={settings.playerDefaultShowId}
                     shows={shows}
-                    onChange={(value) => setSettings((current) => ({ ...current, playerDefaultShowId: value }))}
+                    onChange={(value) => commitSettings({ ...settings, playerDefaultShowId: value })}
                   />
                   <MessageField
                     label="No-access message"
                     value={settings.playerNoAccessMessage}
                     disabled={hasPublicShow}
                     onChange={(value) => setSettings((current) => ({ ...current, playerNoAccessMessage: value }))}
+                    onBlur={(value) => commitSettings({ ...settingsRef.current, playerNoAccessMessage: value })}
                   />
                 </div>
                 <div className="space-y-1">
@@ -299,13 +335,14 @@ export default function AdminShowsPanel({
                     label="Default show"
                     value={settings.dawDefaultShowId}
                     shows={shows}
-                    onChange={(value) => setSettings((current) => ({ ...current, dawDefaultShowId: value }))}
+                    onChange={(value) => commitSettings({ ...settings, dawDefaultShowId: value })}
                   />
                   <MessageField
                     label="No-access message"
                     value={settings.dawNoAccessMessage}
                     disabled={hasPublicShow}
                     onChange={(value) => setSettings((current) => ({ ...current, dawNoAccessMessage: value }))}
+                    onBlur={(value) => commitSettings({ ...settingsRef.current, dawNoAccessMessage: value })}
                   />
                 </div>
               </div>
@@ -315,28 +352,17 @@ export default function AdminShowsPanel({
                   label="Default show"
                   value={settings.defaultShowId}
                   shows={shows}
-                  onChange={(value) => setSettings((current) => ({ ...current, defaultShowId: value }))}
+                  onChange={(value) => commitSettings({ ...settings, defaultShowId: value })}
                 />
                 <MessageField
                   label="No-access message"
                   value={settings.noAccessMessage}
                   disabled={hasPublicShow}
                   onChange={(value) => setSettings((current) => ({ ...current, noAccessMessage: value }))}
+                  onBlur={(value) => commitSettings({ ...settingsRef.current, noAccessMessage: value })}
                 />
               </div>
             )}
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={handleSaveSettings}
-              className="inline-flex items-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:bg-gray-700"
-            >
-              {saving ? <Loader2 size={15} className="animate-spin" /> : null}
-              Save
-            </button>
           </div>
         </div>
       </Panel>

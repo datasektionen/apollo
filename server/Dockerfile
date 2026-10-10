@@ -1,9 +1,13 @@
+# Build context must be the repository root (not ./server) so that the
+# shared/ access-rules module used by both frontend and backend is available:
+#   docker build -f server/Dockerfile .
 FROM node:20-alpine
 
-WORKDIR /app
+WORKDIR /app/server
 
-COPY package.json package-lock.json* ./
+COPY server/package.json server/package-lock.json* ./
 RUN npm install --omit=dev
 
-COPY src ./src
+COPY shared /app/shared
+COPY server/src ./src
 CMD ["npm", "start"]

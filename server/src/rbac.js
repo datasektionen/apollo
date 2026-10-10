@@ -2,54 +2,109 @@ import { randomUUID } from 'crypto';
 import { pool } from './db.js';
 import { getAppSettings, getEffectiveAppSettingsForMode } from './appSettings.js';
 import { matchesOidcBootstrapRule } from './oidcBootstrap.js';
-
-export const ACCESS_LEVEL_READ = 'read';
-export const ACCESS_LEVEL_WRITE = 'write';
-export const ACCESS_LEVELS = [ACCESS_LEVEL_READ, ACCESS_LEVEL_WRITE];
-
-export const RBAC_SCOPE_ALL = 'all';
-export const RBAC_SCOPE_SHOW = 'show';
-export const RBAC_SCOPE_PROJECT = 'project';
-export const RBAC_SCOPE_TRACK = 'track';
-export const RBAC_SCOPE_GROUP_NAME = 'group_name';
-export const RBAC_SCOPE_PART_NAME = 'part_name';
-export const RBAC_SCOPE_TYPES = [
+import {
   RBAC_SCOPE_ALL,
   RBAC_SCOPE_SHOW,
   RBAC_SCOPE_PROJECT,
   RBAC_SCOPE_TRACK,
   RBAC_SCOPE_GROUP_NAME,
   RBAC_SCOPE_PART_NAME,
-];
-
-export const PROJECT_TARGET_ALL_PROJECTS = 'all_projects';
-export const PROJECT_TARGET_PROJECT = 'project';
-export const PROJECT_TARGET_GROUP_NAME = 'group_name';
-export const PROJECT_TARGET_PART_NAME = 'part_name';
-export const PROJECT_TARGET_TYPES = [
+  RBAC_SCOPE_TYPES,
   PROJECT_TARGET_ALL_PROJECTS,
   PROJECT_TARGET_PROJECT,
   PROJECT_TARGET_GROUP_NAME,
   PROJECT_TARGET_PART_NAME,
-];
+  PROJECT_TARGET_TYPES,
+  TRACK_SCOPE_GROUP_NAME,
+  TRACK_SCOPE_PART_NAME,
+  TRACK_SCOPE_TYPES,
+  TRACK_BINDING_SCOPE_TYPES,
+  TRACK_ROLE_CHOIR,
+  TRACK_ROLE_INSTRUMENT,
+  TRACK_ROLE_LEAD,
+  TRACK_ROLE_METRONOME,
+  TRACK_ROLE_OTHER,
+  GROUP_ROLE_NONE,
+  GROUP_PARENT_ROLES,
+  TRACK_NODE_TYPE_GROUP,
+  TRACK_NODE_TYPE_AUDIO,
+  ProjectWriteRejectedError,
+  isProjectWriteRejectedError,
+  WRITE_REJECTED_CODE,
+  normalizeText,
+  normalizeLowerText,
+  normalizeBoolean,
+  isProjectPublished,
+  toNumber,
+  sortByOrder,
+  stableJson,
+  normalizeScopeValue,
+  normalizeArtistUserIds,
+  isChoirPartRole,
+  isMetronomeRole,
+  normalizeTrackRole,
+  normalizeGroupRole,
+  toCategoryRole,
+  isGroupParentRole,
+  mapGroupParentRoleToTrackRole,
+  isLegacyPartGroupRole,
+  normalizePartFlag,
+  buildChildrenMap,
+  buildNormalizedTrackTree,
+  collectTrackBindingInfo,
+  projectLevelWriteEnabled,
+  hasTrackLevelWrite,
+  canExportProject,
+  snapshotTrackMap,
+  snapshotGroupNodeMap,
+  snapshotTrackNodeMap,
+  normalizeTrackForWriteComparison,
+  trackWriteRestrictedShapeChanged,
+  normalizeGroupForComparison,
+  normalizeTopLevelForRestrictedWrite,
+  trackMatchesGrantedScopeEntry,
+  isTrackArtist,
+  trackIsEditable,
+  canEditAllTracksInSnapshot,
+  soloStateChanged,
+  chooseCreatableScopeForNewTrack,
+  cloneTrackWithStampedAccess,
+} from '../../shared/accessRules.js';
+
+export {
+  RBAC_SCOPE_ALL,
+  RBAC_SCOPE_SHOW,
+  RBAC_SCOPE_PROJECT,
+  RBAC_SCOPE_TRACK,
+  RBAC_SCOPE_GROUP_NAME,
+  RBAC_SCOPE_PART_NAME,
+  RBAC_SCOPE_TYPES,
+  PROJECT_TARGET_ALL_PROJECTS,
+  PROJECT_TARGET_PROJECT,
+  PROJECT_TARGET_GROUP_NAME,
+  PROJECT_TARGET_PART_NAME,
+  PROJECT_TARGET_TYPES,
+  TRACK_SCOPE_GROUP_NAME,
+  TRACK_SCOPE_PART_NAME,
+  TRACK_SCOPE_TYPES,
+  ProjectWriteRejectedError,
+  isProjectWriteRejectedError,
+  WRITE_REJECTED_CODE,
+  normalizeScopeValue,
+  canExportProject,
+  // Exported so client capability tests can be driven by the real summary builder.
+  buildProjectAccessSummary,
+};
+
+export const ACCESS_LEVEL_READ = 'read';
+export const ACCESS_LEVEL_WRITE = 'write';
+export const ACCESS_LEVELS = [ACCESS_LEVEL_READ, ACCESS_LEVEL_WRITE];
 
 export const SHOW_TARGET_ALL_SHOWS = 'all_shows';
 export const SHOW_TARGET_SHOW = 'show';
 export const SHOW_TARGET_TYPES = [
   SHOW_TARGET_ALL_SHOWS,
   SHOW_TARGET_SHOW,
-];
-
-export const TRACK_SCOPE_GROUP_NAME = 'group_name';
-export const TRACK_SCOPE_PART_NAME = 'part_name';
-export const TRACK_SCOPE_TYPES = [
-  TRACK_SCOPE_GROUP_NAME,
-  TRACK_SCOPE_PART_NAME,
-];
-const TRACK_BINDING_SCOPE_TYPES = [
-  RBAC_SCOPE_TRACK,
-  TRACK_SCOPE_GROUP_NAME,
-  TRACK_SCOPE_PART_NAME,
 ];
 
 export const SCOPE_TYPE_ALL_PROJECTS = PROJECT_TARGET_ALL_PROJECTS;
@@ -100,43 +155,6 @@ export const SYSTEM_ROLE_ADMIN_KEY = 'admin';
 export const SYSTEM_ROLE_DEFAULT_USER_ID = 'system-role-default-user';
 export const SYSTEM_ROLE_DEFAULT_USER_KEY = 'default_user';
 export const DEFAULT_EMPTY_ACCESS_MESSAGE = 'You do not currently have any permissions. Please contact an admin if you should.';
-
-const TRACK_ROLE_INSTRUMENT = 'instrument';
-const TRACK_ROLE_LEAD = 'lead';
-const TRACK_ROLE_CHOIR = 'choir';
-const TRACK_ROLE_METRONOME = 'metronome';
-const TRACK_ROLE_OTHER = 'other';
-const GROUP_ROLE_NONE = 'group';
-const GROUP_ROLE_INSTRUMENTS = 'instruments';
-const GROUP_ROLE_LEADS = 'leads';
-const GROUP_ROLE_CHOIRS = 'choirs';
-const GROUP_ROLE_OTHERS = 'others';
-const TRACK_NODE_TYPE_GROUP = 'group';
-const TRACK_NODE_TYPE_AUDIO = 'audio';
-
-const COUNTABLE_TRACK_ROLES = new Set([
-  TRACK_ROLE_INSTRUMENT,
-  TRACK_ROLE_LEAD,
-  TRACK_ROLE_CHOIR,
-]);
-
-const GROUP_PARENT_ROLES = new Set([
-  GROUP_ROLE_INSTRUMENTS,
-  GROUP_ROLE_LEADS,
-  GROUP_ROLE_CHOIRS,
-  GROUP_ROLE_OTHERS,
-]);
-
-const GROUP_ALLOWED_ROLES = new Set([
-  GROUP_ROLE_NONE,
-  TRACK_ROLE_INSTRUMENT,
-  TRACK_ROLE_LEAD,
-  TRACK_ROLE_CHOIR,
-  TRACK_ROLE_METRONOME,
-  TRACK_ROLE_OTHER,
-  ...Array.from({ length: 5 }, (_unused, idx) => `choir-part-${idx + 1}`),
-  ...GROUP_PARENT_ROLES,
-]);
 
 const PERMISSION_DEFINITIONS = [
   {
@@ -212,197 +230,8 @@ const PERMISSIONS_WITH_GROUP_PART_FILTERS = new Set([
   PERMISSION_TRACK_READER,
 ]);
 
-function normalizeText(value) {
-  return String(value ?? '').trim();
-}
-
-function normalizeLowerText(value) {
-  return normalizeText(value).toLowerCase();
-}
-
-function normalizeBoolean(value) {
-  return value === true || normalizeLowerText(value) === 'true';
-}
-
-function isProjectPublished(project = null, snapshot = null) {
-  return normalizeBoolean(project?.published ?? project?.publish ?? snapshot?.published ?? snapshot?.publish);
-}
-
-function toNumber(value, fallback = 0) {
-  return Number.isFinite(Number(value)) ? Number(value) : fallback;
-}
-
-function sortByOrder(left, right) {
-  return toNumber(left?.order, 0) - toNumber(right?.order, 0);
-}
-
-function stableJson(value) {
-  return JSON.stringify(value ?? null);
-}
-
 function uniqueTextValues(values = []) {
   return Array.from(new Set(values.filter(Boolean).map((value) => String(value))));
-}
-
-function normalizeArtistUserIds(value = []) {
-  const refs = Array.isArray(value) ? value : [];
-  return new Set(refs
-    .map((ref) => {
-      const type = normalizeLowerText(ref?.type);
-      const id = normalizeText(ref?.id || ref?.userId);
-      return type === 'user' && id ? id : null;
-    })
-    .filter(Boolean));
-}
-
-function isChoirPartRole(role) {
-  return typeof role === 'string' && role.startsWith('choir-part-');
-}
-
-function isMetronomeRole(role) {
-  return role === TRACK_ROLE_METRONOME;
-}
-
-function normalizeTrackRole(role) {
-  if (
-    role === TRACK_ROLE_INSTRUMENT
-    || role === TRACK_ROLE_LEAD
-    || role === TRACK_ROLE_CHOIR
-    || role === TRACK_ROLE_METRONOME
-    || role === TRACK_ROLE_OTHER
-    || isChoirPartRole(role)
-  ) {
-    return role;
-  }
-  return TRACK_ROLE_OTHER;
-}
-
-function normalizeGroupRole(role) {
-  return GROUP_ALLOWED_ROLES.has(role) ? role : GROUP_ROLE_NONE;
-}
-
-function toCategoryRole(role) {
-  const normalized = normalizeTrackRole(role);
-  return isChoirPartRole(normalized) ? TRACK_ROLE_CHOIR : normalized;
-}
-
-function isGroupParentRole(role) {
-  return GROUP_PARENT_ROLES.has(role);
-}
-
-function mapGroupParentRoleToTrackRole(role) {
-  if (role === GROUP_ROLE_INSTRUMENTS) return TRACK_ROLE_INSTRUMENT;
-  if (role === GROUP_ROLE_LEADS) return TRACK_ROLE_LEAD;
-  if (role === GROUP_ROLE_CHOIRS) return TRACK_ROLE_CHOIR;
-  if (role === GROUP_ROLE_OTHERS) return TRACK_ROLE_OTHER;
-  return null;
-}
-
-function isLegacyPartGroupRole(role) {
-  const normalized = normalizeGroupRole(role);
-  return (
-    normalized !== GROUP_ROLE_NONE
-    && normalized !== GROUP_ROLE_OTHERS
-    && !isGroupParentRole(normalized)
-  );
-}
-
-function normalizePartFlag(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'true') return true;
-    if (normalized === 'false') return false;
-  }
-  return Boolean(fallback);
-}
-
-function enforcePartNestingRule(nodes = []) {
-  const childrenByParent = buildChildrenMap(nodes);
-  const walk = (parentId, hasPartAncestor) => {
-    const key = parentId || '__root__';
-    const children = childrenByParent.get(key) || [];
-    for (const node of children) {
-      if (hasPartAncestor && node.part) {
-        node.part = false;
-      }
-      walk(node.id, hasPartAncestor || Boolean(node.part));
-    }
-  };
-  walk(null, false);
-  return nodes;
-}
-
-function buildNormalizedTrackTree(snapshot = {}) {
-  const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  const rawNodes = Array.isArray(snapshot?.trackTree) ? snapshot.trackTree : [];
-  const trackById = new Map(tracks.map((track) => [track.id, track]));
-  const validTrackIds = new Set(tracks.map((track) => track.id));
-  const seenTrackIds = new Set();
-  const nodes = [];
-
-  for (const rawNode of rawNodes) {
-    if (!rawNode || typeof rawNode !== 'object') continue;
-    const kind = rawNode.kind === 'group' || rawNode.type === TRACK_NODE_TYPE_GROUP
-      ? 'group'
-      : ((rawNode.kind === 'track' || rawNode.type === 'track' || rawNode.type === TRACK_NODE_TYPE_AUDIO) ? 'track' : null);
-    if (!kind) continue;
-
-    if (kind === 'track') {
-      const trackId = rawNode.trackId ?? rawNode.track_id;
-      if (!validTrackIds.has(trackId) || seenTrackIds.has(trackId)) {
-        continue;
-      }
-      seenTrackIds.add(trackId);
-      nodes.push({
-        id: String(rawNode.id ?? `track-node:${trackId}`),
-        kind: 'track',
-        type: TRACK_NODE_TYPE_AUDIO,
-        parentId: typeof rawNode.parentId === 'string' ? rawNode.parentId : null,
-        order: toNumber(rawNode.order, 0),
-        trackId,
-        part: normalizePartFlag(rawNode.part, trackById.get(trackId)?.part),
-      });
-      continue;
-    }
-
-    const role = normalizeGroupRole(rawNode.role);
-    nodes.push({
-      id: String(rawNode.id ?? `group-node:${nodes.length}`),
-      kind: 'group',
-      type: TRACK_NODE_TYPE_GROUP,
-      parentId: typeof rawNode.parentId === 'string' ? rawNode.parentId : null,
-      order: toNumber(rawNode.order, 0),
-      name: normalizeText(rawNode.name) || 'Group',
-      role,
-      part: normalizePartFlag(rawNode.part, isLegacyPartGroupRole(role)),
-      collapsed: Boolean(rawNode.collapsed),
-      muted: Boolean(rawNode.muted),
-      soloed: Boolean(rawNode.soloed),
-      volume: Math.max(0, Math.min(100, toNumber(rawNode.volume, 100))),
-      pan: Math.max(-100, Math.min(100, toNumber(rawNode.pan, 0))),
-    });
-  }
-
-  const rootNodes = nodes.filter((node) => !node.parentId);
-  const nextRootOrder = rootNodes.reduce((max, node) => Math.max(max, toNumber(node.order, 0)), -1) + 1;
-
-  tracks
-    .filter((track) => !seenTrackIds.has(track.id))
-    .forEach((track, idx) => {
-      nodes.push({
-        id: `track-node:${track.id}`,
-        kind: 'track',
-        type: TRACK_NODE_TYPE_AUDIO,
-        parentId: null,
-        order: nextRootOrder + idx,
-        trackId: track.id,
-        part: normalizePartFlag(track.part, false),
-      });
-    });
-
-  return enforcePartNestingRule(nodes);
 }
 
 function mapLegacyCapabilityToPermissionKey(capability, scopeType = null) {
@@ -422,11 +251,6 @@ function mapLegacyCapabilityToPermissionKey(capability, scopeType = null) {
   if (normalizedCapability === CAPABILITY_MANAGE_OWN_PROJECTS) return PERMISSION_PROJECT_CREATOR;
   if (normalizedCapability === CAPABILITY_PROJECT_MANAGER) return PERMISSION_PROJECT_MANAGER;
   return null;
-}
-
-export function normalizeScopeValue(value) {
-  const normalized = normalizeLowerText(value);
-  return normalized || null;
 }
 
 export function normalizeAccessLevel(value) {
@@ -541,237 +365,6 @@ function addTag(tagsByKey, tagType, displayName) {
     tagValue: normalizedValue,
     displayName: trimmedLabel,
   });
-}
-
-function buildChildrenMap(nodes = []) {
-  const map = new Map();
-  for (const node of nodes) {
-    const key = node.parentId || '__root__';
-    if (!map.has(key)) {
-      map.set(key, []);
-    }
-    map.get(key).push(node);
-  }
-  for (const siblings of map.values()) {
-    siblings.sort(sortByOrder);
-  }
-  return map;
-}
-
-function collectTrackBindingInfo(snapshot = {}) {
-  const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  const trackById = new Map(tracks.map((track) => [track.id, track]));
-  const nodes = buildNormalizedTrackTree(snapshot);
-  const childrenByParent = buildChildrenMap(nodes);
-  const infoByTrackId = new Map();
-
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-
-  const walk = (parentId, inherited) => {
-    const key = parentId || '__root__';
-    const children = childrenByParent.get(key) || [];
-
-    for (const node of children) {
-      const nodeParentRole = inherited.parentRole;
-      const isImmediateChildOfParentRole = Boolean(nodeParentRole && inherited.parentGroupId === parentId);
-
-      if (node.kind === 'group') {
-        const normalizedGroupValue = normalizeScopeValue(node.name);
-        const nextAncestorGroupValues = normalizedGroupValue
-          ? [...inherited.ancestorGroupValues, normalizedGroupValue]
-          : [...inherited.ancestorGroupValues];
-        const next = {
-          ancestorGroupValues: nextAncestorGroupValues,
-          ancestorTrackIds: [...inherited.ancestorTrackIds, String(node.id)],
-          parentRole: inherited.parentRole,
-          parentGroupId: inherited.parentGroupId,
-          parentUnitName: inherited.parentUnitName,
-          forcedRole: inherited.forcedRole,
-          forcedUnitName: inherited.forcedUnitName,
-          choirRole: inherited.choirRole,
-          choirUnitName: inherited.choirUnitName,
-          partUnitName: inherited.partUnitName,
-        };
-
-        if (node.part) {
-          next.partUnitName = node.name;
-        }
-
-        if (isImmediateChildOfParentRole) {
-          next.parentUnitName = node.name;
-          if (nodeParentRole === TRACK_ROLE_CHOIR) {
-            next.choirRole = next.choirRole || TRACK_ROLE_CHOIR;
-            next.choirUnitName = next.parentUnitName;
-          }
-        }
-
-        const groupRole = normalizeGroupRole(node.role);
-        if (isGroupParentRole(groupRole)) {
-          const mappedRole = mapGroupParentRoleToTrackRole(groupRole);
-          next.parentRole = mappedRole;
-          next.parentGroupId = node.id;
-          next.parentUnitName = null;
-          next.forcedRole = null;
-          next.forcedUnitName = null;
-          if (mappedRole === TRACK_ROLE_CHOIR) {
-            next.choirRole = TRACK_ROLE_CHOIR;
-            next.choirUnitName = null;
-          } else {
-            next.choirRole = null;
-            next.choirUnitName = null;
-          }
-        } else if (groupRole !== GROUP_ROLE_NONE && !nodeParentRole) {
-          const categoryRole = toCategoryRole(groupRole);
-          next.forcedRole = categoryRole;
-          next.forcedUnitName = node.name;
-          if (categoryRole === TRACK_ROLE_CHOIR) {
-            next.choirRole = isChoirPartRole(groupRole) ? groupRole : TRACK_ROLE_CHOIR;
-            next.choirUnitName = next.forcedUnitName;
-          } else {
-            next.choirRole = null;
-            next.choirUnitName = null;
-          }
-        }
-
-        walk(node.id, next);
-        continue;
-      }
-
-      const track = trackById.get(node.trackId);
-      if (!track) continue;
-      const nextAncestorTrackIds = [...inherited.ancestorTrackIds];
-      const parentNode = node.parentId ? nodeById.get(node.parentId) : null;
-      if (parentNode?.kind === 'track' && parentNode.trackId) {
-        nextAncestorTrackIds.push(String(parentNode.trackId));
-      }
-
-      const ownRole = toCategoryRole(track.role);
-      const inheritedRole = inherited.parentRole || inherited.forcedRole || null;
-      const effectiveRole = isMetronomeRole(track.role)
-        ? TRACK_ROLE_METRONOME
-        : (inheritedRole || ownRole);
-      const isImmediateTrackChildOfParentRole = Boolean(inherited.parentRole && inherited.parentGroupId === parentId);
-
-      let roleUnitName = null;
-      if (COUNTABLE_TRACK_ROLES.has(effectiveRole)) {
-        if (inherited.parentRole && effectiveRole === inherited.parentRole) {
-          roleUnitName = isImmediateTrackChildOfParentRole
-            ? track.name
-            : (inherited.parentUnitName || track.name);
-        } else if (inherited.forcedRole && effectiveRole === inherited.forcedRole) {
-          roleUnitName = inherited.forcedUnitName || track.name;
-        } else {
-          roleUnitName = track.name;
-        }
-      }
-
-      let choirUnitName = null;
-      if (effectiveRole === TRACK_ROLE_CHOIR) {
-        if (inherited.parentRole === TRACK_ROLE_CHOIR) {
-          choirUnitName = isImmediateTrackChildOfParentRole
-            ? track.name
-            : (inherited.parentUnitName || roleUnitName || track.name);
-        } else {
-          choirUnitName = inherited.choirUnitName || roleUnitName || track.name;
-        }
-      }
-
-      const derivedPartValues = new Set();
-      const explicitPartName = node.part || track.part
-        ? track.name
-        : inherited.partUnitName;
-      const explicitPartValue = normalizeScopeValue(explicitPartName);
-      if (explicitPartValue) {
-        derivedPartValues.add(explicitPartValue);
-      }
-
-      if (!derivedPartValues.size) {
-        if (effectiveRole === TRACK_ROLE_INSTRUMENT || effectiveRole === TRACK_ROLE_LEAD) {
-          const normalized = normalizeScopeValue(roleUnitName);
-          if (normalized) derivedPartValues.add(normalized);
-        }
-        if (effectiveRole === TRACK_ROLE_CHOIR) {
-          const normalized = normalizeScopeValue(choirUnitName);
-          if (normalized) derivedPartValues.add(normalized);
-        }
-      }
-
-      infoByTrackId.set(track.id, {
-        trackId: track.id,
-        nodeId: node.id,
-        name: normalizeText(track.name) || 'Untitled track',
-        parentId: node.parentId || null,
-        ancestorTrackIds: nextAncestorTrackIds,
-        createdByUserId: normalizeText(track.createdByUserId) || null,
-        artistUserIds: normalizeArtistUserIds(track.artistRefs),
-        accessScopeType: TRACK_BINDING_SCOPE_TYPES.includes(normalizeLowerText(track.accessScopeType))
-          ? normalizeLowerText(track.accessScopeType)
-          : null,
-        accessScopeValue: normalizeScopeValue(track.accessScopeValue),
-        derivedGroupValues: new Set(inherited.ancestorGroupValues),
-        derivedPartValues,
-      });
-
-      walk(node.id, {
-        ...inherited,
-        ancestorTrackIds: [...nextAncestorTrackIds, String(track.id), String(node.id)],
-        partUnitName: node.part || track.part ? track.name : inherited.partUnitName,
-      });
-    }
-  };
-
-  walk(null, {
-    ancestorGroupValues: [],
-    ancestorTrackIds: [],
-    parentRole: null,
-    parentGroupId: null,
-    parentUnitName: null,
-    forcedRole: null,
-    forcedUnitName: null,
-    choirRole: null,
-    choirUnitName: null,
-    partUnitName: null,
-  });
-
-  for (const track of tracks) {
-    if (infoByTrackId.has(track.id) || isMetronomeRole(track.role)) continue;
-    const normalizedTrackName = normalizeScopeValue(track.name);
-    const derivedPartValues = new Set();
-    const effectiveRole = toCategoryRole(track.role);
-    if (track.part) {
-      if (normalizedTrackName) {
-        derivedPartValues.add(normalizedTrackName);
-      }
-    }
-    if (
-      !derivedPartValues.size
-      && (
-        effectiveRole === TRACK_ROLE_INSTRUMENT
-        || effectiveRole === TRACK_ROLE_LEAD
-        || effectiveRole === TRACK_ROLE_CHOIR
-      )
-      && normalizedTrackName
-    ) {
-      derivedPartValues.add(normalizedTrackName);
-    }
-    infoByTrackId.set(track.id, {
-      trackId: track.id,
-      nodeId: `track-node:${track.id}`,
-      name: normalizeText(track.name) || 'Untitled track',
-      parentId: null,
-      ancestorTrackIds: [],
-      createdByUserId: normalizeText(track.createdByUserId) || null,
-      artistUserIds: normalizeArtistUserIds(track.artistRefs),
-      accessScopeType: TRACK_BINDING_SCOPE_TYPES.includes(normalizeLowerText(track.accessScopeType))
-        ? normalizeLowerText(track.accessScopeType)
-        : null,
-      accessScopeValue: normalizeScopeValue(track.accessScopeValue),
-      derivedGroupValues: new Set(),
-      derivedPartValues,
-    });
-  }
-
-  return infoByTrackId;
 }
 
 export function extractProjectAccessTags(snapshot = {}) {
@@ -1935,6 +1528,7 @@ function emptyProjectAccessSummary() {
     canCreateTracks: false,
     canManageTracks: false,
     canEditAllTracks: false,
+    canExportProject: false,
     canListenTutti: false,
     canReadProject: false,
     canCreateMixes: false,
@@ -2076,12 +1670,7 @@ function assertTrackArtistSelfRemovalAllowed({
   ) {
     return;
   }
-  throw new Error('You cannot remove yourself as track artist when that is your only track manager access');
-}
-
-function isTrackArtist(trackInfo, userId) {
-  const normalizedUserId = normalizeText(userId);
-  return Boolean(normalizedUserId && trackInfo?.artistUserIds?.has(normalizedUserId));
+  throw new ProjectWriteRejectedError('You cannot remove yourself as track artist when that is your only track manager access');
 }
 
 function projectHasOwnedTrack(trackInfoById, userId) {
@@ -2119,6 +1708,7 @@ function buildProjectAccessSummary(userId, project, grants = [], projectTags = n
       canCreateTracks: true,
       canManageTracks: true,
       canEditAllTracks: true,
+      canExportProject: true,
       canListenTutti: true,
       canReadProject: true,
       canCreateMixes: true,
@@ -2289,6 +1879,7 @@ function buildProjectAccessSummary(userId, project, grants = [], projectTags = n
     },
     projectCreatedByUserId: createdByUserId,
   });
+  summary.canExportProject = canExportProject(summary);
   return summary;
 }
 
@@ -3141,6 +2732,191 @@ export async function upsertUserGrant(userId, input, actorUserId = null, db = po
   return await upsertGrantForPrincipal('user_id', userId, input, actorUserId, db);
 }
 
+export function grantFieldsFromBody(body = {}) {
+  const source = body && typeof body === 'object' ? body : {};
+  return {
+    permissionKey: source.permissionKey ?? source.permission,
+    scopeType: source.scopeType,
+    scopeShowId: source.scopeShowId,
+    scopeProjectId: source.scopeProjectId,
+    scopeTrackId: source.scopeTrackId,
+    scopeNameValue: source.scopeNameValue,
+    scopeGroupNameValue: source.scopeGroupNameValue ?? source.scopeGroupValue,
+    scopePartNameValue: source.scopePartNameValue ?? source.scopePartValue,
+    capability: source.capability,
+    showTargetType: source.showTargetType,
+    showTargetShowId: source.showTargetShowId,
+    projectTargetType: source.projectTargetType ?? source.scopeType,
+    projectTargetProjectId: source.projectTargetProjectId ?? source.scopeProjectId,
+    projectTargetValue: source.projectTargetValue ?? source.scopeValue,
+    trackScopeType: source.trackScopeType,
+    trackScopeValue: source.trackScopeValue,
+    accessLevel: source.accessLevel,
+  };
+}
+
+const GRANT_ROW_SQL = `SELECT id,
+            role_id,
+            user_id,
+            permission_key,
+            scope_type,
+            scope_show_id,
+            scope_project_id,
+            scope_track_id,
+            scope_name_value,
+            scope_group_name_value,
+            scope_group_label,
+            scope_part_name_value,
+            scope_part_label,
+            scope_label,
+            capability,
+            project_target_type,
+            project_target_project_id,
+            project_target_value,
+            project_target_label,
+            show_target_type,
+            show_target_show_id,
+            show_target_label,
+            track_scope_type,
+            track_scope_value,
+            track_scope_label,
+            granted_by,
+            created_at,
+            updated_at
+     FROM rbac_grants`;
+
+async function loadGrantRow(grantId, db = pool) {
+  const result = await db.query(`${GRANT_ROW_SQL} WHERE id = $1`, [grantId]);
+  return result.rows[0] || null;
+}
+
+export async function replaceGrant(grantId, input, actorUserId = null, expected = {}, db = pool) {
+  const ownsClient = db === pool;
+  const client = ownsClient ? await pool.connect() : db;
+  try {
+    if (ownsClient) await client.query('BEGIN');
+    const current = await client.query(
+      `SELECT id, role_id AS "roleId", user_id AS "userId"
+       FROM rbac_grants
+       WHERE id = $1`,
+      [grantId]
+    );
+    if (current.rowCount === 0) throw new Error('Grant not found');
+    const row = current.rows[0];
+    if (expected.roleId && row.roleId !== expected.roleId) throw new Error('Grant not found');
+    if (expected.userId && row.userId !== expected.userId) throw new Error('Grant not found');
+    if (row.roleId) await assertRoleGrantEditable(row.roleId, client);
+    const principalField = row.roleId ? 'role_id' : 'user_id';
+    const principalId = row.roleId || row.userId;
+    if (!principalId) throw new Error('Grant not found');
+
+    const resolved = await resolveGrantPayload(input, client);
+    const duplicate = await client.query(
+      `SELECT id
+       FROM rbac_grants
+       WHERE ${principalField} = $1
+         AND id <> $2
+         AND permission_key = $3
+         AND COALESCE(scope_type, '') = COALESCE($4, '')
+         AND COALESCE(scope_show_id, '') = COALESCE($5, '')
+         AND COALESCE(scope_project_id, '') = COALESCE($6, '')
+         AND COALESCE(scope_track_id, '') = COALESCE($7, '')
+         AND COALESCE(scope_name_value, '') = COALESCE($8, '')
+         AND COALESCE(scope_group_name_value, '') = COALESCE($9, '')
+         AND COALESCE(scope_part_name_value, '') = COALESCE($10, '')
+       LIMIT 1`,
+      [
+        principalId,
+        grantId,
+        resolved.permissionKey,
+        resolved.scopeType,
+        resolved.scopeShowId,
+        resolved.scopeProjectId,
+        resolved.scopeTrackId,
+        resolved.scopeNameValue,
+        resolved.scopeGroupNameValue,
+        resolved.scopePartNameValue,
+      ]
+    );
+
+    let savedId = grantId;
+    if (duplicate.rowCount > 0) {
+      savedId = duplicate.rows[0].id;
+      await client.query('DELETE FROM rbac_grants WHERE id = $1', [grantId]);
+      await client.query(
+        `UPDATE rbac_grants
+         SET scope_label = $2,
+             scope_group_label = $3,
+             scope_part_label = $4,
+             granted_by = $5,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [savedId, resolved.scopeLabel, resolved.scopeGroupLabel, resolved.scopePartLabel, actorUserId]
+      );
+    } else {
+      await client.query(
+        `UPDATE rbac_grants
+         SET permission_key = $2,
+             capability = $2,
+             scope_type = $3,
+             scope_show_id = $4,
+             scope_project_id = $5,
+             scope_track_id = $6,
+             scope_name_value = $7,
+             scope_group_name_value = $8,
+             scope_group_label = $9,
+             scope_part_name_value = $10,
+             scope_part_label = $11,
+             scope_label = $12,
+             project_target_type = NULL,
+             project_target_project_id = NULL,
+             project_target_value = NULL,
+             project_target_label = NULL,
+             show_target_type = NULL,
+             show_target_show_id = NULL,
+             show_target_label = NULL,
+             track_scope_type = NULL,
+             track_scope_value = NULL,
+             track_scope_label = NULL,
+             granted_by = $13,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [
+          grantId,
+          resolved.permissionKey,
+          resolved.scopeType,
+          resolved.scopeShowId,
+          resolved.scopeProjectId,
+          resolved.scopeTrackId,
+          resolved.scopeNameValue,
+          resolved.scopeGroupNameValue,
+          resolved.scopeGroupLabel,
+          resolved.scopePartNameValue,
+          resolved.scopePartLabel,
+          resolved.scopeLabel,
+          actorUserId,
+        ]
+      );
+    }
+
+    const saved = await loadGrantRow(savedId, client);
+    if (!saved) throw new Error('Grant not found');
+    if (ownsClient) await client.query('COMMIT');
+    return serializeGrantRow(saved);
+  } catch (error) {
+    if (ownsClient) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Keep the original failure.
+      }
+    }
+    throw error;
+  } finally {
+    if (ownsClient) client.release();
+  }
+}
+
 export async function deleteGrant(grantId, db = pool) {
   const grantResult = await db.query(
     `SELECT id, role_id AS "roleId"
@@ -3178,132 +2954,6 @@ export async function syncLegacyProjectPermission(userId, projectId, { canRead, 
   }, actorUserId, db);
 }
 
-function projectLevelWriteEnabled(access) {
-  return Boolean(access?.canManageProject);
-}
-
-function hasTrackLevelWrite(access) {
-  return Boolean(access?.canCreateTracks || access?.canManageTracks || projectLevelWriteEnabled(access));
-}
-
-function snapshotTrackMap(snapshot = {}) {
-  const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  return new Map(tracks.map((track) => [track.id, track]));
-}
-
-function snapshotGroupNodeMap(snapshot = {}) {
-  const nodes = buildNormalizedTrackTree(snapshot).filter((node) => node.kind === 'group');
-  return new Map(nodes.map((node) => [node.id, node]));
-}
-
-function snapshotTrackNodeMap(snapshot = {}) {
-  const nodes = buildNormalizedTrackTree(snapshot).filter((node) => node.kind === 'track');
-  return new Map(nodes.map((node) => [node.trackId, node]));
-}
-
-function normalizeTrackForWriteComparison(track = {}) {
-  return {
-    id: track.id,
-    type: track.type || TRACK_NODE_TYPE_AUDIO,
-    name: track.name,
-    part: Boolean(track.part),
-    role: track.role,
-    icon: track.icon,
-    volume: track.volume,
-    pan: track.pan,
-    muted: Boolean(track.muted),
-    soloed: Boolean(track.soloed),
-    clips: Array.isArray(track.clips) ? track.clips.map((clip) => ({
-      id: clip.id,
-      blobId: clip.blobId,
-      timelineStartMs: clip.timelineStartMs,
-      sourceStartMs: clip.sourceStartMs,
-      sourceDurationMs: clip.sourceDurationMs,
-      cropStartMs: clip.cropStartMs,
-      cropEndMs: clip.cropEndMs,
-      gainDb: clip.gainDb,
-      muted: Boolean(clip.muted),
-    })) : [],
-    createdByUserId: normalizeText(track.createdByUserId) || null,
-    accessScopeType: TRACK_BINDING_SCOPE_TYPES.includes(normalizeLowerText(track.accessScopeType))
-      ? normalizeLowerText(track.accessScopeType)
-      : null,
-    accessScopeValue: normalizeScopeValue(track.accessScopeValue),
-    artistRefs: Array.isArray(track.artistRefs)
-      ? track.artistRefs.map((ref) => ({
-        type: normalizeLowerText(ref?.type),
-        id: normalizeText(ref?.id),
-      })).filter((ref) => ref.type && ref.id)
-      : [],
-  };
-}
-
-function stripTrackWriteRestrictedShape(track = {}) {
-  const normalized = normalizeTrackForWriteComparison(track);
-  return {
-    ...normalized,
-    role: null,
-    soloed: false,
-    createdByUserId: null,
-    accessScopeType: null,
-    accessScopeValue: null,
-  };
-}
-
-function normalizeGroupForComparison(node = {}) {
-  return {
-    id: node.id,
-    type: TRACK_NODE_TYPE_GROUP,
-    parentId: node.parentId || null,
-    order: toNumber(node.order, 0),
-    name: node.name,
-    part: Boolean(node.part),
-    muted: Boolean(node.muted),
-    soloed: Boolean(node.soloed),
-    volume: toNumber(node.volume, 100),
-    pan: toNumber(node.pan, 0),
-    role: normalizeGroupRole(node.role),
-  };
-}
-
-function normalizeTopLevelForRestrictedWrite(snapshot = {}) {
-  return {
-    projectId: snapshot.projectId,
-    projectName: snapshot.projectName,
-    musicalNumber: snapshot.musicalNumber,
-    published: isProjectPublished(snapshot, null),
-    sampleRate: snapshot.sampleRate,
-    masterVolume: snapshot.masterVolume,
-    autoPan: snapshot.autoPan || null,
-    exportSettings: snapshot.exportSettings || null,
-    credits: snapshot.credits || null,
-  };
-}
-
-function trackMatchesGrantedScopeEntry(trackInfo, scope, project) {
-  if (!trackInfo || !scope) return false;
-  let baseMatches = false;
-  if (scope.type === RBAC_SCOPE_ALL || scope.type === RBAC_SCOPE_GROUP_NAME || scope.type === RBAC_SCOPE_PART_NAME) {
-    baseMatches = true;
-  } else if (scope.type === RBAC_SCOPE_SHOW) {
-    baseMatches = Boolean(project?.showId) && String(scope.showId || '') === String(project.showId);
-  } else if (scope.type === RBAC_SCOPE_PROJECT) {
-    baseMatches = Boolean(project?.id) && String(scope.projectId || '') === String(project.id);
-  } else if (scope.type === RBAC_SCOPE_TRACK) {
-    const targetTrackId = String(scope.trackId || scope.value || '');
-    baseMatches = String(trackInfo.trackId || '') === targetTrackId
-      || String(trackInfo.nodeId || '') === targetTrackId
-      || (trackInfo.ancestorTrackIds || []).includes(targetTrackId);
-  }
-  if (!baseMatches) return false;
-
-  const groupValue = normalizeScopeValue(scope.groupNameValue || (scope.type === TRACK_SCOPE_GROUP_NAME ? scope.value : null));
-  const partValue = normalizeScopeValue(scope.partNameValue || (scope.type === TRACK_SCOPE_PART_NAME ? scope.value : null));
-  if (groupValue && !trackInfo.derivedGroupValues?.has(groupValue)) return false;
-  if (partValue && !trackInfo.derivedPartValues?.has(partValue)) return false;
-  return true;
-}
-
 function buildProjectTagSetFromSnapshot(snapshot = {}) {
   const tags = {
     [PROJECT_TARGET_GROUP_NAME]: new Set(),
@@ -3332,167 +2982,6 @@ function projectMatchesScopeEntry(scope, project = null, projectTags = null, tra
     && projectMatchesShapeNameFilters(shape, projectTags, trackInfoById);
 }
 
-function trackIsEditable(trackInfo, access, userId, project = null, projectCreatedByUserId = null, options = {}) {
-  if (projectLevelWriteEnabled(access)) return true;
-  if (!trackInfo) return false;
-  const normalizedUserId = normalizeText(userId);
-  const fallbackOwnerUserId = normalizeText(projectCreatedByUserId);
-  if (access?.canManageTracks) {
-    const scopes = Array.isArray(access?.manageableTrackScopes) ? access.manageableTrackScopes : [];
-    if (scopes.some((scope) => trackMatchesGrantedScopeEntry(trackInfo, scope, project))) {
-      return true;
-    }
-  }
-  {
-    const ownerUserId = normalizeText(trackInfo.createdByUserId) || fallbackOwnerUserId;
-    if (ownerUserId && ownerUserId === normalizedUserId) {
-      return true;
-    }
-  }
-  if (options.includeArtistAccess !== false && isTrackArtist(trackInfo, normalizedUserId)) {
-    return true;
-  }
-  return false;
-}
-
-function canEditAllTracksInSnapshot({
-  snapshot = {},
-  access,
-  userId,
-  project = null,
-  projectCreatedByUserId = null,
-}) {
-  if (!hasTrackLevelWrite(access)) return false;
-  const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  if (!tracks.length) return true;
-  const trackInfoById = collectTrackBindingInfo(snapshot);
-  return tracks.every((track) => trackIsEditable(
-    trackInfoById.get(track?.id),
-    access,
-    userId,
-    project,
-    projectCreatedByUserId
-  ));
-}
-
-function soloStateChanged(currentSnapshot = {}, nextSnapshot = {}) {
-  const currentTracks = snapshotTrackMap(currentSnapshot);
-  const nextTracks = snapshotTrackMap(nextSnapshot);
-  const trackIds = new Set([...currentTracks.keys(), ...nextTracks.keys()]);
-  for (const trackId of trackIds) {
-    if (Boolean(currentTracks.get(trackId)?.soloed) !== Boolean(nextTracks.get(trackId)?.soloed)) {
-      return true;
-    }
-  }
-
-  const currentGroups = snapshotGroupNodeMap(currentSnapshot);
-  const nextGroups = snapshotGroupNodeMap(nextSnapshot);
-  const groupIds = new Set([...currentGroups.keys(), ...nextGroups.keys()]);
-  for (const groupId of groupIds) {
-    if (Boolean(currentGroups.get(groupId)?.soloed) !== Boolean(nextGroups.get(groupId)?.soloed)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function scopeSpecificity(scope) {
-  if (!scope) return -1;
-  if (scope.type === RBAC_SCOPE_TRACK) return 5;
-  if (scope.partNameValue || scope.type === RBAC_SCOPE_PART_NAME) return 4;
-  if (scope.groupNameValue || scope.type === RBAC_SCOPE_GROUP_NAME) return 4;
-  if (scope.type === RBAC_SCOPE_PROJECT) return 3;
-  if (scope.type === RBAC_SCOPE_SHOW) return 2;
-  if (scope.type === RBAC_SCOPE_ALL) return 1;
-  return 0;
-}
-
-function scopeBindingForCreatedTrack(scope = null) {
-  if (!scope) return null;
-  if (scope.type === RBAC_SCOPE_TRACK) {
-    return { type: RBAC_SCOPE_TRACK, value: scope.trackId || scope.value || null };
-  }
-  if (scope.partNameValue || scope.type === RBAC_SCOPE_PART_NAME) {
-    return {
-      type: RBAC_SCOPE_PART_NAME,
-      value: scope.partNameValue || scope.value || null,
-    };
-  }
-  if (scope.groupNameValue || scope.type === RBAC_SCOPE_GROUP_NAME) {
-    return {
-      type: RBAC_SCOPE_GROUP_NAME,
-      value: scope.groupNameValue || scope.value || null,
-    };
-  }
-  return null;
-}
-
-function chooseCreatableScopeForNewTrack(track, access, project = null, inferredTrackInfo = null) {
-  const explicitType = TRACK_BINDING_SCOPE_TYPES.includes(normalizeLowerText(track?.accessScopeType))
-    ? normalizeLowerText(track.accessScopeType)
-    : null;
-  const explicitValue = normalizeScopeValue(track?.accessScopeValue);
-  const creatableScopes = Array.isArray(access?.creatableTrackScopes) ? access.creatableTrackScopes : [];
-
-  if (explicitType && explicitValue) {
-    const matching = creatableScopes.find((scope) => (
-      scope.type === explicitType
-      && String(scope.value || scope.trackId || '') === String(explicitType === RBAC_SCOPE_TRACK ? explicitValue : explicitValue)
-    ));
-    if (!matching) {
-      throw new Error('New track scope is not permitted for this project');
-    }
-    return matching;
-  }
-
-  const matchingScopes = creatableScopes
-    .filter((scope) => {
-      if (!inferredTrackInfo) {
-        return scope.type === RBAC_SCOPE_ALL
-          || (scope.type === RBAC_SCOPE_SHOW && project?.showId && String(scope.showId || '') === String(project.showId))
-          || (scope.type === RBAC_SCOPE_PROJECT && project?.id && String(scope.projectId || '') === String(project.id));
-      }
-      return trackMatchesGrantedScopeEntry(inferredTrackInfo, scope, project);
-    })
-    .sort((left, right) => scopeSpecificity(right) - scopeSpecificity(left));
-
-  if (!matchingScopes.length) {
-    throw new Error('You cannot create tracks in this scope');
-  }
-
-  const best = matchingScopes[0];
-  const bestSpecificity = scopeSpecificity(best);
-  const equallySpecific = matchingScopes.filter((scope) => scopeSpecificity(scope) === bestSpecificity);
-  if (
-    bestSpecificity >= 4
-    && equallySpecific.length > 1
-    && new Set(equallySpecific.map((scope) => {
-      const binding = scopeBindingForCreatedTrack(scope);
-      return `${binding?.type || scope.type}:${binding?.value || scope.value || scope.trackId || ''}`;
-    })).size > 1
-  ) {
-    throw new Error('New tracks match multiple allowed scopes. Please place them more specifically.');
-  }
-  return best;
-}
-
-function cloneTrackWithStampedAccess(track, { userId, scope = null }) {
-  const nextTrack = {
-    ...track,
-    createdByUserId: normalizeText(track?.createdByUserId) || normalizeText(userId) || null,
-  };
-  const binding = scopeBindingForCreatedTrack(scope);
-  if (binding && TRACK_BINDING_SCOPE_TYPES.includes(binding.type) && binding.value) {
-    nextTrack.accessScopeType = binding.type;
-    nextTrack.accessScopeValue = normalizeScopeValue(binding.value);
-  } else {
-    nextTrack.accessScopeType = null;
-    nextTrack.accessScopeValue = null;
-  }
-  return nextTrack;
-}
-
 export async function validateAndTransformProjectWrite({
   userId,
   project,
@@ -3518,29 +3007,29 @@ export async function validateAndTransformProjectWrite({
         nextTrackInfo
       ));
       if (!stillCovered) {
-        throw new Error('That change would remove your only project manager access');
+        throw new ProjectWriteRejectedError('That change would remove your only project manager access');
       }
     }
     return nextSnapshot;
   }
 
   if (!hasTrackLevelWrite(access)) {
-    throw new Error('You do not have permission to edit this project');
+    throw new ProjectWriteRejectedError('You do not have permission to edit this project');
   }
 
   if (stableJson(normalizeTopLevelForRestrictedWrite(currentSnapshot)) !== stableJson(normalizeTopLevelForRestrictedWrite(nextSnapshot))) {
-    throw new Error('Project-level settings require project manager access');
+    throw new ProjectWriteRejectedError('Project-level settings require project manager access');
   }
 
   const currentGroupMap = snapshotGroupNodeMap(currentSnapshot);
   const nextGroupMap = snapshotGroupNodeMap(nextSnapshot);
   if (currentGroupMap.size !== nextGroupMap.size) {
-    throw new Error('Group changes require project manager access');
+    throw new ProjectWriteRejectedError('Group changes require project manager access');
   }
   for (const [groupId, currentGroup] of currentGroupMap.entries()) {
     const nextGroup = nextGroupMap.get(groupId);
     if (!nextGroup || stableJson(normalizeGroupForComparison(currentGroup)) !== stableJson(normalizeGroupForComparison(nextGroup))) {
-      throw new Error('Group changes require project manager access');
+      throw new ProjectWriteRejectedError('Group changes require project manager access');
     }
   }
 
@@ -3566,7 +3055,7 @@ export async function validateAndTransformProjectWrite({
       projectCreatedByUserId,
     })
   ) {
-    throw new Error('Soloing tracks requires permission to edit every track in the project');
+    throw new ProjectWriteRejectedError('Soloing tracks requires permission to edit every track in the project');
   }
 
   const nextTracksArray = Array.isArray(nextSnapshot?.tracks) ? [...nextSnapshot.tracks] : [];
@@ -3575,7 +3064,7 @@ export async function validateAndTransformProjectWrite({
   for (const [trackId, currentTrack] of currentTracks.entries()) {
     if (!nextTracks.has(trackId)) {
       if (!trackIsEditable(currentTrackInfo.get(trackId), access, userId, normalizedProject, projectCreatedByUserId)) {
-        throw new Error('You can only delete tracks that you are allowed to edit');
+        throw new ProjectWriteRejectedError('You can only delete tracks that you are allowed to edit');
       }
     }
   }
@@ -3583,7 +3072,7 @@ export async function validateAndTransformProjectWrite({
   for (const [trackId, nextTrack] of nextTracks.entries()) {
     if (!currentTracks.has(trackId)) {
       if (!access?.canCreateTracks) {
-        throw new Error('You cannot create tracks in this project');
+        throw new ProjectWriteRejectedError('You cannot create tracks in this project');
       }
       const scope = chooseCreatableScopeForNewTrack(nextTrack, access, normalizedProject, nextTrackInfo.get(trackId) || null);
       nextTracksArray[nextTrackIndexById.get(trackId)] = cloneTrackWithStampedAccess(nextTrack, { userId, scope });
@@ -3596,7 +3085,7 @@ export async function validateAndTransformProjectWrite({
       continue;
     }
     if (!editable) {
-      throw new Error('You can only edit tracks that you are allowed to edit');
+      throw new ProjectWriteRejectedError('You can only edit tracks that you are allowed to edit');
     }
     assertTrackArtistSelfRemovalAllowed({
       currentTrack,
@@ -3609,10 +3098,12 @@ export async function validateAndTransformProjectWrite({
       projectCreatedByUserId,
     });
     if (!trackIsEditable(nextTrackInfo.get(trackId), access, userId, normalizedProject, projectCreatedByUserId)) {
-      throw new Error('That change would move or rename the track outside your permitted scope');
+      throw new ProjectWriteRejectedError('That change would move or rename the track outside your permitted scope');
     }
-    if (stableJson(stripTrackWriteRestrictedShape(currentTrack)) !== stableJson(stripTrackWriteRestrictedShape(nextTrack))) {
-      throw new Error('Track role and scope changes require project manager access');
+    // Track-level writers may change anything on an editable track except the
+    // manager-only fields (role, ownership and scope stamps).
+    if (trackWriteRestrictedShapeChanged(currentTrack, nextTrack)) {
+      throw new ProjectWriteRejectedError('Track role and scope changes require project manager access');
     }
   }
 
@@ -3623,10 +3114,10 @@ export async function validateAndTransformProjectWrite({
       continue;
     }
     if (!trackIsEditable(currentTrackInfo.get(trackId), access, userId, normalizedProject, projectCreatedByUserId)) {
-      throw new Error('You can only move tracks that you are allowed to edit');
+      throw new ProjectWriteRejectedError('You can only move tracks that you are allowed to edit');
     }
     if (!trackIsEditable(nextTrackInfo.get(trackId) || currentTrackInfo.get(trackId), access, userId, normalizedProject, projectCreatedByUserId)) {
-      throw new Error('Moving this track would break its allowed scope');
+      throw new ProjectWriteRejectedError('Moving this track would break its allowed scope');
     }
   }
 

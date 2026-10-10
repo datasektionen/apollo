@@ -13,6 +13,19 @@ import { createId } from '../utils/id';
 import { bootstrapServerProject, resolveMedia } from '../lib/serverApi';
 import { registerAndUploadMediaBlob } from '../lib/mediaUpload';
 import { localCacheBlobToWavBlob } from '../lib/mediaEncoding';
+import { reportUserError } from '../utils/errorReporter';
+import { applyTrackAccessStamps, WRITE_REJECTED_CODE } from '../../shared/accessRules.js';
+
+// Server error codes (server/src/index.js) that mean "this write was refused
+// by the access rules" as opposed to transient failures.
+export const WRITE_REJECTION_CODES = new Set([WRITE_REJECTED_CODE, 'NO_WRITE_PERMISSION']);
+
+export function isWriteRejectionMessage(message) {
+  if (!message || typeof message !== 'object') return false;
+  if (!WRITE_REJECTION_CODES.has(String(message.code || ''))) return false;
+  // Lock errors share NO_WRITE_PERMISSION but carry a trackId and no clientOpId.
+  return Boolean(message.clientOpId);
+}
 
 function collectBlobIds(project) {
   const ids = new Set();
@@ -219,6 +232,7 @@ export default function useRealtimeProjectSync({
   const [latestSeq, setLatestSeq] = useState(0);
   const [syncError, setSyncError] = useState('');
   const [lockByTrackId, setLockByTrackId] = useState({});
+  const [lockErrorByTrackId, setLockErrorByTrackId] = useState({});
   const [remoteAnimation, setRemoteAnimation] = useState(null);
   const [joined, setJoined] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
@@ -231,6 +245,12 @@ export default function useRealtimeProjectSync({
   const uploadedBlobIdsRef = useRef(new Set());
   const localClientOpIdsRef = useRef(new Set());
   const acknowledgedClientOpIdsRef = useRef(new Set());
+  // Project snapshots for ops that have been submitted but not yet acked, keyed
+  // by clientOpId, plus the most recent snapshot the server accepted. A rejected
+  // op reverts the local project to the latter without a re-bootstrap.
+  const inFlightProjectByClientOpIdRef = useRef(new Map());
+  const lastAckedSnapshotRef = useRef(null);
+  const lastRejectionAlertRef = useRef({ message: '', at: 0 });
   const latestSeqRef = useRef(0);
   const projectId = project?.projectId || null;
   const session = remoteSession?.session || null;
@@ -307,7 +327,10 @@ export default function useRealtimeProjectSync({
 
     let disposed = false;
     setLockByTrackId({});
+    setLockErrorByTrackId({});
     setJoined(false);
+    inFlightProjectByClientOpIdRef.current.clear();
+    lastAckedSnapshotRef.current = null;
 
     const rememberServerSeq = async (seq) => {
       const nextSeq = Number(seq || 0);
@@ -366,6 +389,7 @@ export default function useRealtimeProjectSync({
       });
       const snapshotString = JSON.stringify(snapshot);
       lastSyncedSnapshotRef.current = snapshotString;
+      lastAckedSnapshotRef.current = snapshot;
       updateProject(snapshot, 'Apply remote sync update', {
         skipUndo: true,
       });
@@ -373,6 +397,72 @@ export default function useRealtimeProjectSync({
       setTimeout(() => {
         applyingRemoteRef.current = false;
       }, 0);
+    };
+
+    // Apply a snapshot that came from the server in response to our own op
+    // (stamps, reverts). Unlike applyRemoteSnapshot this must not swallow a
+    // local edit that is still waiting in the debounce window.
+    const applyLocalCorrection = (nextProject, label) => {
+      const current = projectRef.current;
+      if (!nextProject || nextProject === current) return;
+      const hasUnsentLocalEdits = Boolean(current)
+        && JSON.stringify(current) !== lastSyncedSnapshotRef.current;
+      if (!hasUnsentLocalEdits) {
+        applyingRemoteRef.current = true;
+        lastSyncedSnapshotRef.current = JSON.stringify(nextProject);
+      }
+      updateProject(nextProject, label, { skipUndo: true });
+      if (!hasUnsentLocalEdits) {
+        setTimeout(() => {
+          applyingRemoteRef.current = false;
+        }, 0);
+      }
+    };
+
+    const handleWriteRejected = async (message) => {
+      const rejectedClientOpId = String(message?.clientOpId || '');
+      const text = message?.message || 'The server rejected this change.';
+      localClientOpIdsRef.current.delete(rejectedClientOpId);
+      inFlightProjectByClientOpIdRef.current.delete(rejectedClientOpId);
+
+      const pending = await getPendingSyncOp(projectId);
+      if (pending?.payload?.clientOpId && String(pending.payload.clientOpId) === rejectedClientOpId) {
+        await clearPendingSyncOp(projectId);
+      }
+      if (disposed) return;
+
+      // Invalidate any in-flight send so it cannot resubmit the rejected state.
+      localEditSeqRef.current += 1;
+
+      const base = lastAckedSnapshotRef.current;
+      if (base) {
+        applyingRemoteRef.current = true;
+        lastSyncedSnapshotRef.current = JSON.stringify(base);
+        updateProject(base, 'Revert rejected change', { skipUndo: true });
+        setTimeout(() => {
+          applyingRemoteRef.current = false;
+        }, 0);
+      } else if (serverProjectId && session) {
+        // No acked baseline yet (rejection before join completed): fall back
+        // to re-bootstrapping the authoritative snapshot.
+        try {
+          const payload = await bootstrapServerProject(serverProjectId, session, 0, { purpose: 'daw' });
+          if (!disposed && payload?.snapshot) {
+            await applyRemoteSnapshot(payload.snapshot, Number(payload.latestSeq || 0), {
+              animateFromOtherClient: false,
+            });
+          }
+        } catch {
+          // Keep the sync error visible; nothing else to do.
+        }
+      }
+
+      const now = Date.now();
+      const last = lastRejectionAlertRef.current;
+      if (last.message !== text || now - last.at > 3000) {
+        lastRejectionAlertRef.current = { message: text, at: now };
+        reportUserError(text);
+      }
     };
 
     const flushPending = async () => {
@@ -391,6 +481,7 @@ export default function useRealtimeProjectSync({
       }
       if (payload.clientOpId) {
         localClientOpIdsRef.current.add(String(payload.clientOpId));
+        inFlightProjectByClientOpIdRef.current.set(String(payload.clientOpId), payload.project);
       }
       clientRef.current?.submitOp(payload.op, payload.clientOpId);
     };
@@ -488,6 +579,30 @@ export default function useRealtimeProjectSync({
           if (pending?.payload?.clientOpId && pending.payload.clientOpId === message.clientOpId) {
             await clearPendingSyncOp(projectId);
           }
+          if (disposed) return;
+
+          // The server stamps ownership/scope on new tracks; merge those stamps
+          // into the local copy so later edits to our own tracks are accepted.
+          const stamps = message?.trackAccessStamps && typeof message.trackAccessStamps === 'object'
+            ? message.trackAccessStamps
+            : null;
+          const ackedProject = ackClientOpId
+            ? inFlightProjectByClientOpIdRef.current.get(ackClientOpId) || null
+            : null;
+          if (ackClientOpId) {
+            inFlightProjectByClientOpIdRef.current.delete(ackClientOpId);
+          }
+          if (ackedProject) {
+            lastAckedSnapshotRef.current = stamps ? applyTrackAccessStamps(ackedProject, stamps) : ackedProject;
+          } else if (stamps && lastAckedSnapshotRef.current) {
+            lastAckedSnapshotRef.current = applyTrackAccessStamps(lastAckedSnapshotRef.current, stamps);
+          }
+          if (stamps && projectRef.current) {
+            applyLocalCorrection(
+              applyTrackAccessStamps(projectRef.current, stamps),
+              'Apply track access stamps'
+            );
+          }
 
           await rememberServerSeq(seq);
         },
@@ -504,17 +619,20 @@ export default function useRealtimeProjectSync({
         },
         onError: (message) => {
           if (disposed) return;
-          setSyncError(message?.message || 'Realtime sync error');
-          if (serverProjectId && session && /permission|scope|manager|track/i.test(String(message?.message || ''))) {
-            bootstrapServerProject(serverProjectId, session, 0, { purpose: 'daw' })
-              .then(async (payload) => {
-                if (payload?.snapshot) {
-                  await applyRemoteSnapshot(payload.snapshot, Number(payload.latestSeq || 0), {
-                    animateFromOtherClient: false,
-                  });
-                }
-              })
-              .catch(() => {});
+          const text = message?.message || 'Realtime sync error';
+          setSyncError(text);
+          if (message?.trackId) {
+            setLockErrorByTrackId((prev) => ({
+              ...prev,
+              [message.trackId]: {
+                code: String(message.code || ''),
+                message: text,
+                receivedAt: Date.now(),
+              },
+            }));
+          }
+          if (isWriteRejectionMessage(message)) {
+            handleWriteRejected(message).catch(() => {});
           }
         },
       });
@@ -530,6 +648,7 @@ export default function useRealtimeProjectSync({
       }
       localClientOpIdsRef.current.clear();
       acknowledgedClientOpIdsRef.current.clear();
+      inFlightProjectByClientOpIdRef.current.clear();
     };
   }, [enabled, session, serverProjectId, projectId, updateProject, remoteSession?.latestSeq, ensureMediaUploaded]);
 
@@ -579,8 +698,12 @@ export default function useRealtimeProjectSync({
         }
         if (localEditSeqRef.current !== localEditSeq) return;
 
+        inFlightProjectByClientOpIdRef.current.set(clientOpId, uploadReadyProject);
         const sent = clientRef.current.submitOp(opToSend, clientOpId);
-        if (!sent) return;
+        if (!sent) {
+          inFlightProjectByClientOpIdRef.current.delete(clientOpId);
+          return;
+        }
       } catch (error) {
         if (localEditSeqRef.current !== localEditSeq) return;
         setSyncError(error.message || 'Failed to sync project update');
@@ -609,6 +732,7 @@ export default function useRealtimeProjectSync({
     syncError,
     remoteAnimation,
     lockByTrackId,
+    lockErrorByTrackId,
     lockHelpers,
   };
 }

@@ -38,6 +38,13 @@ import { reportUserError } from '../utils/errorReporter';
 import { buildBlobReferenceErrorMessage } from '../utils/mediaErrors';
 import { measureTuttiPeak, resolveAdvancedMixRealtimeTrackMix } from '../lib/exportEngine';
 import useRealtimeProjectSync from '../hooks/useRealtimeProjectSync';
+import useProjectCapabilities, {
+  EDITOR_MODE_ADVANCED_MIX,
+  EDITOR_MODE_HOSTED,
+  EDITOR_MODE_LOCAL,
+  EDITOR_MODE_LOCAL_RECORDING,
+} from '../hooks/useProjectCapabilities';
+import { findProjectWriteViolation, hasTrackLevelWrite } from '../../shared/accessRules.js';
 import { commitLocalProjectSession, downloadMediaBlob, forceCheckpoint } from '../lib/serverApi';
 import { createId } from '../utils/id';
 import {
@@ -80,7 +87,7 @@ import {
   TRACK_NODE_TYPE_AUDIO,
   TRACK_NODE_TYPE_GROUP,
 } from '../utils/trackTree';
-import { applyImportAssignments } from '../utils/importTrackMatch';
+import { applyImportAssignments, IMPORT_DESTINATION_MODES } from '../utils/importTrackMatch';
 import { usePlaybackDeviceSettings, useAudioDeviceAutoPause } from '../hooks/usePlaybackDeviceSettings';
 import useLocalProjectViewState from '../hooks/useLocalProjectViewState';
 import {
@@ -355,10 +362,76 @@ function Editor({
     && (isHostedSession || isLocalRecordingSession)
   );
   const remoteUserId = remoteSession?.session?.user?.id || null;
-  const canSoloTracksInProject = isAdvancedMixSession
-    || isLocalRecordingSession
-    || !remoteSession?.projectAccess
-    || Boolean(remoteSession.projectAccess.canEditAllTracks || remoteSession.projectAccess.canManageProject);
+  const editorMode = isAdvancedMixSession
+    ? EDITOR_MODE_ADVANCED_MIX
+    : isLocalRecordingSession
+      ? EDITOR_MODE_LOCAL_RECORDING
+      : isHostedSession
+        ? EDITOR_MODE_HOSTED
+        : EDITOR_MODE_LOCAL;
+  const caps = useProjectCapabilities({
+    access: remoteSession?.projectAccess || null,
+    project,
+    userId: remoteUserId,
+    projectId: remoteSession?.serverProjectId || project?.projectId || null,
+    showId: remoteSession?.showId || project?.showId || null,
+    mode: editorMode,
+  });
+  const canSoloTracksInProject = caps.canSolo;
+  // Local recording sessions commit through POST /local-session, which requires
+  // track-level write access on the source project regardless of editor mode.
+  const canStartLocalRecordingSession = !remoteSession?.projectAccess
+    || hasTrackLevelWrite(remoteSession.projectAccess);
+  // Mode-based gates that existed before capability gating; kept separate so the
+  // capability checks below only need to express permission rules.
+  const structuralEditsAllowed = !isAdvancedMixSession && !isLocalRecordingSession;
+  // The server stamps createdByUserId on new tracks; stamping locally as well
+  // keeps the local copy editable (owner rule) until the ack confirms it.
+  const stampTrackCreator = useCallback((track) => {
+    if (!remoteUserId || !track || track.createdByUserId) return track;
+    return { ...track, createdByUserId: remoteUserId };
+  }, [remoteUserId]);
+  const stampNewTracks = useCallback((previousProject, nextProject) => {
+    if (!remoteUserId || !nextProject?.tracks) return nextProject;
+    const previousIds = new Set((previousProject?.tracks || []).map((track) => track.id));
+    let changed = false;
+    const tracks = nextProject.tracks.map((track) => {
+      if (previousIds.has(track.id) || track.createdByUserId) return track;
+      changed = true;
+      return { ...track, createdByUserId: remoteUserId };
+    });
+    return changed ? { ...nextProject, tracks } : nextProject;
+  }, [remoteUserId]);
+  // Where would an import destination put a new track? Used to ask the
+  // capability layer whether the user may create a track at that position.
+  const canCreateTrackForImportDestination = useCallback((destination) => {
+    if (!destination) return caps.canCreateTrackUnder(null);
+    const nodes = Array.isArray(project?.trackTree) ? project.trackTree : [];
+    const trackNodeFor = (trackId) => nodes.find((node) => node?.kind === 'track' && node.trackId === trackId) || null;
+    switch (destination.mode) {
+      case IMPORT_DESTINATION_MODES.NEW_CHILD:
+        if (destination.parentTrackId) {
+          return caps.canCreateTrackUnder(null, { viaTrackId: destination.parentTrackId });
+        }
+        return caps.canCreateTrackUnder(destination.parentGroupId || null);
+      case IMPORT_DESTINATION_MODES.NEW_SIBLING: {
+        if (destination.groupId) {
+          const groupNode = nodes.find((node) => node?.kind === 'group' && node.id === destination.groupId);
+          return caps.canCreateTrackUnder(groupNode?.parentId ?? null);
+        }
+        const trackNode = trackNodeFor(destination.trackId);
+        return caps.canCreateTrackUnder(trackNode?.parentId ?? null);
+      }
+      case IMPORT_DESTINATION_MODES.EXISTING:
+      case IMPORT_DESTINATION_MODES.APPEND:
+        return destination.trackId ? caps.canEditTrack(destination.trackId) : false;
+      default:
+        return caps.canCreateTrackUnder(null);
+    }
+  }, [caps, project?.trackTree]);
+  const noCreateScopeMessage = caps.creatableScopeLabels.length
+    ? `You can only create tracks inside: ${caps.creatableScopeLabels.join(', ')}.`
+    : 'You do not have permission to create tracks in this project.';
   const [advancedMixFocus, setAdvancedMixFocus] = useState(() => (
     normalizeAdvancedMixFocus(advancedMixSession?.mix?.advancedMix?.focus)
   ));
@@ -426,7 +499,10 @@ function Editor({
     setSettingsOpen(false);
   }, [isAdvancedMixSession]);
 
-  const updateProject = useCallback((updater, actionDescription = 'Update', options = {}) => {
+  // Unguarded project update: used for snapshots that come *from* the server
+  // (remote sync, acks, reverts), which must never be filtered by the local
+  // user's permissions.
+  const rawUpdateProject = useCallback((updater, actionDescription = 'Update', options = {}) => {
     if (!isAdvancedMixSession && !isLocalRecordingSession) {
       storeUpdateProject(updater, actionDescription, options);
       return;
@@ -438,9 +514,50 @@ function Editor({
     });
   }, [isAdvancedMixSession, isLocalRecordingSession, storeUpdateProject]);
 
+  // Single chokepoint for every *local* edit (Editor handlers, TrackList,
+  // Timeline gestures and shortcuts). In a hosted session the resulting
+  // snapshot is validated against the same rules the server applies before it
+  // is committed, so a forbidden change is never visible for a frame and never
+  // leaves the client. The violation message is surfaced to the user.
+  const lastWriteViolationRef = useRef({ message: '', at: 0 });
+  const updateProject = useCallback((updater, actionDescription = 'Update', options = {}) => {
+    const access = remoteSession?.projectAccess || null;
+    if (editorMode !== EDITOR_MODE_HOSTED || !access || options?.skipAccessGuard) {
+      rawUpdateProject(updater, actionDescription, options);
+      return;
+    }
+    const currentProject = useStore.getState().project;
+    const nextProject = typeof updater === 'function' ? updater(currentProject) : updater;
+    const violation = findProjectWriteViolation({
+      access,
+      currentSnapshot: currentProject,
+      nextSnapshot: nextProject,
+      userId: remoteUserId,
+      project: {
+        id: remoteSession?.serverProjectId || currentProject?.projectId || null,
+        showId: remoteSession?.showId || currentProject?.showId || null,
+      },
+      projectCreatedByUserId: null,
+    });
+    if (violation) {
+      const now = Date.now();
+      const last = lastWriteViolationRef.current;
+      if (last.message !== violation || now - last.at > 2000) {
+        lastWriteViolationRef.current = { message: violation, at: now };
+        reportUserError(violation);
+      }
+      return;
+    }
+    rawUpdateProject(nextProject, actionDescription, options);
+  }, [editorMode, rawUpdateProject, remoteSession?.projectAccess, remoteSession?.serverProjectId, remoteSession?.showId, remoteUserId]);
+
   const startLocalRecordingSession = useCallback(() => {
     if (!project) return;
     if (isLocalRecordingSession) return;
+    if (!canStartLocalRecordingSession) {
+      reportUserError('You do not have write access to any track in this project, so a local recording session cannot be uploaded.', null, { onceKey: 'editor:local-session-no-access' });
+      return;
+    }
 
     const sourceProjectId = String(
       advancedMixSession?.sourceProjectId
@@ -482,6 +599,7 @@ function Editor({
     advancedMixSession?.baseSnapshot,
     advancedMixSession?.mix?.projectId,
     advancedMixSession?.sourceProjectId,
+    canStartLocalRecordingSession,
     isAdvancedMixEditorSession,
     isLocalRecordingSession,
     project,
@@ -496,6 +614,7 @@ function Editor({
       if (!Object.keys(allowedUpdates).length) return;
       updates = allowedUpdates;
     }
+    if (!caps.canEditTrack(trackId)) return;
 
     updateProject((proj) => ({
       ...proj,
@@ -533,7 +652,7 @@ function Editor({
         };
       }),
     }), action === 'add' ? 'Add clip' : action === 'delete' ? 'Delete clip' : action === 'split' ? 'Split clip' : 'Update clip');
-  }, [isAdvancedMixSession, updateProject]);
+  }, [caps, isAdvancedMixSession, updateProject]);
 
   const persistImportedMedia = useCallback(async (file, audioBuffer) => {
     const prepared = await prepareMediaForImportSource({
@@ -595,13 +714,18 @@ function Editor({
     syncError,
     remoteAnimation,
     lockByTrackId,
+    lockErrorByTrackId,
     lockHelpers,
   } = useRealtimeProjectSync({
     enabled: isHostedSession,
     project,
     remoteSession,
-    updateProject,
+    updateProject: rawUpdateProject,
   });
+  const lockErrorByTrackIdRef = useRef({});
+  useEffect(() => {
+    lockErrorByTrackIdRef.current = lockErrorByTrackId || {};
+  }, [lockErrorByTrackId]);
   const advancedMixDefaultCollapsedGroupIds = useMemo(() => (
     isAdvancedMixSession
       ? (project?.trackTree || [])
@@ -1348,19 +1472,26 @@ function Editor({
     return { clip: durationMs > 0 ? nextClip : null, durationMs };
   };
 
+  // Resolves to `true` when this client owns the lock, otherwise to a
+  // descriptive object ({ code, message }) explaining why not.
   const waitForOwnTrackLock = async (trackId, timeoutMs = 2500) => {
     const start = Date.now();
+    const errorsBefore = lockErrorByTrackIdRef.current?.[trackId]?.receivedAt || 0;
     while (Date.now() - start < timeoutMs) {
+      const lockError = lockErrorByTrackIdRef.current?.[trackId];
+      if (lockError && (lockError.receivedAt || 0) > errorsBefore) {
+        return { code: lockError.code, message: lockError.message };
+      }
       const lockState = lockByTrackIdRef.current?.[trackId];
       if (lockState?.ownerUserId === remoteUserId) {
         return true;
       }
       if (lockState?.ownerUserId && lockState.ownerUserId !== remoteUserId) {
-        return false;
+        return { code: 'TRACK_LOCKED', message: `Track is locked by ${lockState.ownerName || 'another user'}.` };
       }
       await new Promise((resolve) => setTimeout(resolve, 80));
     }
-    return false;
+    return { code: 'TIMEOUT', message: 'Timed out waiting for the recording lock.' };
   };
 
   const releaseRecordingLock = () => {
@@ -1728,7 +1859,36 @@ function Editor({
     && selectedTrackLock.ownerUserId !== remoteUserId
   );
   const selectedTrackLockOwnerName = selectedTrackLock?.ownerName || 'another user';
-  const recordButtonDisabled = hasNoTracks;
+  const selectedTrackNotEditable = Boolean(
+    isHostedSession
+    && selectedTrackId
+    && selectedRowKind !== 'group'
+    && !caps.canRecordTo(selectedTrackId)
+  );
+  // Why the record button cannot start a recording right now (null = it can).
+  // Rendered as the button tooltip so a grayed-out button always explains itself.
+  const recordBlockReason = (() => {
+    if (isRecording) return null;
+    if (hasNoTracks) return 'Add a track before recording';
+    if (recordButtonStartsLocalSession) {
+      return canStartLocalRecordingSession
+        ? null
+        : 'You do not have write access to any track in this project, so a local recording session cannot be uploaded';
+    }
+    if (isAdvancedMixSession || isLocalRecordingSession) return null;
+    if (isHostedSession && caps.isReadOnly) {
+      return 'You have read-only access to this project';
+    }
+    if (selectedRowKind === 'group') return 'Select a track to record to (groups cannot be recorded to)';
+    if (!selectedTrackId) return 'Select a track to record to';
+    if (selectedTrackNotEditable) {
+      return caps.explainTrackAccess(selectedTrackId) || 'You do not have permission to record to this track';
+    }
+    if (isHostedSession && !syncConnected) return 'Disconnected from server';
+    if (selectedTrackLockedByOther) return `Locked by ${selectedTrackLockOwnerName}`;
+    return null;
+  })();
+  const recordButtonDisabled = !isRecording && Boolean(recordBlockReason);
   const advancedFocusStep = getAdvancedMixPracticeFocusStep(advancedMixControls.practiceFocusControl);
   const advancedFocusSliderPosition = getAdvancedMixPracticeFocusSliderPosition(advancedMixControls.practiceFocusControl);
   const advancedPanControlDisabled = !isAdvancedMixSession
@@ -1798,8 +1958,9 @@ function Editor({
       return;
     }
     if (dismissedEmptyImportForProjectIdRef.current === project.projectId) return;
+    if (!caps.canCreateTracks) return;
     setShowFileImport(true);
-  }, [hasNoTracks, isAdvancedMixSession, project.projectId]);
+  }, [caps.canCreateTracks, hasNoTracks, isAdvancedMixSession, project.projectId]);
 
   useEffect(() => {
     if (!timelineRows.length) {
@@ -2094,6 +2255,10 @@ function Editor({
       // Start recording
       try {
         if (isHostedSession) {
+          if (!caps.canRecordTo(selectedTrackId)) {
+            alert('You do not have permission to record to this track.');
+            return;
+          }
           if (!syncConnected) {
             alert('Cannot record while disconnected from server.');
             return;
@@ -2109,9 +2274,15 @@ function Editor({
             return;
           }
 
-          const lockGranted = await waitForOwnTrackLock(selectedTrackId);
-          if (!lockGranted) {
-            alert(`Track is locked by ${selectedTrackLockOwnerName}.`);
+          const lockResult = await waitForOwnTrackLock(selectedTrackId);
+          if (lockResult !== true) {
+            if (lockResult?.code === 'NO_WRITE_PERMISSION' || lockResult?.code === 'NO_TRACK_WRITE_PERMISSION') {
+              alert(lockResult.message || 'You do not have permission to record to this track.');
+            } else if (lockResult?.code === 'TRACK_LOCKED' || selectedTrackLockedByOther || lockByTrackIdRef.current?.[selectedTrackId]?.ownerUserId) {
+              alert(`Track is locked by ${lockByTrackIdRef.current?.[selectedTrackId]?.ownerName || 'another user'}.`);
+            } else {
+              alert(lockResult?.message || 'Could not acquire the recording lock. Try again.');
+            }
             return;
           }
           recordingLockTrackIdRef.current = selectedTrackId;
@@ -2201,6 +2372,20 @@ function Editor({
   const handleFileImport = async (fileData) => {
     const assignments = [];
 
+    // Mirror the server's rules before uploading anything: replacing or
+    // appending to an existing track needs edit access to that track; every
+    // other destination creates a new track.
+    for (const { file, destination } of fileData) {
+      const targetsExistingTrack = destination?.mode === IMPORT_DESTINATION_MODES.EXISTING
+        || destination?.mode === IMPORT_DESTINATION_MODES.APPEND;
+      if (targetsExistingTrack && destination?.trackId && !caps.canEditTrack(destination.trackId)) {
+        throw new Error(`You do not have permission to edit the track selected for ${file.name}.`);
+      }
+      if (!targetsExistingTrack && !canCreateTrackForImportDestination(destination)) {
+        throw new Error(`${noCreateScopeMessage} (${file.name})`);
+      }
+    }
+
     for (const { file, destination } of fileData) {
       try {
         console.log(`Importing ${file.name}...`);
@@ -2226,12 +2411,16 @@ function Editor({
       }
     }
 
-    updateProject((proj) => applyImportAssignments(proj, assignments), 'Import audio files');
+    updateProject((proj) => stampNewTracks(proj, applyImportAssignments(proj, assignments)), 'Import audio files');
     console.log(`Import complete: ${assignments.length} files`);
   };
 
   const handleDropImportToTrackAtPlayhead = async (files, targetRow) => {
     if (!targetRow?.trackId || !targetRow?.nodeId || !files.length) return;
+    if (!caps.canEditTrack(targetRow.trackId)) {
+      reportUserError('You do not have permission to edit this track.', null, { onceKey: 'editor:drop-import-no-track-access' });
+      return;
+    }
 
     const snapshotTrack = projectRef.current?.tracks?.find((track) => track.id === targetRow.trackId);
     if (!snapshotTrack || (snapshotTrack.clips?.length || 0) > 0) {
@@ -2293,7 +2482,7 @@ function Editor({
         if (fileIndex < emptyTrackIds.length) {
           return { trackId: emptyTrackIds[fileIndex], fileData };
         }
-        const newTrack = createTrack(fileData.name || `Track ${nextProject.tracks.length + addedTracks.length + 1}`, dropRole);
+        const newTrack = stampTrackCreator(createTrack(fileData.name || `Track ${nextProject.tracks.length + addedTracks.length + 1}`, dropRole));
         addedTracks.push(newTrack);
         return { trackId: newTrack.id, fileData, isNewTrack: true };
       });
@@ -2345,6 +2534,10 @@ function Editor({
 
   const handleDropImportToNewTracksAtPlayhead = async (files) => {
     if (!files.length) return null;
+    if (!caps.canCreateTrackUnder(null)) {
+      reportUserError(noCreateScopeMessage, null, { onceKey: 'editor:drop-import-no-create-access' });
+      return null;
+    }
 
     const importedFiles = [];
     for (const file of files) {
@@ -2367,7 +2560,7 @@ function Editor({
 
     const newTracks = importedFiles.map((fileData, index) => {
       const fallbackName = `Track ${projectRef.current?.tracks?.length + index + 1 || index + 1}`;
-      const track = createTrack(fileData.name || fallbackName, TRACK_ROLES.INSTRUMENT);
+      const track = stampTrackCreator(createTrack(fileData.name || fallbackName, TRACK_ROLES.INSTRUMENT));
       track.clips.push(createClip(fileData.blobId, currentTimeMs, fileData.durationMs));
       return track;
     });
@@ -2440,12 +2633,22 @@ function Editor({
 
   const handleUpdateTrack = (trackId, updates) => {
     if (!trackId || updates == null) return;
+    if (!caps.canEditTrack(trackId)) {
+      reportUserError('You do not have permission to edit this track.', null, { onceKey: `editor:track-no-access:${trackId}` });
+      return;
+    }
 
     const resolveUpdates = (currentTrack) => {
       const rawUpdates = typeof updates === 'function' ? updates(currentTrack) : updates;
-      return isAdvancedMixSession
+      let allowed = isAdvancedMixSession
         ? pickAllowedUpdates(rawUpdates, ADVANCED_MIX_ALLOWED_TRACK_UPDATE_KEYS)
         : rawUpdates;
+      // Track role changes are project-manager-only on the server.
+      if (allowed && !caps.canChangeTrackRoles && Object.prototype.hasOwnProperty.call(allowed, 'role')) {
+        const { role: _role, ...rest } = allowed;
+        allowed = rest;
+      }
+      return allowed;
     };
 
     if (typeof updates !== 'function') {
@@ -2591,6 +2794,7 @@ function Editor({
   };
 
   const applyTrackArtistRefs = (trackId, artistRefs) => {
+    if (!caps.canEditTrack(trackId)) return;
     updateProject((proj) => {
       let nextProject = normalizeTrackTree({
         ...proj,
@@ -2603,6 +2807,7 @@ function Editor({
   };
 
   const applyGroupArtistRefs = (groupNodeId, artistRefs) => {
+    if (!caps.canManageGroups) return;
     updateProject((proj) => {
       let nextProject = updateGroupNode(proj, groupNodeId, { artistRefs });
       return enforceSoloArtistAncestorRule(nextProject);
@@ -2652,6 +2857,10 @@ function Editor({
   };
 
   const handleUpdateGroup = (groupNodeId, updates) => {
+    if (!caps.canManageGroups) {
+      reportUserError('Group changes require project manager access.', null, { onceKey: 'editor:group-no-access' });
+      return;
+    }
     const safeUpdates = isAdvancedMixSession
       ? pickAllowedUpdates(updates, ADVANCED_MIX_ALLOWED_TRACK_UPDATE_KEYS)
       : updates;
@@ -2712,7 +2921,7 @@ function Editor({
   };
 
   const handleSetAutoPanStrategy = (strategyId) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed || !caps.canEditProjectSettings) return;
     applyProjectAutoPanSettings(
       strategyId === 'off'
         ? { enabled: false }
@@ -2722,7 +2931,7 @@ function Editor({
   };
 
   const handleSetProjectPublished = (published) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed || !caps.canEditProjectSettings) return;
     updateProject((proj) => ({
       ...proj,
       published: Boolean(published),
@@ -2730,7 +2939,7 @@ function Editor({
   };
 
   const applyProjectAutoPanSettings = (settingsUpdate, description) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed || !caps.canEditProjectSettings) return;
     let panUpdates = null;
     updateProject((proj) => {
       const result = applyChoirAutoPanToProject(proj, settingsUpdate);
@@ -2746,7 +2955,7 @@ function Editor({
   };
 
   const handleToggleAutoPanInverted = () => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed || !caps.canEditProjectSettings) return;
     applyProjectAutoPanSettings(
       {
         inverted: !project?.autoPan?.inverted,
@@ -2756,7 +2965,7 @@ function Editor({
   };
 
   const handleSetAutoPanManualChoirParts = (enabled) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed || !caps.canEditProjectSettings) return;
     applyProjectAutoPanSettings(
       { manualChoirParts: enabled },
       'Update choir part selection mode'
@@ -2764,7 +2973,7 @@ function Editor({
   };
 
   const handleUpdateExportSettings = (updates) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed || !caps.canEditProjectSettings) return;
     updateProject((proj) => ({
       ...proj,
       exportSettings: normalizeExportSettings({
@@ -2776,6 +2985,7 @@ function Editor({
 
   const handleReorderTrack = (trackId, insertIndex) => {
     if (isAdvancedMixSession) return;
+    if (!caps.canEditTrack(trackId)) return;
     let panUpdates = null;
     updateProject((proj) => {
       const rowTracks = getVisibleTimelineRows(proj)
@@ -2816,6 +3026,13 @@ function Editor({
 
   const handleMoveNode = (nodeId, targetNodeId, placement) => {
     if (isAdvancedMixSession) return;
+    {
+      const movingNode = (projectRef.current?.trackTree || project?.trackTree || []).find((node) => node?.id === nodeId);
+      if (movingNode?.kind === 'group' ? !caps.canManageGroups : !caps.canEditTrack(movingNode?.trackId)) {
+        reportUserError('You do not have permission to move this item.', null, { onceKey: 'editor:move-no-access' });
+        return;
+      }
+    }
     let panUpdates = null;
     updateProject((proj) => {
       let nextProject = moveTrackTreeNode(proj, nodeId, targetNodeId, placement);
@@ -2840,6 +3057,7 @@ function Editor({
 
   const handleConvertEmptyTrackAboveToGroup = (sourceTrackId, movingNodeId) => {
     if (isAdvancedMixSession) return;
+    if (!caps.canManageGroups) return;
     let panUpdates = null;
     updateProject((proj) => {
       const normalized = normalizeTrackTree(proj);
@@ -3035,17 +3253,17 @@ function Editor({
   };
 
   const handleCreateGroup = (name = 'Group', parentId = null) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed || !caps.canManageGroups) return;
     updateProject((proj) => createGroupNode(proj, name, parentId, null), 'Create group');
   };
 
   const handleRenameGroup = (groupNodeId, name) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed || !caps.canManageGroups) return;
     updateProject((proj) => renameGroupNode(proj, groupNodeId, name), 'Rename group');
   };
 
   const handleDeleteGroup = (groupNodeId) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed || !caps.canManageGroups) return;
     const normalizedBeforeDelete = normalizeTrackTree(project);
     const rowsBeforeDelete = getVisibleTimelineRows(normalizedBeforeDelete);
     const groupNode = (normalizedBeforeDelete.trackTree || []).find(
@@ -3177,6 +3395,7 @@ function Editor({
   };
 
   const handleMasterVolumeDoubleClick = () => {
+    if (!caps.canEditProjectSettings) return;
     const currentValue = toFiniteNumber(masterVolumeRef.current, masterVolume);
     const display = currentValue <= 0 ? '-∞' : volumeToDb(currentValue).toFixed(1);
     setMasterEditTooltip({ text: display });
@@ -3184,6 +3403,7 @@ function Editor({
 
   const handleNormalizeMasterVolume = async () => {
     if (!project) return;
+    if (!caps.canEditProjectSettings) return;
     if (isNormalizingMasterRef.current) return;
     isNormalizingMasterRef.current = true;
 
@@ -3235,6 +3455,7 @@ function Editor({
   const handleMasterVolumeMouseDown = (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
+    if (!caps.canEditProjectSettings) return;
     stopMasterVolumeAnimation();
     if (masterEditTooltip) setMasterEditTooltip(null);
     const rect = e.currentTarget.getBoundingClientRect();
@@ -3267,12 +3488,13 @@ function Editor({
       }
 
       if (!projectNeedsUpdate) return;
+      if (!caps.canEditProjectSettings) return;
       updateProject((proj) => ({
         ...proj,
         masterVolume: nextVolume,
       }), 'Set master volume');
     },
-    [startMasterVolumeAnimation, stopMasterVolumeAnimation, updateProject]
+    [caps, startMasterVolumeAnimation, stopMasterVolumeAnimation, updateProject]
   );
 
   const parseMasterVolumeInput = useCallback((rawText) => {
@@ -3303,12 +3525,7 @@ function Editor({
   }, [applyMasterVolume, masterEditTooltip, parseMasterVolumeInput]);
 
   const handleAddEmptyTrack = (options = null) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
-    const trackNumber = project.tracks.length + 1;
-    const trackName = `Track ${trackNumber}`;
-    const newTrack = createTrack(trackName, 'other');
-    let panUpdates = null;
-
+    if (!structuralEditsAllowed) return;
     let preferredParentId = null;
     let preferredInsertIndex = null;
     let afterNodeId = null;
@@ -3320,6 +3537,15 @@ function Editor({
       preferredInsertIndex = Number.isInteger(options.insertIndex) ? options.insertIndex : null;
       afterNodeId = typeof options.afterNodeId === 'string' ? options.afterNodeId : null;
     }
+
+    if (!caps.canCreateTrackUnder(preferredParentId)) {
+      reportUserError(noCreateScopeMessage, null, { onceKey: `editor:add-track-no-access:${preferredParentId || 'root'}` });
+      return;
+    }
+    const trackNumber = project.tracks.length + 1;
+    const trackName = `Track ${trackNumber}`;
+    const newTrack = stampTrackCreator(createTrack(trackName, 'other'));
+    let panUpdates = null;
     
     updateProject((proj) => {
       let nextProject = {
@@ -3370,9 +3596,13 @@ function Editor({
   };
 
   const handleDeleteTrackById = (trackId) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed) return;
     if (!trackId) {
       return; // No track selected
+    }
+    if (!caps.canEditTrack(trackId)) {
+      reportUserError('You can only delete tracks that you are allowed to edit.', null, { onceKey: `editor:delete-track-no-access:${trackId}` });
+      return;
     }
 
     const track = project.tracks.find(t => t.id === trackId);
@@ -3495,8 +3725,14 @@ function Editor({
   };
 
   const handleCreateSubtrackFromTrack = (trackId) => {
-    if (isAdvancedMixSession || isLocalRecordingSession) return;
+    if (!structuralEditsAllowed) return;
     if (!trackId) return;
+    // Converts the empty track into a group with a child track: needs group
+    // management plus track creation rights.
+    if (!caps.canManageGroups || !caps.canCreateTracks) {
+      reportUserError('Creating subtracks requires project manager access.', null, { onceKey: 'editor:subtrack-no-access' });
+      return;
+    }
     const sourceTrack = project.tracks.find((t) => t.id === trackId);
     if (!sourceTrack) return;
     if ((sourceTrack.clips?.length || 0) > 0) {
@@ -3505,7 +3741,7 @@ function Editor({
     }
 
     const newTrackNumber = project.tracks.length + 1;
-    const newTrack = createTrack(`Track ${newTrackNumber}`, 'other');
+    const newTrack = stampTrackCreator(createTrack(`Track ${newTrackNumber}`, 'other'));
     let panUpdates = null;
 
     updateProject((proj) => {
@@ -3671,11 +3907,11 @@ function Editor({
     onToggleLoop: handleToggleLoop,
     onUndo: undo,
     onRedo: redo,
-    onDeleteTrack: isAdvancedMixSession || isLocalRecordingSession ? null : handleDeleteTrack,
-    onAddTrack: isAdvancedMixSession || isLocalRecordingSession ? null : handleAddTrackFromSelected,
-    onAddSubtrack: isAdvancedMixSession || isLocalRecordingSession ? null : handleCreateSubtrackFromSelected,
-    onIndentRight: isAdvancedMixSession ? null : handleIndentSelectedRight,
-    onIndentLeft: isAdvancedMixSession ? null : handleIndentSelectedLeft,
+    onDeleteTrack: structuralEditsAllowed && caps.canEditAnyTrack ? handleDeleteTrack : null,
+    onAddTrack: structuralEditsAllowed && caps.canCreateTracks ? handleAddTrackFromSelected : null,
+    onAddSubtrack: structuralEditsAllowed && caps.canManageGroups && caps.canCreateTracks ? handleCreateSubtrackFromSelected : null,
+    onIndentRight: !isAdvancedMixSession && caps.canEditAnyTrack ? handleIndentSelectedRight : null,
+    onIndentLeft: !isAdvancedMixSession && caps.canEditAnyTrack ? handleIndentSelectedLeft : null,
     onToggleFold: handleToggleSelectedGroupFold,
     onToggleFoldRecursive: handleToggleSelectedGroupFoldRecursive,
   });
@@ -3833,40 +4069,48 @@ function Editor({
                   {isPlaying ? <Pause size={18} /> : <Play size={18} />}
                 </button>
 
-                <button
-                  onClick={handleRecord}
-                  onContextMenu={(event) => {
-                    if (isLocalRecordingSession || isRecording) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    startLocalRecordingSession();
-                  }}
-                  disabled={recordButtonDisabled}
-                  className={`p-2 ${
-                    isRecording
-                      ? 'bg-red-600 hover:bg-red-700 animate-pulse'
-                      : 'bg-red-600 hover:bg-red-700'
-                  } disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded transition-colors`}
+                {/* Wrapper carries the tooltip so it still shows while the button is disabled. */}
+                <span
+                  className="inline-flex"
                   title={
-                    recordButtonStartsLocalSession
-                      ? LOCAL_RECORDING_START_TOOLTIP
-                      : isRecording
-                      ? 'Stop Recording'
-                      : isLocalRecordingSession
-                        ? 'Record'
-                      : selectedTrackLockedByOther
-                        ? `Locked by ${selectedTrackLockOwnerName}. Right-click: ${LOCAL_RECORDING_START_TOOLTIP}`
-                        : (isHostedSession && !syncConnected)
-                          ? `Disconnected from server. Right-click: ${LOCAL_RECORDING_START_TOOLTIP}`
-                          : `Record (right-click: ${LOCAL_RECORDING_START_TOOLTIP})`
+                    recordBlockReason
+                      ? (
+                        !isLocalRecordingSession && !recordButtonStartsLocalSession && canStartLocalRecordingSession
+                          ? `${recordBlockReason}. Right-click: ${LOCAL_RECORDING_START_TOOLTIP}`
+                          : recordBlockReason
+                      )
+                      : recordButtonStartsLocalSession
+                        ? LOCAL_RECORDING_START_TOOLTIP
+                        : isRecording
+                          ? 'Stop Recording'
+                          : isLocalRecordingSession
+                            ? 'Record'
+                            : `Record (right-click: ${LOCAL_RECORDING_START_TOOLTIP})`
                   }
                 >
-                  {!isRecording && selectedTrackLockedByOther ? (
-                    <Lock size={18} />
-                  ) : (
-                    <Circle size={18} fill={isRecording ? 'currentColor' : 'none'} />
-                  )}
-                </button>
+                  <button
+                    onClick={handleRecord}
+                    onContextMenu={(event) => {
+                      if (isLocalRecordingSession || isRecording) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      startLocalRecordingSession();
+                    }}
+                    disabled={recordButtonDisabled}
+                    aria-label={recordBlockReason || (isRecording ? 'Stop recording' : 'Record')}
+                    className={`p-2 rounded transition-colors text-white ${
+                      isRecording
+                        ? 'bg-red-600 hover:bg-red-700 animate-pulse'
+                        : 'bg-red-600 hover:bg-red-700'
+                    } disabled:bg-gray-700 disabled:cursor-not-allowed`}
+                  >
+                    {!isRecording && selectedTrackLockedByOther ? (
+                      <Lock size={18} />
+                    ) : (
+                      <Circle size={18} fill={isRecording ? 'currentColor' : 'none'} />
+                    )}
+                  </button>
+                </span>
 
                 {isHostedSession && showDisconnectedIndicator && !syncConnected && (
                   <div className="p-1 text-red-500" title="Disconnected from server">
@@ -4058,8 +4302,10 @@ function Editor({
                       onMouseDown={handleMasterVolumeMouseDown}
                       onDoubleClick={handleMasterVolumeDoubleClick}
                       onContextMenu={handleMasterVolumeContextMenu}
-                      className="w-28 volume-slider cursor-pointer block"
-                      title="Master Volume (double-click for numeric input)"
+                      className={`w-28 volume-slider block ${caps.canEditProjectSettings ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                      title={caps.canEditProjectSettings
+                        ? 'Master Volume (double-click for numeric input)'
+                        : 'Master volume is a project setting (project manager access required)'}
                     />
                     {masterDragTooltip !== null && (
                       <div
@@ -4095,15 +4341,18 @@ function Editor({
 
                 {!isAdvancedMixSession ? (
                   <>
-                    <button
-                      onClick={() => setShowFileImport(true)}
-                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded transition-colors"
-                    >
-                      <Download size={16} />
-                      <span className="text-sm">Import</span>
-                    </button>
+                    {(caps.canCreateTracks || caps.canEditAnyTrack) ? (
+                      <button
+                        onClick={() => setShowFileImport(true)}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded transition-colors"
+                        title={caps.canCreateTracks ? 'Import audio files' : 'Import audio into tracks you can edit'}
+                      >
+                        <Download size={16} />
+                        <span className="text-sm">Import</span>
+                      </button>
+                    ) : null}
 
-                    {!isLocalRecordingSession ? (
+                    {!isLocalRecordingSession && caps.canExport ? (
                       <button
                         onClick={async () => {
                           if (isHostedSession) {
@@ -4154,10 +4403,12 @@ function Editor({
           updateProject={updateProject}
           onUpdateLoop={setLocalLoop}
           shortcutsEnabled={true}
-          deleteClipShortcutEnabled={!isAdvancedMixSession}
-          onDeleteTrackShortcut={isAdvancedMixSession || isLocalRecordingSession ? null : handleDeleteTrackById}
+          deleteClipShortcutEnabled={!isAdvancedMixSession && caps.canEditAnyTrack}
+          onDeleteTrackShortcut={structuralEditsAllowed && caps.canEditAnyTrack ? handleDeleteTrackById : null}
           advancedMixLocked={isAdvancedMixSession}
           canSoloTracks={canSoloTracksInProject}
+          canEditTrack={caps.canEditTrack}
+          explainTrackAccess={caps.explainTrackAccess}
           sharedVerticalScroll
           scrollContainerRef={timelineScrollRef}
           missingMediaBlobIds={missingMediaBlobIds}
@@ -4202,28 +4453,33 @@ function Editor({
                       trackEffectiveRoleById={trackEffectiveRoleById}
                       onUpdateTrack={handleUpdateTrack}
                       onUpdateGroup={handleUpdateGroup}
-                      onCreateSubtrack={isAdvancedMixSession || isLocalRecordingSession ? null : handleCreateSubtrackFromTrack}
+                      onCreateSubtrack={structuralEditsAllowed && caps.canManageGroups && caps.canCreateTracks ? handleCreateSubtrackFromTrack : null}
                       onSelectRow={handleSelectRow}
                       onSelectTrack={selectTrack}
                       selectedNodeId={selectedNodeId}
                       selectedTrackId={selectedTrackId}
-                      onAddTrack={isAdvancedMixSession || isLocalRecordingSession ? null : handleAddEmptyTrack}
-                      onDeleteTrack={isAdvancedMixSession || isLocalRecordingSession ? null : handleDeleteTrackById}
-                      onEditTrackArtists={!isAdvancedMixSession && !isLocalRecordingSession && remoteSession?.session ? handleEditTrackArtists : null}
-                      onEditGroupArtists={!isAdvancedMixSession && !isLocalRecordingSession && remoteSession?.session ? handleEditGroupArtists : null}
-                      onSetAutoPanStrategy={isAdvancedMixSession || isLocalRecordingSession ? null : handleSetAutoPanStrategy}
-                      onToggleAutoPanInverted={isAdvancedMixSession || isLocalRecordingSession ? null : handleToggleAutoPanInverted}
+                      onAddTrack={structuralEditsAllowed && caps.canCreateTracks ? handleAddEmptyTrack : null}
+                      onDeleteTrack={structuralEditsAllowed && caps.canEditAnyTrack ? handleDeleteTrackById : null}
+                      onEditTrackArtists={structuralEditsAllowed && remoteSession?.session && caps.canEditAnyTrack ? handleEditTrackArtists : null}
+                      onEditGroupArtists={structuralEditsAllowed && remoteSession?.session && caps.canManageGroups ? handleEditGroupArtists : null}
+                      onSetAutoPanStrategy={structuralEditsAllowed && caps.canEditProjectSettings ? handleSetAutoPanStrategy : null}
+                      onToggleAutoPanInverted={structuralEditsAllowed && caps.canEditProjectSettings ? handleToggleAutoPanInverted : null}
                       autoPanInverted={Boolean(treeProject.autoPan?.inverted)}
                       autoPanManualChoirParts={Boolean(treeProject.autoPan?.manualChoirParts)}
-                      onReorderTrack={isAdvancedMixSession ? null : handleReorderTrack}
-                      onMoveNode={isAdvancedMixSession ? null : handleMoveNode}
-                      onCreateGroup={isAdvancedMixSession || isLocalRecordingSession ? null : handleCreateGroup}
-                      onRenameGroup={isAdvancedMixSession || isLocalRecordingSession ? null : handleRenameGroup}
-                      onDeleteGroup={isAdvancedMixSession || isLocalRecordingSession ? null : handleDeleteGroup}
+                      onReorderTrack={!isAdvancedMixSession && caps.canEditAnyTrack ? handleReorderTrack : null}
+                      onMoveNode={!isAdvancedMixSession && caps.canEditAnyTrack ? handleMoveNode : null}
+                      onCreateGroup={structuralEditsAllowed && caps.canManageGroups ? handleCreateGroup : null}
+                      onRenameGroup={structuralEditsAllowed && caps.canManageGroups ? handleRenameGroup : null}
+                      onDeleteGroup={structuralEditsAllowed && caps.canManageGroups ? handleDeleteGroup : null}
                       onToggleGroupCollapse={handleToggleGroupCollapse}
                       advancedMixLocked={isAdvancedMixSession}
                       localSessionMode={isLocalRecordingSession}
                       canSoloTracks={canSoloTracksInProject}
+                      canEditTrack={caps.canEditTrack}
+                      explainTrackAccess={caps.explainTrackAccess}
+                      canCreateTrackUnder={caps.canCreateTrackUnder}
+                      canManageGroups={caps.canManageGroups}
+                      canChangeTrackRoles={caps.canChangeTrackRoles}
                       advancedMixFocus={isAdvancedMixSession ? advancedMixFocus : null}
                       getAdvancedMixFocusMode={getAdvancedMixFocusModeForTrack}
                       onToggleAdvancedTrackFocus={isAdvancedMixSession ? handleToggleAdvancedTrackFocus : null}
@@ -4240,7 +4496,11 @@ function Editor({
                         <div className="text-center text-gray-500">
                           <Download size={48} className="mx-auto mb-4 opacity-50" />
                           <p className="text-lg mb-2">No tracks yet</p>
-                          <p className="text-sm">Click Import to add audio files</p>
+                          <p className="text-sm">
+                            {caps.canCreateTracks
+                              ? 'Click Import to add audio files'
+                              : 'You do not have permission to add tracks to this project'}
+                          </p>
                         </div>
                       </div>
                     )}
@@ -4256,6 +4516,9 @@ function Editor({
         <FileImport
           project={project}
           onImport={handleFileImport}
+          canCreateTracks={caps.canCreateTracks}
+          canEditTrack={caps.canEditTrack}
+          canCreateTrackForDestination={canCreateTrackForImportDestination}
           manualChoirPartsEnabled={Boolean(project?.autoPan?.manualChoirParts)}
           onClose={() => {
             if (hasNoTracks && project.projectId) {
@@ -4266,12 +4529,13 @@ function Editor({
         />
       )}
 
-      {showExportDialog && !isAdvancedMixSession && !isLocalRecordingSession && (
+      {showExportDialog && !isAdvancedMixSession && !isLocalRecordingSession && caps.canExport && (
         <ExportDialog
           project={project}
           audioBuffers={audioManager.mediaCache}
           mediaMap={mediaMap}
           onUpdateExportSettings={handleUpdateExportSettings}
+          canEditExportSettings={caps.canEditProjectSettings}
           onClose={() => setShowExportDialog(false)}
         />
       )}
@@ -4324,20 +4588,22 @@ function Editor({
                 >
                   Playback and Devices
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setSettingsTab('project')}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                    settingsTab === 'project'
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
-                >
-                  Project
-                </button>
+                {caps.canEditProjectSettings ? (
+                  <button
+                    type="button"
+                    onClick={() => setSettingsTab('project')}
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                      settingsTab === 'project'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                    }`}
+                  >
+                    Project
+                  </button>
+                ) : null}
               </div>
 
-              {settingsTab === 'playback' ? (
+              {settingsTab === 'playback' || !caps.canEditProjectSettings ? (
                 <PlaybackDevicesSettingsPanel
                   audioSettings={audioSettings}
                   setAudioSettings={setAudioSettings}

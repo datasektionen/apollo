@@ -88,6 +88,8 @@ function Timeline({
   onDeleteTrackShortcut = null,
   advancedMixLocked = false,
   canSoloTracks = true,
+  canEditTrack = null,
+  explainTrackAccess = null,
   sharedVerticalScroll = false,
   missingMediaBlobIds = null,
   onReloadMissingMedia = null,
@@ -126,6 +128,16 @@ function Timeline({
   const animatedClipLayoutByIdRef = useRef({});
   const clipAnimationFrameRef = useRef(null);
   const selectedClipIdSet = useMemo(() => new Set(selectedClipIds), [selectedClipIds]);
+  // Per-track permission gate (hosted projects). Clips on locked tracks can be
+  // selected and inspected but not dragged, cropped or gain-edited.
+  const isTrackEditable = useCallback(
+    (trackId) => (typeof canEditTrack === 'function' ? Boolean(canEditTrack(trackId)) : true),
+    [canEditTrack]
+  );
+  const trackAccessTitle = useCallback((trackId) => (
+    (typeof explainTrackAccess === 'function' && explainTrackAccess(trackId))
+      || 'You do not have permission to edit this track'
+  ), [explainTrackAccess]);
 
   const updateLoop = useCallback((updater, description) => {
     if (typeof onUpdateLoop === 'function') {
@@ -940,6 +952,10 @@ function Timeline({
       selectClickedClip();
       return;
     }
+    if (!isTrackEditable(track.id)) {
+      selectClickedClip();
+      return;
+    }
 
     const rect = e.currentTarget.getBoundingClientRect();
     const offsetX = e.clientX - rect.left;
@@ -1674,6 +1690,10 @@ function Timeline({
         e.preventDefault();
         const track = project.tracks.find(t => t.id === selectedTrackId);
         if (!track) return;
+        if (!isTrackEditable(selectedTrackId)) {
+          playErrorBeep();
+          return;
+        }
         onSelectTrack(selectedTrackId);
         updateProject((proj) => ({
           ...proj,
@@ -1686,8 +1706,8 @@ function Timeline({
 
       if (e.code === 'KeyS' && hasTrackSelection) {
         e.preventDefault();
-        if (!canSoloTracks) {
-          window.alert('Solo requires permission to edit every track in the project.');
+        if (!canSoloTracks || !isTrackEditable(selectedTrackId)) {
+          playErrorBeep();
           return;
         }
         const track = project.tracks.find(t => t.id === selectedTrackId);
@@ -1943,6 +1963,7 @@ function Timeline({
     deleteClipShortcutEnabled,
     advancedMixLocked,
     canSoloTracks,
+    isTrackEditable,
     selectedClipId,
     selectedClipIds,
     selectedTrackId,
@@ -2626,7 +2647,11 @@ function Timeline({
                         <div
                           key={clip.id}
                           data-clip-id={clip.id}
-                          title={missingMedia ? 'Missing media — click to reload' : undefined}
+                          title={
+                            missingMedia
+                              ? 'Missing media — click to reload'
+                              : (!advancedMixLocked && !isTrackEditable(track.id) ? trackAccessTitle(track.id) : undefined)
+                          }
                           className={`absolute rounded overflow-hidden ${
                             selectedClipIds.includes(clip.id)
                               ? (missingMedia ? 'ring-2 ring-red-500' : 'ring-2 ring-blue-500')
@@ -2647,7 +2672,7 @@ function Timeline({
                           onContextMenu={handleClipRightClick}
                         >
                           <div
-                            className={`absolute inset-0 ${advancedMixLocked ? 'cursor-default' : 'cursor-move'}`}
+                            className={`absolute inset-0 ${advancedMixLocked || !isTrackEditable(track.id) ? 'cursor-default' : 'cursor-move'}`}
                             style={{
                               pointerEvents: 'none',
                               zIndex: 1,
@@ -2688,7 +2713,7 @@ function Timeline({
                             </div>
                           )}
 
-                          {!advancedMixLocked && (
+                          {!advancedMixLocked && isTrackEditable(track.id) && (
                           <>
                             <div
                               className="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize group"
