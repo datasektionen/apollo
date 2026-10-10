@@ -65,9 +65,8 @@ describe('GrantRulesTable', () => {
     expect(view.container.textContent).toContain('Les Misérables');
     expect(view.container.textContent).toContain('Choir');
     expect(view.container.textContent).toContain('Inherited from Singers');
-    const buttons = [...view.container.querySelectorAll('button')].map((button) => button.textContent);
-    expect(buttons.filter((label) => label === 'Edit')).toHaveLength(1);
-    expect(buttons.filter((label) => label === 'Remove')).toHaveLength(1);
+    expect(view.container.querySelectorAll('button[aria-label="Edit"]')).toHaveLength(1);
+    expect(view.container.querySelectorAll('button[aria-label="Delete"]')).toHaveLength(1);
     view.unmount();
   });
 
@@ -76,7 +75,7 @@ describe('GrantRulesTable', () => {
     const view = render(
       <GrantRulesTable grants={grants} catalog={catalog} canEdit onChange={onChange} onRemove={vi.fn()} />
     );
-    const edit = [...view.container.querySelectorAll('button')].find((button) => button.textContent === 'Edit');
+    const edit = view.container.querySelector('button[aria-label="Edit"]');
     await act(async () => {
       edit.click();
     });

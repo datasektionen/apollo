@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   ACCESS_TYPE_COLUMNS,
   ACCESS_TYPE_ROWS,
@@ -11,8 +11,24 @@ import {
 import { useGrantForm } from './useGrantForm';
 
 const selectClass = 'w-full min-w-0 rounded border border-gray-700 bg-gray-900 px-1.5 py-1.5 text-xs text-gray-100 disabled:cursor-not-allowed disabled:text-gray-500';
-const actionClass = 'rounded-lg bg-gray-800 px-2 py-1 text-xs font-semibold text-gray-100 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50';
 const COLUMN_COUNT = SCOPE_COLUMNS.length + 2;
+
+function IconAction({ label, disabled, onClick, tone = 'default', children }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50 ${
+        tone === 'danger' ? 'hover:border-red-800 hover:text-red-200' : ''
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 function ScopeValue({ cell }) {
   if (cell.kind === 'na') {
@@ -168,14 +184,9 @@ function GrantEditRow({
       </td>
       <td className="px-2 py-2 align-top text-right">
         {onRemove ? (
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => onRemove(grant)}
-            className={actionClass}
-          >
-            Remove
-          </button>
+          <IconAction label="Delete" disabled={disabled} tone="danger" onClick={() => onRemove(grant)}>
+            <Trash2 size={14} />
+          </IconAction>
         ) : null}
       </td>
     </tr>
@@ -288,23 +299,13 @@ export function GrantRulesTable({
                 ))}
                 <td className="px-2 py-2 align-middle text-right">
                   {editable ? (
-                    <div className="flex flex-wrap justify-end gap-1">
-                      <button
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => setEditingId(grant.id)}
-                        className={actionClass}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => onRemove?.(grant)}
-                        className={actionClass}
-                      >
-                        Remove
-                      </button>
+                    <div className="flex flex-nowrap justify-end gap-1">
+                      <IconAction label="Edit" disabled={disabled} onClick={() => setEditingId(grant.id)}>
+                        <Pencil size={14} />
+                      </IconAction>
+                      <IconAction label="Delete" disabled={disabled} tone="danger" onClick={() => onRemove?.(grant)}>
+                        <Trash2 size={14} />
+                      </IconAction>
                     </div>
                   ) : null}
                 </td>

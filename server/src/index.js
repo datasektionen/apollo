@@ -56,6 +56,11 @@ import {
 import { choosePreferredOrigin, getRequestOrigin } from './requestOrigin.js';
 import { getAppSettings, saveAppSettings } from './appSettings.js';
 import {
+  detachArtistFromCredits,
+  detachArtistFromSnapshot,
+  detachArtistRefs,
+} from './artistCleanup.js';
+import {
   deleteUserAccount,
   findOrCreateOidcUser,
   findUserById,
@@ -1984,6 +1989,126 @@ app.patch('/api/admin/artists/music-groups/:id', requireAuth, requireAdmin, asyn
     res.status(500).json({ error: 'Failed to update music group' });
   }
 });
+
+async function detachArtistFromStoredRecords(type, artistId, actorUserId) {
+  const shows = await pool.query(
+    `SELECT id, producers
+     FROM shows`
+  );
+  for (const show of shows.rows) {
+    const detached = detachArtistRefs(show.producers, type, artistId);
+    if (!detached.changed) continue;
+    await pool.query(
+      `UPDATE shows
+       SET producers = $2::jsonb
+       WHERE id = $1`,
+      [show.id, JSON.stringify(detached.refs)]
+    );
+  }
+
+  const projects = await pool.query(
+    `SELECT p.id,
+            p.credits_json AS credits,
+            ph.latest_snapshot_json AS snapshot
+     FROM projects p
+     LEFT JOIN project_heads ph
+       ON ph.project_id = p.id`
+  );
+  for (const project of projects.rows) {
+    const snapshot = project.snapshot && typeof project.snapshot === 'object' ? project.snapshot : null;
+    const storedCredits = detachArtistFromCredits(project.credits, type, artistId);
+    if (!snapshot) {
+      if (storedCredits.changed) {
+        await pool.query(
+          `UPDATE projects
+           SET credits_json = $2::jsonb
+           WHERE id = $1`,
+          [project.id, JSON.stringify(storedCredits.credits)]
+        );
+      }
+      continue;
+    }
+
+    const detached = detachArtistFromSnapshot(snapshot, type, artistId);
+    let nextSnapshot = detached.snapshot;
+    let changed = detached.changed;
+    if (storedCredits.changed) {
+      nextSnapshot = {
+        ...nextSnapshot,
+        credits: chooseStoredProjectCredits(storedCredits.credits, nextSnapshot.credits),
+      };
+      changed = true;
+    }
+    if (!changed) continue;
+
+    const result = await appendProjectOp({
+      projectId: project.id,
+      userId: actorUserId,
+      clientOpId: null,
+      op: {
+        type: 'project.replace',
+        project: nextSnapshot,
+      },
+    });
+    broadcastToProject(project.id, 'op.broadcast', {
+      projectId: project.id,
+      serverSeq: result.serverSeq,
+      clientOpId: null,
+      op: result.op,
+      actor: {
+        userId: actorUserId,
+      },
+    });
+  }
+}
+
+async function deleteAdminArtistRecord(kind, artistId, actorUserId) {
+  if (kind === 'group') {
+    const existing = await pool.query(`SELECT id FROM music_groups WHERE id = $1`, [artistId]);
+    if (existing.rowCount === 0) return false;
+    await detachArtistFromStoredRecords('group', artistId, actorUserId);
+    await pool.query(`DELETE FROM music_groups WHERE id = $1`, [artistId]);
+    return true;
+  }
+  if (kind === 'guest') {
+    const existing = await pool.query(`SELECT id FROM guest_artists WHERE id = $1`, [artistId]);
+    if (existing.rowCount === 0) return false;
+    await detachArtistFromStoredRecords('guest', artistId, actorUserId);
+    await pool.query(`DELETE FROM guest_artists WHERE id = $1`, [artistId]);
+    return true;
+  }
+  const existing = await pool.query(`SELECT id FROM users WHERE id = $1`, [artistId]);
+  if (existing.rowCount === 0) return false;
+  await detachArtistFromStoredRecords('user', artistId, actorUserId);
+  await pool.query(
+    `UPDATE users
+     SET artist_description = NULL,
+         updated_at = NOW()
+     WHERE id = $1`,
+    [artistId]
+  );
+  return true;
+}
+
+function handleDeleteAdminArtist(kind) {
+  return async (req, res) => {
+    try {
+      const deleted = await deleteAdminArtistRecord(kind, req.params.id, req.user.id);
+      if (!deleted) {
+        res.status(404).json({ error: 'Artist not found' });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Failed to delete artist' });
+    }
+  };
+}
+
+app.delete('/api/admin/artists/users/:id', requireAuth, requireAdmin, handleDeleteAdminArtist('user'));
+app.delete('/api/admin/artists/music-groups/:id', requireAuth, requireAdmin, handleDeleteAdminArtist('group'));
+app.delete('/api/admin/artists/guest-artists/:id', requireAuth, requireAdmin, handleDeleteAdminArtist('guest'));
 
 app.patch('/api/admin/artists/guest-artists/:id', requireAuth, requireAdmin, async (req, res) => {
   try {

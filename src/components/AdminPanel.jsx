@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CircleUserRound, MoreHorizontal, Plus, Search } from 'lucide-react';
+import { ArrowLeft, CircleUserRound, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { BrandWordmark } from './BrandLogo';
 import AdminShowsPanel from './AdminShowsPanel';
 import AdminStoragePanel from './AdminStoragePanel';
@@ -30,6 +30,7 @@ import {
   getRbacCatalog,
   getRbacRole,
   getUserAccessDetail,
+  deleteAdminArtist,
   listAdminArtists,
   listAdminStorage,
   listRbacRoles,
@@ -696,6 +697,18 @@ export default function AdminPanel({
     }, 'Failed to update artist.');
   };
 
+  const handleDeleteArtist = async (artist) => {
+    const message = artist.kind === 'user'
+      ? `Delete "${artist.name}" from artists? The user account will stay.`
+      : `Delete "${artist.name}"?`;
+    if (!window.confirm(message)) return;
+    await runAction(async () => {
+      await deleteAdminArtist(artist.kind, artist.id, session);
+      const nextArtists = await listAdminArtists(session);
+      setArtists(nextArtists || { users: [], groups: [], guests: [] });
+    }, 'Failed to delete artist.');
+  };
+
   const handleSaveRoleOidcLink = async () => {
     if (!selectedRole || !oidcClaimValueDraft.trim()) return;
     await runAction(async () => {
@@ -1132,7 +1145,7 @@ export default function AdminPanel({
               ) : tab === 'artists' ? (
                 <div className="mx-auto max-w-6xl space-y-5">
                   <div className="overflow-hidden rounded-xl border border-gray-800 bg-gray-950/50">
-                    <div className="grid grid-cols-[1fr,150px,110px] gap-4 border-b border-gray-800 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    <div className="grid grid-cols-[1fr,150px,80px] gap-4 border-b border-gray-800 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
                       <span>Artist</span>
                       <span>Type</span>
                       <span />
@@ -1140,7 +1153,7 @@ export default function AdminPanel({
                     {allArtists.map((artist) => (
                       <div
                         key={`${artist.kind}:${artist.id}`}
-                        className="grid grid-cols-[1fr,150px,110px] items-center gap-4 border-b border-gray-800 px-4 py-4 last:border-b-0 hover:bg-gray-900/70"
+                        className="grid grid-cols-[1fr,150px,80px] items-center gap-4 border-b border-gray-800 px-4 py-4 last:border-b-0 hover:bg-gray-900/70"
                       >
                         <div className="min-w-0">
                           <div className="truncate font-semibold text-white">{artist.name}</div>
@@ -1155,14 +1168,26 @@ export default function AdminPanel({
                             ? artist.groupType
                             : artist.kindLabel}
                         </div>
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-1">
                           <button
                             type="button"
                             disabled={saving}
+                            title="Edit"
+                            aria-label={`Edit ${artist.name}`}
                             onClick={() => handleEditArtistDescription(artist)}
-                            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-gray-800 disabled:opacity-50"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            Edit
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={saving}
+                            title="Delete"
+                            aria-label={`Delete ${artist.name}`}
+                            onClick={() => handleDeleteArtist(artist)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-200 hover:border-red-800 hover:bg-gray-700 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </div>

@@ -430,15 +430,25 @@ export async function deleteAdminQuarantinedMedia(session) {
   }, session);
 }
 
-export async function updateAdminArtist(kind, artistId, updates, session) {
+function adminArtistPath(kind, artistId) {
   const pathKind = kind === 'group'
     ? 'music-groups'
     : (kind === 'guest' ? 'guest-artists' : 'users');
-  const payload = await apiFetch(`/api/admin/artists/${pathKind}/${encodeURIComponent(artistId)}`, {
+  return `/api/admin/artists/${pathKind}/${encodeURIComponent(artistId)}`;
+}
+
+export async function updateAdminArtist(kind, artistId, updates, session) {
+  const payload = await apiFetch(adminArtistPath(kind, artistId), {
     method: 'PATCH',
     body: updates,
   }, session);
   return payload.artist || payload.group || payload.guest || null;
+}
+
+export async function deleteAdminArtist(kind, artistId, session) {
+  return await apiFetch(adminArtistPath(kind, artistId), {
+    method: 'DELETE',
+  }, session);
 }
 
 export async function createUser(user, session) {
