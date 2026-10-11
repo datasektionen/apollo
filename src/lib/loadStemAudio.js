@@ -5,7 +5,11 @@ import {
   persistAudioBufferAsLocalPcm,
 } from './mediaEncoding';
 import {
+  beginPlayStemProgress,
+  getLoadProgress,
+  isPlayProgressBars,
   logLoadProgress,
+  reportPlayStemEvent,
   shortLoadId,
   updateLoadProgress,
   withLoadStep,
@@ -175,6 +179,9 @@ export async function ensureStemInMediaCache({
   needMediaEntry = false,
   onPersistFailed = null,
   deferPersist = false,
+  progressMode = null,
+  progressSessionId = null,
+  expectedSource = null,
 } = {}) {
   throwIfCancelled(isCancelled);
 
@@ -246,34 +253,67 @@ export async function ensureStemInMediaCache({
         defer: deferPersist,
       });
     }
+    if (progressMode === 'split') {
+      reportPlayStemEvent('idb-loaded', progressSessionId);
+    } else if (progressMode === 'combined') {
+      reportPlayStemEvent('settled', progressSessionId);
+    }
     return { source: 'idb', audioBuffer, media };
   } catch (localError) {
     if (localError?.name === 'StaleAudioLoad') throw localError;
     if (!canDownload) {
       throw localError;
     }
+    if (progressMode === 'split' && expectedSource === 'idb') {
+      reportPlayStemEvent('idb-missed', progressSessionId);
+    }
 
-    const remoteBlob = await withLoadStep(
-      `Download compressed file (${shortLoadId(blobId)})`,
-      async () => download(blobId),
-      {
-        depth: 1,
-        bytesFrom: (blob) => blob?.size,
-      }
-    );
-    throwIfCancelled(isCancelled);
+    if (progressMode === 'split') reportPlayStemEvent('download-start', progressSessionId);
+    let remoteBlob;
+    try {
+      remoteBlob = await withLoadStep(
+        `Download compressed file (${shortLoadId(blobId)})`,
+        async () => download(blobId),
+        {
+          depth: 1,
+          bytesFrom: (blob) => blob?.size,
+        }
+      );
+      throwIfCancelled(isCancelled);
+    } catch (error) {
+      if (progressMode === 'split') reportPlayStemEvent('download-stop', progressSessionId);
+      throw error;
+    }
+    if (progressMode === 'split') {
+      reportPlayStemEvent('fetched', progressSessionId);
+      reportPlayStemEvent('convert-start', progressSessionId);
+    }
 
-    const audioBuffer = await withLoadStep(
-      `Decode compressed audio for RAM (${shortLoadId(blobId)})`,
-      async () => decodeRemoteBlobToAudioBuffer({
-        blobId,
-        remoteBlob,
-        decodeAudioFile,
-      }),
-      { depth: 1 }
-    );
-    throwIfCancelled(isCancelled);
+    let audioBuffer;
+    try {
+      audioBuffer = await withLoadStep(
+        `Decode compressed audio for RAM (${shortLoadId(blobId)})`,
+        async () => decodeRemoteBlobToAudioBuffer({
+          blobId,
+          remoteBlob,
+          decodeAudioFile,
+        }),
+        { depth: 1 }
+      );
+      throwIfCancelled(isCancelled);
+    } catch (error) {
+      if (progressMode === 'split') reportPlayStemEvent('convert-stop', progressSessionId);
+      throw error;
+    }
+    if (progressMode === 'split') {
+      reportPlayStemEvent('converted', progressSessionId);
+    } else if (progressMode === 'combined') {
+      reportPlayStemEvent('settled', progressSessionId);
+    }
     mediaCache.set(blobId, audioBuffer);
+    if (progressMode === 'split') {
+      reportPlayStemEvent('server-cached', progressSessionId);
+    }
 
     scheduleLocalPcmPersist({
       blobId,
@@ -292,26 +332,142 @@ export async function ensureStemInMediaCache({
   }
 }
 
+async function classifyStemSources({
+  ids,
+  mediaCache,
+  probeStoredBlobIds,
+  isCancelled,
+}) {
+  const cached = [];
+  const pending = [];
+  ids.forEach((blobId) => {
+    if (mediaCache?.has?.(blobId)) cached.push(blobId);
+    else pending.push(blobId);
+  });
+
+  const sourceById = new Map();
+  cached.forEach((blobId) => sourceById.set(blobId, 'ram'));
+  const baseCounts = {
+    total: ids.length,
+    cached: cached.length,
+  };
+
+  if (pending.length === 0) {
+    return {
+      mode: 'split',
+      sourceById,
+      counts: {
+        ...baseCounts,
+        classified: true,
+        idbTotal: 0,
+        fetchTotal: 0,
+      },
+    };
+  }
+
+  let storedIds = null;
+  if (typeof probeStoredBlobIds === 'function') {
+    try {
+      const stored = await probeStoredBlobIds(pending);
+      throwIfCancelled(isCancelled);
+      storedIds = new Set(Array.isArray(stored) ? stored : []);
+    } catch (error) {
+      if (error?.name === 'StaleAudioLoad') throw error;
+      storedIds = null;
+    }
+  }
+
+  if (!storedIds) {
+    pending.forEach((blobId) => sourceById.set(blobId, 'pending'));
+    return {
+      mode: 'combined',
+      sourceById,
+      counts: {
+        ...baseCounts,
+        classified: false,
+        idbTotal: 0,
+        fetchTotal: 0,
+      },
+    };
+  }
+
+  let idbTotal = 0;
+  let fetchTotal = 0;
+  pending.forEach((blobId) => {
+    if (storedIds.has(blobId)) {
+      sourceById.set(blobId, 'idb');
+      idbTotal += 1;
+    } else {
+      sourceById.set(blobId, 'fetch');
+      fetchTotal += 1;
+    }
+  });
+
+  return {
+    mode: 'split',
+    sourceById,
+    counts: {
+      ...baseCounts,
+      classified: true,
+      idbTotal,
+      fetchTotal,
+    },
+  };
+}
+
 export async function loadStemsIntoMediaCache(blobIds, options = {}) {
   const ids = Array.isArray(blobIds) ? blobIds : [];
   const {
     isCancelled = null,
     onStemComplete = null,
     onStemError = null,
+    probeStoredBlobIds = null,
+    mediaCache = null,
   } = options;
 
-  updateLoadProgress({
-    phase: 'Audio',
-    stemIndex: 0,
-    stemTotal: ids.length,
-    current: ids.length ? `Loading ${ids.length} stems…` : 'No stems to load',
-  });
+  const progressSessionId = getLoadProgress()?.id ?? null;
+  const trackPlayBars = isPlayProgressBars();
+  let progressMode = null;
+  let sourceById = null;
 
   let completed = 0;
   const audioBuffers = new Map();
   const mediaEntries = new Map();
 
+  function noteStemFinished(blobId) {
+    completed += 1;
+    if (!progressMode) {
+      updateLoadProgress({
+        stemIndex: completed,
+        stemTotal: ids.length,
+        current: `Loaded ${completed}/${ids.length} stems`,
+      });
+    }
+    onStemComplete?.(completed, ids.length, blobId);
+  }
+
   try {
+    if (trackPlayBars) {
+      const plan = await classifyStemSources({
+        ids,
+        mediaCache,
+        probeStoredBlobIds,
+        isCancelled,
+      });
+      if (getLoadProgress()?.id === progressSessionId) {
+        beginPlayStemProgress(plan.counts, progressSessionId);
+        progressMode = plan.mode;
+        sourceById = plan.sourceById;
+      }
+    } else {
+      updateLoadProgress({
+        phase: 'Audio',
+        stemIndex: 0,
+        stemTotal: ids.length,
+        current: ids.length ? `Loading ${ids.length} stems…` : 'No stems to load',
+      });
+    }
+
     await mapPool(ids, async (blobId) => {
       throwIfCancelled(isCancelled);
       let result = null;
@@ -321,18 +477,15 @@ export async function loadStemsIntoMediaCache(blobIds, options = {}) {
           blobId,
           isCancelled,
           deferPersist: true,
+          progressMode,
+          progressSessionId,
+          expectedSource: sourceById?.get(blobId) || null,
         });
       } catch (error) {
         if (error?.name === 'StaleAudioLoad') throw error;
         if (typeof onStemError === 'function') {
           onStemError(error, blobId);
-          completed += 1;
-          updateLoadProgress({
-            stemIndex: completed,
-            stemTotal: ids.length,
-            current: `Loaded ${completed}/${ids.length} stems`,
-          });
-          onStemComplete?.(completed, ids.length, blobId);
+          noteStemFinished(blobId);
           return null;
         }
         throw error;
@@ -343,13 +496,7 @@ export async function loadStemsIntoMediaCache(blobIds, options = {}) {
       if (result?.media) {
         mediaEntries.set(blobId, result.media);
       }
-      completed += 1;
-      updateLoadProgress({
-        stemIndex: completed,
-        stemTotal: ids.length,
-        current: `Loaded ${completed}/${ids.length} stems`,
-      });
-      onStemComplete?.(completed, ids.length, blobId);
+      noteStemFinished(blobId);
       return result;
     }, {
       concurrency: options.concurrency,

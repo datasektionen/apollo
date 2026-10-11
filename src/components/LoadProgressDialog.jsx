@@ -6,6 +6,7 @@ import {
   formatLoadDuration,
   formatLoadProgressText,
   loadLogLevelPrefix,
+  readServerPipeline,
   subscribeLoadProgress,
 } from '../lib/loadProgress';
 
@@ -15,6 +16,165 @@ function levelClass(level) {
   if (level === 'warn') return 'text-amber-300';
   if (level === 'start') return 'text-sky-300';
   return 'text-gray-300';
+}
+
+function barPercent(done, total) {
+  const safeTotal = Number(total) || 0;
+  if (safeTotal <= 0) return 0;
+  return Math.max(0, Math.min(100, (Number(done) / safeTotal) * 100));
+}
+
+function blobsInCache(stems) {
+  if (!stems?.classified) return (stems?.cached || 0) + (stems?.pendingLoaded || 0);
+  return (stems.cached || 0) + (stems.idbLoaded || 0) + (stems.serverCached || 0);
+}
+
+function ProgressCount({
+  label,
+  done,
+  total,
+  tone = 'ready',
+  size = 'sub',
+}) {
+  const percent = barPercent(done, total);
+  const barHeight = size === 'main' ? 'h-2.5' : 'h-1.5';
+  const fill = tone === 'step' ? 'bg-sky-400' : 'bg-green-500';
+  const labelClass = size === 'main'
+    ? 'text-sm font-medium text-gray-100'
+    : 'text-sm text-gray-300';
+  return (
+    <div>
+      <div className={`mb-1.5 flex items-center justify-between ${labelClass}`}>
+        <span>{label}</span>
+        <span>{done}/{total}</span>
+      </div>
+      <div
+        className={`${barHeight} w-full overflow-hidden rounded border border-gray-700 bg-gray-800`}
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={done}
+      >
+        <div className={`h-full ${fill}`} style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function PlayLoadBars({ state, now }) {
+  const elapsedMs = (state.endedAt || now) - state.startedAt;
+  const stems = state.stems || {};
+  const inCache = blobsInCache(stems);
+  const pipeline = readServerPipeline(stems, now);
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4"
+      onClick={() => dismissLoadProgress()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="play-progress-title"
+        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 text-white"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-gray-800 px-5 py-4">
+          <div className="min-w-0">
+            <div className="text-xs uppercase tracking-wide text-gray-500">
+              {state.status === 'error'
+                ? "Couldn't load audio"
+                : state.status === 'done'
+                  ? 'Audio ready'
+                  : 'Loading audio'}
+            </div>
+            <h2 id="play-progress-title" className="mt-1 truncate text-lg font-semibold">
+              {state.title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
+            onClick={() => dismissLoadProgress()}
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          <ProgressCount
+            label="Audio sources"
+            done={inCache}
+            total={stems.total || 0}
+            size="main"
+          />
+          <div className="space-y-3 border-l border-gray-800 pl-3">
+            {stems.cached > 0 ? (
+              <ProgressCount
+                label="Already loaded"
+                done={stems.cached}
+                total={stems.cached}
+              />
+            ) : null}
+            {stems.classified && stems.idbTotal > 0 ? (
+              <ProgressCount
+                label="Loaded from local database"
+                done={stems.idbLoaded || 0}
+                total={stems.idbTotal}
+              />
+            ) : null}
+            {stems.classified && stems.fetchTotal > 0 ? (
+              <div className="space-y-3">
+                <ProgressCount
+                  label="Loaded from server"
+                  done={stems.serverCached || 0}
+                  total={stems.fetchTotal}
+                />
+                <div className="space-y-3 border-l border-gray-800 pl-3">
+                  <ProgressCount
+                    label="Downloaded"
+                    done={stems.fetched || 0}
+                    total={stems.fetchTotal}
+                    tone="step"
+                  />
+                  <ProgressCount
+                    label="Converted"
+                    done={stems.converted || 0}
+                    total={stems.fetchTotal}
+                    tone="step"
+                  />
+                  {pipeline ? (
+                    <p className="text-xs text-gray-500">
+                      Download busy {formatLoadDuration(pipeline.downloadBusyMs)}
+                      {' · '}
+                      Convert busy {formatLoadDuration(pipeline.convertBusyMs)}
+                      {' · '}
+                      Convert idle {formatLoadDuration(pipeline.convertIdleMs)}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            {!stems.classified && stems.pendingTotal > 0 ? (
+              <ProgressCount
+                label="Loading"
+                done={stems.pendingLoaded || 0}
+                total={stems.pendingTotal}
+              />
+            ) : null}
+          </div>
+          {state.error ? (
+            <p className="text-sm text-red-300">{state.error}</p>
+          ) : null}
+          <div className="text-xs text-gray-400">
+            Elapsed {formatLoadDuration(elapsedMs)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function LoadProgressDialog() {
@@ -69,6 +229,11 @@ export default function LoadProgressDialog() {
 
   if (!state?.visible) return null;
 
+  if (state.presentation === 'bars') {
+    return <PlayLoadBars state={state} now={now} />;
+  }
+
+  // Technical step log. Used when LOAD_PROGRESS_VERBOSE_LOG is enabled.
   const elapsedMs = (state.endedAt || now) - state.startedAt;
   const running = state.status === 'running';
   const stemLabel = state.stemTotal > 0

@@ -1,9 +1,85 @@
+// Dead path: play and DAW open show progress bars while this stays false.
+// Set it to true to restore the technical step log.
+export const LOAD_PROGRESS_VERBOSE_LOG = false;
+
 const listeners = new Set();
 
 let session = null;
 
+function createStemProgress() {
+  return {
+    total: 0,
+    cached: 0,
+    classified: true,
+    idbTotal: 0,
+    idbLoaded: 0,
+    fetchTotal: 0,
+    fetched: 0,
+    convertTotal: 0,
+    converted: 0,
+    pendingTotal: 0,
+    pendingLoaded: 0,
+    serverCached: 0,
+    activeDownloads: 0,
+    activeConverts: 0,
+    downloadBusyMs: 0,
+    convertBusyMs: 0,
+    convertIdleMs: 0,
+    pipelineMarkAt: null,
+  };
+}
+
+function flushServerPipeline(stems, now) {
+  if (!stems || !(stems.fetchTotal > 0)) return;
+  if (stems.pipelineMarkAt == null) {
+    stems.pipelineMarkAt = now;
+    return;
+  }
+  const dt = Math.max(0, now - stems.pipelineMarkAt);
+  stems.pipelineMarkAt = now;
+  const serverRemaining = stems.serverCached < stems.fetchTotal
+    || stems.activeDownloads > 0
+    || stems.activeConverts > 0;
+  if (!serverRemaining) return;
+  if (stems.activeDownloads > 0) stems.downloadBusyMs += dt;
+  if (stems.activeConverts > 0) stems.convertBusyMs += dt;
+  else if (stems.serverCached < stems.fetchTotal) stems.convertIdleMs += dt;
+}
+
+export function readServerPipeline(stems, now = nowMs()) {
+  if (!stems || !(stems.fetchTotal > 0)) return null;
+  const times = {
+    downloadBusyMs: Number(stems.downloadBusyMs) || 0,
+    convertBusyMs: Number(stems.convertBusyMs) || 0,
+    convertIdleMs: Number(stems.convertIdleMs) || 0,
+  };
+  if (stems.pipelineMarkAt == null) return times;
+  const dt = Math.max(0, now - stems.pipelineMarkAt);
+  const serverRemaining = stems.serverCached < stems.fetchTotal
+    || stems.activeDownloads > 0
+    || stems.activeConverts > 0;
+  if (!serverRemaining) return times;
+  if (stems.activeDownloads > 0) times.downloadBusyMs += dt;
+  if (stems.activeConverts > 0) times.convertBusyMs += dt;
+  else if (stems.serverCached < stems.fetchTotal) times.convertIdleMs += dt;
+  return times;
+}
+
+function isVerboseLogSession(target = session) {
+  return Boolean(target && target.status === 'running' && target.presentation !== 'bars');
+}
+
+function snapshotSession() {
+  if (!session) return null;
+  return {
+    ...session,
+    logs: session.logs.slice(),
+    stems: { ...(session.stems || {}) },
+  };
+}
+
 function emit() {
-  const snapshot = session ? { ...session, logs: session.logs.slice() } : null;
+  const snapshot = snapshotSession();
   listeners.forEach((listener) => {
     listener(snapshot);
   });
@@ -92,7 +168,7 @@ export function shortLoadId(id) {
 }
 
 export function logLoadProgress(message, extra = {}) {
-  if (!session || session.status !== 'running') return;
+  if (!isVerboseLogSession()) return;
   appendLog(extra.level || 'info', message, extra);
   if (extra.current) session.current = String(extra.current);
   emit();
@@ -133,7 +209,7 @@ export function logAudioBufferStats(audioBuffer, extra = {}) {
 
 export function subscribeLoadProgress(listener) {
   listeners.add(listener);
-  listener(session ? { ...session, logs: session.logs.slice() } : null);
+  listener(snapshotSession());
   return () => listeners.delete(listener);
 }
 
@@ -145,30 +221,139 @@ export function isLoadProgressRunning() {
   return Boolean(session && session.status === 'running' && session.visible);
 }
 
+export function isPlayProgressBars() {
+  return Boolean(session && session.status === 'running' && session.presentation === 'bars');
+}
+
 export function startLoadProgress({
   kind = 'open',
   title = 'Loading',
   detail = '',
+  verbose = false,
 } = {}) {
+  const play = kind === 'play';
+  const useVerboseLog = Boolean(verbose) || LOAD_PROGRESS_VERBOSE_LOG;
   session = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    kind: kind === 'play' ? 'play' : 'open',
+    kind: play ? 'play' : 'open',
+    presentation: useVerboseLog ? 'log' : 'bars',
     title: String(title || 'Loading'),
     detail: String(detail || ''),
     status: 'running',
-    visible: true,
+    visible: useVerboseLog,
+    revealed: useVerboseLog,
     startedAt: nowMs(),
     endedAt: null,
-    current: 'Starting…',
-    phase: kind === 'play' ? 'Play' : 'Open',
+    current: useVerboseLog ? 'Starting…' : '',
+    phase: play ? 'Play' : 'Open',
     stemIndex: 0,
     stemTotal: 0,
     error: null,
     logs: [],
+    stems: createStemProgress(),
   };
-  appendLog('info', `Started ${session.kind}: ${session.title}`);
+  if (useVerboseLog) {
+    appendLog('info', `Started ${session.kind}: ${session.title}`);
+  }
   emit();
   return session.id;
+}
+
+export function beginPlayStemProgress(counts = {}, sessionId = null) {
+  if (!isPlayProgressBars()) return;
+  if (sessionId != null && session.id !== sessionId) return;
+  const total = Math.max(0, Number(counts.total) || 0);
+  const cached = Math.max(0, Math.min(total, Number(counts.cached) || 0));
+  const classified = counts.classified !== false;
+  const idbTotal = classified ? Math.max(0, Number(counts.idbTotal) || 0) : 0;
+  const fetchTotal = classified ? Math.max(0, Number(counts.fetchTotal) || 0) : 0;
+  session.stems = {
+    total,
+    cached,
+    classified,
+    idbTotal,
+    idbLoaded: 0,
+    fetchTotal,
+    fetched: 0,
+    convertTotal: fetchTotal,
+    converted: 0,
+    pendingTotal: classified ? 0 : Math.max(0, total - cached),
+    pendingLoaded: 0,
+    serverCached: 0,
+    activeDownloads: 0,
+    activeConverts: 0,
+    downloadBusyMs: 0,
+    convertBusyMs: 0,
+    convertIdleMs: 0,
+    pipelineMarkAt: fetchTotal > 0 ? nowMs() : null,
+  };
+  const needsDialog = cached < total;
+  session.revealed = needsDialog;
+  session.visible = needsDialog;
+  session.current = needsDialog ? 'Loading audio…' : 'Ready';
+  emit();
+}
+
+const PLAY_STEM_EVENTS = {
+  'idb-loaded': ['idbLoaded', 'idbTotal'],
+  fetched: ['fetched', 'fetchTotal'],
+  converted: ['converted', 'convertTotal'],
+  settled: ['pendingLoaded', 'pendingTotal'],
+};
+
+export function reportPlayStemEvent(event, sessionId = null, now = nowMs()) {
+  if (!isPlayProgressBars()) return;
+  if (sessionId != null && session.id !== sessionId) return;
+  const stems = session.stems;
+  if (!stems) return;
+  flushServerPipeline(stems, now);
+  if (event === 'idb-missed') {
+    if (stems.idbTotal <= 0) return;
+    stems.idbTotal -= 1;
+    stems.fetchTotal += 1;
+    stems.convertTotal += 1;
+    if (stems.fetchTotal > 0 && stems.pipelineMarkAt == null) stems.pipelineMarkAt = now;
+    emit();
+    return;
+  }
+  if (event === 'download-start') {
+    stems.activeDownloads += 1;
+    emit();
+    return;
+  }
+  if (event === 'download-stop') {
+    stems.activeDownloads = Math.max(0, stems.activeDownloads - 1);
+    emit();
+    return;
+  }
+  if (event === 'convert-start') {
+    stems.activeConverts += 1;
+    emit();
+    return;
+  }
+  if (event === 'convert-stop') {
+    stems.activeConverts = Math.max(0, stems.activeConverts - 1);
+    emit();
+    return;
+  }
+  if (event === 'fetched') {
+    stems.activeDownloads = Math.max(0, stems.activeDownloads - 1);
+  }
+  if (event === 'converted') {
+    stems.activeConverts = Math.max(0, stems.activeConverts - 1);
+  }
+  if (event === 'server-cached') {
+    if (stems.serverCached >= stems.fetchTotal) return;
+    stems.serverCached += 1;
+    emit();
+    return;
+  }
+  const spec = PLAY_STEM_EVENTS[event];
+  if (!spec) return;
+  const [doneKey, totalKey] = spec;
+  if (stems[doneKey] >= stems[totalKey]) return;
+  stems[doneKey] += 1;
+  emit();
 }
 
 export function updateLoadProgress(patch = {}) {
@@ -197,7 +382,7 @@ function appendLog(level, message, extra = {}) {
 
 export async function withLoadStep(label, fn, extra = {}) {
   const depth = Number.isFinite(Number(extra.depth)) ? Number(extra.depth) : 0;
-  if (!session || session.status !== 'running') {
+  if (!isVerboseLogSession()) {
     return fn();
   }
 
@@ -232,16 +417,31 @@ export function finishLoadProgress(error = null, sessionId = null) {
   if (sessionId != null && session.id !== sessionId) return;
   const durationMs = nowMs() - session.startedAt;
   session.endedAt = nowMs();
+  const bars = session.presentation === 'bars';
+  if (bars && session.stems) {
+    flushServerPipeline(session.stems, session.endedAt);
+    session.stems.pipelineMarkAt = null;
+    session.stems.activeDownloads = 0;
+    session.stems.activeConverts = 0;
+  }
   if (error) {
     session.error = error?.message || String(error);
     session.current = 'Failed';
-    appendLog('error', `Failed after ${formatLoadDuration(durationMs)}: ${session.error}`);
     session.status = 'error';
+    if (bars) {
+      session.visible = Boolean(session.revealed);
+    } else {
+      appendLog('error', `Failed after ${formatLoadDuration(durationMs)}: ${session.error}`);
+    }
   } else {
     session.error = null;
     session.current = 'Done';
-    appendLog('ok', `Finished in ${formatLoadDuration(durationMs)}`, { durationMs });
     session.status = 'done';
+    if (bars) {
+      session.visible = Boolean(session.revealed);
+    } else {
+      appendLog('ok', `Finished in ${formatLoadDuration(durationMs)}`, { durationMs });
+    }
   }
   emit();
 }

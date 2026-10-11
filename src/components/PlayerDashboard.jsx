@@ -64,7 +64,7 @@ import {
   resolvePracticeRealtimeTrackMix,
 } from '../lib/exportEngine';
 import { audioManager } from '../lib/audioManager';
-import { getMediaBlob, storeMediaBlob } from '../lib/db';
+import { getMediaBlob, listStoredMediaBlobIds, storeMediaBlob } from '../lib/db';
 import { loadStemsIntoMediaCache, createStaleAudioLoadError } from '../lib/loadStemAudio';
 import { resolvePlayerProjectSnapshot } from '../lib/playerSnapshotCache';
 import { getEffectiveTrackMix } from '../utils/trackTree';
@@ -1250,6 +1250,7 @@ function PlayerDashboard({
       loadAudioBuffer: audioManager.loadAudioBuffer.bind(audioManager),
       decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
       storeMediaBlob,
+      probeStoredBlobIds: listStoredMediaBlobIds,
       download: (blobId) => downloadMediaBlob(blobId, session, {
         projectId: snapshot?.projectId || realtimePlaybackRef.current?.item?.projectId || null,
       }),

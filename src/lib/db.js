@@ -132,6 +132,22 @@ export async function getMediaBlob(blobId) {
 }
 
 /**
+ * Which of these ids already have a media row.
+ * Reads primary keys only, so the audio blobs stay unread.
+ */
+export async function listStoredMediaBlobIds(blobIds) {
+  const ids = [];
+  const seen = new Set();
+  (Array.isArray(blobIds) ? blobIds : []).forEach((blobId) => {
+    if (!blobId || seen.has(blobId)) return;
+    seen.add(blobId);
+    ids.push(blobId);
+  });
+  if (ids.length === 0) return [];
+  return db.media.where('blobId').anyOf(ids).primaryKeys();
+}
+
+/**
  * Save undo/redo action (circular buffer, max 100)
  */
 export async function saveUndoAction(projectId, action, currentIndex) {

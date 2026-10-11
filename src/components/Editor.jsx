@@ -21,7 +21,7 @@ import {
 import useStore from '../store/useStore';
 import { audioManager } from '../lib/audioManager';
 import { recordingManager } from '../lib/recordingManager';
-import { storeMediaBlob, getMediaBlob } from '../lib/db';
+import { storeMediaBlob, getMediaBlob, listStoredMediaBlobIds } from '../lib/db';
 import { createTrack, createClip, normalizeExportSettings, TRACK_ROLES } from '../types/project';
 import FileImport from './FileImport';
 import TrackList from './TrackList';
@@ -56,7 +56,6 @@ import { loadStemsIntoMediaCache } from '../lib/loadStemAudio';
 import { registerAndUploadMediaBlob } from '../lib/mediaUpload';
 import {
   finishLoadProgress,
-  isLoadProgressRunning,
   getLoadProgress,
   logLoadProgress,
   summarizeProjectForLoadLog,
@@ -971,8 +970,9 @@ function Editor({
     };
 
     const currentProject = projectRef.current;
-    const shouldFinish = !isolated && isLoadProgressRunning();
-    const progressId = shouldFinish ? getLoadProgress()?.id : null;
+    const activeProgress = !isolated ? getLoadProgress() : null;
+    const shouldFinish = activeProgress?.status === 'running';
+    const progressId = shouldFinish ? activeProgress.id : null;
     if (!currentProject) {
       if (shouldFinish && !isStale()) {
         logLoadProgress('Editor has no project in memory');
@@ -1006,6 +1006,7 @@ function Editor({
         loadAudioBuffer: audioManager.loadAudioBuffer.bind(audioManager),
         decodeAudioFile: audioManager.decodeAudioFile.bind(audioManager),
         storeMediaBlob,
+        probeStoredBlobIds: listStoredMediaBlobIds,
         download: canUseRemoteMedia
           ? (blobId) => downloadMediaBlob(blobId, remoteSession.session, {
             projectId: remoteSession.serverProjectId,

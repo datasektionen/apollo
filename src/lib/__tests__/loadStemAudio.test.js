@@ -129,7 +129,7 @@ describe('ensureStemInMediaCache', () => {
   });
 
   it('logs a local cache miss as a fallback when download is available', async () => {
-    startLoadProgress({ kind: 'play', title: 'Song' });
+    startLoadProgress({ kind: 'play', title: 'Song', verbose: true });
     const blobId = 'stem-cold';
     await ensureStemInMediaCache({
       blobId,
@@ -150,7 +150,7 @@ describe('ensureStemInMediaCache', () => {
   });
 
   it('keeps a local cache miss as an error when there is no download path', async () => {
-    startLoadProgress({ kind: 'open', title: 'Song' });
+    startLoadProgress({ kind: 'open', title: 'Song', verbose: true });
     await expect(ensureStemInMediaCache({
       blobId: 'stem-offline',
       mediaCache: new Map(),
@@ -183,6 +183,148 @@ describe('loadStemsIntoMediaCache persist deferral', () => {
     expect(storeMediaBlob).not.toHaveBeenCalled();
     await delay(30);
     expect(storeMediaBlob).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('play request progress bars', () => {
+  it('does not open a dialog or touch device storage when every stem is already cached', async () => {
+    startLoadProgress({ kind: 'play', title: 'Song' });
+    const probe = vi.fn();
+    const getMediaBlob = vi.fn();
+    await loadStemsIntoMediaCache(['ram'], {
+      mediaCache: new Map([['ram', fakeAudioBuffer()]]),
+      probeStoredBlobIds: probe,
+      getMediaBlob,
+    });
+    expect(probe).not.toHaveBeenCalled();
+    expect(getMediaBlob).not.toHaveBeenCalled();
+    expect(getLoadProgress().visible).toBe(false);
+    expect(getLoadProgress().stems).toMatchObject({ cached: 1, total: 1 });
+  });
+
+  it('counts cached, device, downloaded, and converted stems separately', async () => {
+    startLoadProgress({ kind: 'play', title: 'Song' });
+    const probe = vi.fn(async (ids) => ids.filter((id) => id === 'local'));
+    let stemsAtDownloadStart = null;
+    await loadStemsIntoMediaCache(['ram', 'local', 'remote'], {
+      mediaCache: new Map([['ram', fakeAudioBuffer()]]),
+      probeStoredBlobIds: probe,
+      getMediaBlob: async (id) => {
+        if (id !== 'local') throw new Error(`Media blob ${id} not found`);
+        return {
+          fileName: 'local.apcm',
+          blob: { size: 4, type: 'application/x-apollo-planar-pcm' },
+        };
+      },
+      loadAudioBuffer: async () => fakeAudioBuffer(),
+      download: async () => {
+        stemsAtDownloadStart = { ...getLoadProgress().stems };
+        return fakeRemoteBlob(8);
+      },
+      decodeAudioFile: async () => fakeAudioBuffer(),
+      storeMediaBlob: async () => {},
+    });
+
+    expect(probe).toHaveBeenCalledWith(['local', 'remote']);
+    expect(stemsAtDownloadStart.fetched).toBe(0);
+    expect(stemsAtDownloadStart.converted).toBe(0);
+    expect(getLoadProgress().visible).toBe(true);
+    expect(getLoadProgress().stems).toMatchObject({
+      total: 3,
+      cached: 1,
+      idbTotal: 1,
+      idbLoaded: 1,
+      fetchTotal: 1,
+      fetched: 1,
+      convertTotal: 1,
+      converted: 1,
+      serverCached: 1,
+    });
+  });
+
+  it('moves a stem the device lookup cannot read onto the download bars', async () => {
+    startLoadProgress({ kind: 'play', title: 'Song' });
+    await loadStemsIntoMediaCache(['missing'], {
+      mediaCache: new Map(),
+      probeStoredBlobIds: async () => ['missing'],
+      getMediaBlob: async () => {
+        throw new Error('Media blob missing not found');
+      },
+      download: async () => fakeRemoteBlob(),
+      decodeAudioFile: async () => fakeAudioBuffer(),
+      storeMediaBlob: async () => {},
+    });
+    expect(getLoadProgress().stems).toMatchObject({
+      idbTotal: 0,
+      idbLoaded: 0,
+      fetchTotal: 1,
+      fetched: 1,
+      convertTotal: 1,
+      converted: 1,
+      serverCached: 1,
+    });
+  });
+
+  it('uses one loading bar when the device lookup fails', async () => {
+    startLoadProgress({ kind: 'play', title: 'Song' });
+    await loadStemsIntoMediaCache(['remote'], {
+      mediaCache: new Map(),
+      probeStoredBlobIds: async () => {
+        throw new Error('idb blocked');
+      },
+      getMediaBlob: async () => {
+        throw new Error('nope');
+      },
+      download: async () => fakeRemoteBlob(),
+      decodeAudioFile: async () => fakeAudioBuffer(),
+      storeMediaBlob: async () => {},
+    });
+    expect(getLoadProgress().stems).toMatchObject({
+      classified: false,
+      pendingTotal: 1,
+      pendingLoaded: 1,
+      fetchTotal: 0,
+    });
+  });
+
+  it('does not paint an older load onto a newer play request', async () => {
+    const firstId = startLoadProgress({ kind: 'play', title: 'First' });
+    let releaseProbe;
+    const probe = vi.fn(() => new Promise((resolve) => {
+      releaseProbe = resolve;
+    }));
+    const load = loadStemsIntoMediaCache(['remote'], {
+      mediaCache: new Map(),
+      probeStoredBlobIds: probe,
+      getMediaBlob: async () => {
+        throw new Error('nope');
+      },
+      download: async () => fakeRemoteBlob(),
+      decodeAudioFile: async () => fakeAudioBuffer(),
+      storeMediaBlob: async () => {},
+    });
+    await vi.waitFor(() => expect(probe).toHaveBeenCalled());
+    const secondId = startLoadProgress({ kind: 'play', title: 'Second' });
+    releaseProbe([]);
+    await load;
+    const session = getLoadProgress();
+    expect(session.id).toBe(secondId);
+    expect(session.id).not.toBe(firstId);
+    expect(session.visible).toBe(false);
+    expect(session.stems.total).toBe(0);
+  });
+
+  it('still reports stem progress for an open request', async () => {
+    startLoadProgress({ kind: 'open', title: 'Song', verbose: true });
+    const blobId = 'stem-ram';
+    await loadStemsIntoMediaCache([blobId], {
+      mediaCache: new Map([[blobId, fakeAudioBuffer()]]),
+      getMediaBlob: vi.fn(),
+    });
+    expect(getLoadProgress().presentation).toBe('log');
+    expect(getLoadProgress().stemIndex).toBe(1);
+    expect(getLoadProgress().stemTotal).toBe(1);
+    expect(getLoadProgress().visible).toBe(true);
   });
 });
 
