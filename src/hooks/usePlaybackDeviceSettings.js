@@ -7,6 +7,7 @@ import {
   isDefaultAudioOutputDeviceId,
   isMonoOutputActive,
   normalizePlaybackDeviceSettings,
+  normalizeRecordingCalibration,
   resolvePlaybackPanLawDisplayDb,
 } from '../utils/playbackOutput';
 
@@ -23,7 +24,6 @@ export function usePlaybackDeviceSettings(options = {}) {
   const {
     defaults = DEFAULT_PLAYBACK_DEVICE_SETTINGS,
     errorPrefix = 'settings',
-    onRecordingOffsetChange = null,
   } = options;
 
   const [audioInputs, setAudioInputs] = useState([]);
@@ -71,11 +71,26 @@ export function usePlaybackDeviceSettings(options = {}) {
         ...normalizePlaybackDeviceSettings(audioSettings),
       }));
     }
+  }, [audioSettings, errorPrefix]);
 
-    if (typeof onRecordingOffsetChange === 'function') {
-      onRecordingOffsetChange(Math.max(0, Number(audioSettings.recordingOffsetMs) || 0));
-    }
-  }, [audioSettings, errorPrefix, onRecordingOffsetChange]);
+  const saveRecordingCalibration = useCallback((key, record) => {
+    const normalized = normalizeRecordingCalibration(record);
+    if (!key || !normalized) return;
+    setAudioSettings((prev) => normalizePlaybackDeviceSettings({
+      ...prev,
+      recordingCalibrations: {
+        ...(prev.recordingCalibrations || {}),
+        [String(key)]: normalized,
+      },
+    }));
+  }, []);
+
+  const setRecordingOffsetMode = useCallback((mode) => {
+    setAudioSettings((prev) => normalizePlaybackDeviceSettings({
+      ...prev,
+      recordingOffsetMode: mode,
+    }));
+  }, []);
 
   const applyEnumeratedDevices = useCallback((devices) => {
     const inputs = devices.filter((device) => device.kind === 'audioinput');
@@ -169,6 +184,8 @@ export function usePlaybackDeviceSettings(options = {}) {
     outputChannelCount,
     playbackPanLawDb,
     refreshAudioDevices,
+    saveRecordingCalibration,
     setAudioSettings,
+    setRecordingOffsetMode,
   };
 }

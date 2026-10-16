@@ -2740,8 +2740,7 @@ function Timeline({
                     {isRecording && recordingSegments && recordingSegments.length > 0 && selectedTrackId === track.id && (() => {
                       const currentSegment = recordingSegments[recordingSegments.length - 1];
                       const recordingStartMs = currentSegment.startTimeMs;
-                      const segmentOffsetMs = Math.max(0, Number(currentSegment.offsetMs) || 0);
-                      const effectiveEndMs = Math.max(recordingStartMs, currentTimeMs - segmentOffsetMs);
+                      const effectiveEndMs = Math.max(recordingStartMs, currentTimeMs);
                       const recordingDurationMs = Math.max(0, effectiveEndMs - recordingStartMs);
                       const recordingWidthPx = recordingDurationMs * pixelsPerMs;
                       const recordingLeftPx = recordingStartMs * pixelsPerMs;

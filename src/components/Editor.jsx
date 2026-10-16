@@ -31,6 +31,9 @@ import CreditsEditorDialog from './CreditsEditorDialog';
 import { dbToVolume, volumeToDb } from '../utils/audio';
 import { applyChoirAutoPanToProject } from '../utils/choirAutoPan';
 import { PlaybackDevicesSettingsPanel, ProjectSettingsPanel } from './SettingsPanels';
+import { measureRecordingRoundTrip } from '../lib/recordingLatencyCalibration';
+import { RECORDING_OFFSET_MODES } from '../utils/playbackOutput';
+import { describeRecordingDevices, resolveRecordingOffset } from '../utils/recordingDevices';
 import useKeyboardShortcuts from '../utils/useKeyboardShortcuts';
 import { processRecordingOverwrites } from '../utils/clipCollision';
 import { isPrimaryModifierPressed } from '../utils/keyboard';
@@ -325,12 +328,21 @@ function Editor({
   const [missingMediaBlobIds, setMissingMediaBlobIds] = useState(() => new Set());
   const reloadingMediaBlobIdsRef = useRef(new Set());
   const [recordingSegments, setRecordingSegments] = useState([]);
-  const [recordingOffsetMs, setRecordingOffsetMs] = useState(0);
+  const [measuringRecordingDelay, setMeasuringRecordingDelay] = useState(false);
+  const [recordingDelayError, setRecordingDelayError] = useState('');
+  const measuringRecordingDelayRef = useRef(false);
   const lastMasterRightClickRef = useRef(0);
   const isNormalizingMasterRef = useRef(false);
   const recordingOriginalClipsRef = useRef(null);
   const previousTimeRef = useRef(0);
   const finalizeRecordingRef = useRef(null);
+  const handleLoopWrapDuringRecordingRef = useRef(null);
+  // Mirrors of recording state for the playback interval, so arming or
+  // splitting a take never restarts playback (which would move the clock
+  // the take is anchored to).
+  const isRecordingRef = useRef(false);
+  const recordingSegmentsRef = useRef([]);
+  const isArmingRecordingRef = useRef(false);
   const recordingStartTimeRef = useRef(0);
   const projectRef = useRef(project);
   const dismissedEmptyImportForProjectIdRef = useRef(null);
@@ -448,11 +460,40 @@ function Editor({
     outputChannelCount,
     playbackPanLawDb,
     refreshAudioDevices,
+    saveRecordingCalibration,
     setAudioSettings,
   } = usePlaybackDeviceSettings({
     errorPrefix: 'editor',
-    onRecordingOffsetChange: setRecordingOffsetMs,
   });
+  const audioSettingsRef = useRef(audioSettings);
+  audioSettingsRef.current = audioSettings;
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+  useEffect(() => {
+    recordingSegmentsRef.current = recordingSegments;
+  }, [recordingSegments]);
+  // Which physical microphone/output pair is active, and whether a measured
+  // round trip exists for it. Drives the settings panel and the record prompt.
+  const recordingDeviceInfo = useMemo(
+    () => describeRecordingDevices([...audioInputs, ...audioOutputs], {
+      inputDeviceId: audioSettings.inputDeviceId,
+      outputDeviceId: audioSettings.outputDeviceId,
+    }),
+    [audioInputs, audioOutputs, audioSettings.inputDeviceId, audioSettings.outputDeviceId]
+  );
+  const recordingDelayStatus = useMemo(() => {
+    const context = audioManager.audioContext;
+    const resolved = resolveRecordingOffset(audioSettings, recordingDeviceInfo, {
+      sampleRate: context?.sampleRate ?? null,
+      outputLatencyMs: Number.isFinite(context?.outputLatency) ? context.outputLatency * 1000 : null,
+    });
+    return { ...resolved, deviceInfo: recordingDeviceInfo };
+  }, [audioSettings, recordingDeviceInfo]);
+  useEffect(() => () => {
+    // Release the microphone when the editor goes away.
+    recordingManager.dispose();
+  }, []);
   useAudioDeviceAutoPause((timeMs) => {
     if (Number.isFinite(Number(timeMs))) {
       setCurrentTime(Number(timeMs));
@@ -1344,7 +1385,7 @@ function Editor({
           const playbackEndMs = getPlaybackEndMs(currentProject);
           if (
             !currentProject.loop.enabled
-            && !isRecording
+            && !isRecordingRef.current
             && playbackEndMs > 0
             && previousTime < playbackEndMs
             && newTime >= playbackEndMs
@@ -1363,14 +1404,15 @@ function Editor({
             // Loop wraparound detected
             isHandlingLoopWrapRef.current = true;
             
-            // Handle recording if active
-            if (isRecording && recordingSegments.length > 0) {
-              handleLoopWrapDuringRecording();
+            // Seamlessly restart playback at loop start. The seek resolves
+            // with the audio-clock instant of the jump; a running take is
+            // split exactly there.
+            const seekPromise = audioManager.seek(currentProject, currentProject.loop.startMs);
+            if (isRecordingRef.current && recordingSegmentsRef.current.length > 0) {
+              void handleLoopWrapDuringRecordingRef.current?.(seekPromise);
             }
-            
-            // Seamlessly restart playback at loop start
             setCurrentTime(currentProject.loop.startMs);
-            void audioManager.seek(currentProject, currentProject.loop.startMs).then(() => {
+            void seekPromise.then(() => {
               applyProjectLiveMix(currentProject);
               previousTimeRef.current = currentProject.loop.endMs + 1000;
               setTimeout(() => {
@@ -1395,7 +1437,7 @@ function Editor({
         clearInterval(interval);
       }
     };
-  }, [applyAdvancedMixRealtimeSettings, applyEditorPlaybackOutputConfig, applyProjectLiveMix, isPlaying, project.projectId, isRecording, recordingSegments.length]);
+  }, [applyAdvancedMixRealtimeSettings, applyEditorPlaybackOutputConfig, applyProjectLiveMix, isPlaying, project.projectId]);
 
   // Separate effect for handling recording overwrite
   useEffect(() => {
@@ -1449,28 +1491,94 @@ function Editor({
     return Math.max(0, numeric);
   };
 
-  const getSegmentOffsetMs = (segment) =>
-    normalizeRecordingOffset(segment?.offsetMs ?? recordingOffsetMs);
+  const getSegmentOffsetMs = (segment) => normalizeRecordingOffset(segment?.offsetMs);
 
+  // The on-screen recording indicator tracks the playhead. The round-trip
+  // offset shifts which captured samples fill that span; it does not shorten it.
   const getEffectiveRecordingEndMs = (segment, timeMs) => {
     if (!segment) return timeMs;
-    const offsetMs = getSegmentOffsetMs(segment);
-    return Math.max(segment.startTimeMs, timeMs - offsetMs);
+    return Math.max(segment.startTimeMs, timeMs);
   };
 
-  const applyRecordingOffsetToClip = (clip, offsetMs) => {
-    const safeOffset = normalizeRecordingOffset(offsetMs);
-    if (!clip || safeOffset <= 0) {
-      return { clip, durationMs: clip ? clip.cropEndMs - clip.cropStartMs : 0 };
+  const getActiveInputDeviceId = () => String(audioSettingsRef.current?.inputDeviceId || '');
+
+  /**
+   * Work out the offset to trim from a new take. Opens the microphone first so
+   * device labels are available, then resolves the physical input/output pair
+   * and looks up its measured round trip (or the manual override).
+   */
+  const resolveRecordingOffsetForTake = async () => {
+    await recordingManager.ensureCapture({ deviceId: getActiveInputDeviceId() });
+    let devices = [];
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch {
+      devices = [];
     }
-    const trimMs = Math.min(safeOffset, clip.sourceDurationMs);
-    const nextClip = {
-      ...clip,
-      cropStartMs: trimMs,
-      cropEndMs: clip.sourceDurationMs,
-    };
-    const durationMs = Math.max(0, nextClip.cropEndMs - nextClip.cropStartMs);
-    return { clip: durationMs > 0 ? nextClip : null, durationMs };
+    const settings = audioSettingsRef.current;
+    const deviceInfo = describeRecordingDevices(devices, {
+      inputDeviceId: settings.inputDeviceId,
+      outputDeviceId: settings.outputDeviceId,
+    });
+    const context = audioManager.audioContext;
+    const resolved = resolveRecordingOffset(settings, deviceInfo, {
+      sampleRate: context?.sampleRate ?? null,
+      outputLatencyMs: Number.isFinite(context?.outputLatency) ? context.outputLatency * 1000 : null,
+    });
+    return { ...resolved, deviceInfo };
+  };
+
+  const startRecordingDelayMeasurement = () => {
+    if (isRecording || measuringRecordingDelayRef.current) return null;
+    if (isPlaying) {
+      pause();
+    }
+    void refreshAudioDevices();
+    setSettingsTab('playback');
+    setSettingsOpen(true);
+
+    measuringRecordingDelayRef.current = true;
+    setMeasuringRecordingDelay(true);
+    setRecordingDelayError('');
+    return (async () => {
+      try {
+        const record = await measureRecordingRoundTrip({
+          inputDeviceId: getActiveInputDeviceId(),
+        });
+        let devices = [];
+        try {
+          devices = await navigator.mediaDevices.enumerateDevices();
+        } catch {
+          devices = [];
+        }
+        const settings = audioSettingsRef.current;
+        const deviceInfo = describeRecordingDevices(devices, {
+          inputDeviceId: settings.inputDeviceId,
+          outputDeviceId: settings.outputDeviceId,
+        });
+        const offsetMs = Math.max(0, Math.round(Number(record.roundTripMs) || 0));
+        saveRecordingCalibration(deviceInfo.key, {
+          ...record,
+          inputLabel: deviceInfo.input?.label || '',
+          outputLabel: deviceInfo.output?.label || '',
+        });
+        setAudioSettings((prev) => ({
+          ...prev,
+          recordingOffsetMode: RECORDING_OFFSET_MODES.AUTO,
+          recordingOffsetMs: offsetMs,
+        }));
+        void refreshAudioDevices();
+        return record;
+      } catch (error) {
+        if (error?.code !== 'aborted') {
+          setRecordingDelayError(error?.message || 'The measurement could not be completed.');
+        }
+        return null;
+      } finally {
+        measuringRecordingDelayRef.current = false;
+        setMeasuringRecordingDelay(false);
+      }
+    })();
   };
 
   // Resolves to `true` when this client owns the lock, otherwise to a
@@ -1999,11 +2107,17 @@ function Editor({
         }
         // Force reset the flag to ensure clean state
         isHandlingLoopWrapRef.current = false;
-        pause();
-        // Stop recording if active when pausing
         if (isRecording) {
-          finalizeRecording();
+          // Park the playhead exactly where the take ends.
+          const transport = audioManager.getTransportPosition();
+          if (Number.isFinite(Number(transport.timelineMs))) {
+            setCurrentTime(Number(transport.timelineMs));
+          }
+          pause();
+          void finalizeRecording(transport);
+          return;
         }
+        pause();
       };
       doPause();
     } else {
@@ -2025,78 +2139,78 @@ function Editor({
     setCurrentTime(startTime);
   };
 
-  const handleLoopWrapDuringRecording = async () => {
+  /**
+   * Insert a finished recording segment into a track's clips: clear whatever
+   * it overwrote, keep the other segments of the same take untouched.
+   */
+  const mergeRecordingClipIntoTrack = (clips, clip, otherRecordingClipIds) => {
+    const clipEnd = clip.timelineStartMs + (clip.cropEndMs - clip.cropStartMs);
+    const protectedIds = new Set([...otherRecordingClipIds, clip.id]);
+    const base = clips.filter((candidate) => !protectedIds.has(candidate.id));
+    const overwritten = processRecordingOverwrites(clip.timelineStartMs, clipEnd, base);
+    const otherRecordingClips = clips.filter((candidate) => protectedIds.has(candidate.id) && candidate.id !== clip.id);
+    return [...overwritten, ...otherRecordingClips, clip];
+  };
+
+  /**
+   * Loop wrapped while recording. The capture keeps running; the take is
+   * split at the audio-clock instant playback jumped, the finished part is
+   * stored as a clip, and the next segment starts at the loop start.
+   */
+  const handleLoopWrapDuringRecording = async (seekPromise) => {
     console.log('Loop wrap detected during recording!');
-    
+    const trackId = recordingManager.recordingTrackId || selectedTrackId;
+
     try {
-      // Stop the current MediaRecorder
-      const result = await recordingManager.stopRecording();
-      
-      const currentSegment = recordingSegments[recordingSegments.length - 1];
-      const segmentStart = currentSegment.startTimeMs;
-      const segmentOffsetMs = getSegmentOffsetMs(currentSegment);
-      
-      // Process the audio
-      const arrayBuffer = await result.blob.arrayBuffer();
-      const audioBuffer = await audioManager.decodeAudioFile(arrayBuffer);
-      const { blobId } = await persistRecordedMedia(audioBuffer, `recording_segment_${Date.now()}`);
-      
-      // Create clip for this segment
-      const duration = audioBuffer.duration * 1000;
-      const clip = createClip(blobId, segmentStart, duration);
-      const { clip: adjustedClip, durationMs: adjustedDurationMs } = applyRecordingOffsetToClip(
-        clip,
-        segmentOffsetMs
-      );
-      
-      // Update the segment with the blobId
-      const updatedSegments = recordingSegments.map((seg, idx) => 
-        idx === recordingSegments.length - 1 
-          ? { ...seg, blobId, clip: adjustedClip }
-          : seg
-      );
-      
-      // Get current track state
-      const track = project.tracks.find(t => t.id === selectedTrackId);
-      if (!track) return;
-      
-      let updatedClips = track.clips;
-      if (adjustedClip && adjustedDurationMs > 0) {
-        const segmentEnd = segmentStart + adjustedDurationMs;
-        // Apply overwrites for this segment
-        updatedClips = processRecordingOverwrites(segmentStart, segmentEnd, track.clips);
-        // Add the new clip
-        updatedClips = [...updatedClips, adjustedClip];
-      }
-      
-      // Apply overwrites from previous segments to the clips
-      for (const segment of updatedSegments.slice(0, -1)) {
-        if (segment.clip) {
-          const segStart = segment.startTimeMs;
-          const segEnd = segment.startTimeMs + (segment.clip.cropEndMs - segment.clip.cropStartMs);
-          updatedClips = processRecordingOverwrites(segStart, segEnd, updatedClips.filter(c => c.id !== segment.clip.id));
-        }
-      }
-      
-      // Update project with finalized segment
-      updateProject((proj) => ({
-        ...proj,
-        tracks: proj.tracks.map(t => 
-          t.id === selectedTrackId 
-            ? { ...t, clips: updatedClips }
-            : t
-        ),
-      }), 'Recording segment finalized');
-      
-      // Start a new segment at loop start
-      const loopStartMs = projectRef.current?.loop?.startMs || 0;
-      await recordingManager.startRecording(selectedTrackId, loopStartMs);
-      setRecordingSegments([
-        ...updatedSegments,
+      const seekResult = await seekPromise;
+      if (!recordingManager.isRecording) return;
+
+      const loopStartMs = Number.isFinite(Number(seekResult?.timelineMs))
+        ? Number(seekResult.timelineMs)
+        : (projectRef.current?.loop?.startMs || 0);
+      const endContextTime = Number.isFinite(Number(seekResult?.contextTime))
+        ? Number(seekResult.contextTime)
+        : audioManager.getContextTime();
+
+      const segments = recordingSegmentsRef.current;
+      const segmentIndex = segments.length - 1;
+      const segmentOffsetMs = getSegmentOffsetMs(segments[segmentIndex]);
+
+      const closedSegmentPromise = recordingManager.splitSegment({
+        endContextTime,
+        nextTimelineStartMs: loopStartMs,
+      });
+      setRecordingSegments((prev) => [
+        ...prev,
         { startTimeMs: loopStartMs, offsetMs: segmentOffsetMs },
       ]);
-      
       console.log('New recording segment started at loop start');
+
+      const result = await closedSegmentPromise;
+      if (!result.audioBuffer || result.durationMs <= 0) return;
+
+      const { blobId, durationMs } = await persistRecordedMedia(
+        result.audioBuffer,
+        `recording_segment_${Date.now()}`
+      );
+      const clip = createClip(blobId, result.startTimeMs, durationMs);
+
+      setRecordingSegments((prev) => prev.map((seg, idx) => (
+        idx === segmentIndex ? { ...seg, blobId, clip } : seg
+      )));
+
+      const otherRecordingClipIds = recordingSegmentsRef.current
+        .filter((segment) => segment.clip && segment.clip.id !== clip.id)
+        .map((segment) => segment.clip.id);
+
+      updateProject((proj) => ({
+        ...proj,
+        tracks: proj.tracks.map((t) => (
+          t.id === trackId
+            ? { ...t, clips: mergeRecordingClipIntoTrack(t.clips, clip, otherRecordingClipIds) }
+            : t
+        )),
+      }), 'Recording segment finalized');
     } catch (error) {
       reportUserError(
         'Failed to process recording loop wrap.',
@@ -2104,6 +2218,7 @@ function Editor({
       );
     }
   };
+  handleLoopWrapDuringRecordingRef.current = handleLoopWrapDuringRecording;
 
   const handleRecordingOverwrite = (currentTime) => {
     if (recordingSegments.length === 0 || !selectedTrackId) return;
@@ -2148,67 +2263,63 @@ function Editor({
     }
   };
 
-  const finalizeRecording = async () => {
-    try {
-      const result = await recordingManager.stopRecording();
-      stopRecording();
-      
-      const currentSegment = recordingSegments[recordingSegments.length - 1];
-      const recordingStart = currentSegment.startTimeMs;
-      const segmentOffsetMs = getSegmentOffsetMs(currentSegment);
-      
-      const arrayBuffer = await result.blob.arrayBuffer();
-      const audioBuffer = await audioManager.decodeAudioFile(arrayBuffer);
-      const { blobId, durationMs: totalDurationMs } = await persistRecordedMedia(
-        audioBuffer,
-        `recording_final_${Date.now()}`
-      );
+  /**
+   * Stop the take. `transport` is the audio-clock snapshot at the moment stop
+   * was requested; it is read synchronously here when not supplied so the
+   * clip ends at that playhead. The microphone tail is still collected so the
+   * last round trip is in the clip. Resolves with the timeline position.
+   */
+  const finalizeRecording = async (transport = null) => {
+    const stopTransport = transport || audioManager.getTransportPosition();
+    const stopTimelineMs = Number(stopTransport.timelineMs);
+    const trackId = recordingManager.recordingTrackId || selectedTrackId;
 
-      // Create clip for final segment
-      const finalClip = createClip(blobId, recordingStart, totalDurationMs);
-      const { clip: adjustedFinalClip } = applyRecordingOffsetToClip(finalClip, segmentOffsetMs);
-      
-      // Update the final segment
-      const finalSegments = recordingSegments.map((seg, idx) => 
-        idx === recordingSegments.length - 1 
-          ? { ...seg, blobId, clip: adjustedFinalClip }
-          : seg
-      );
-      
-      // Get the current track state
-      const track = project.tracks.find(t => t.id === selectedTrackId);
-      if (!track) {
-        throw new Error('Track not found');
+    if (!recordingManager.isRecording) {
+      stopRecording();
+      setRecordingSegments([]);
+      recordingOriginalClipsRef.current = null;
+      releaseRecordingLock();
+      return stopTimelineMs;
+    }
+
+    try {
+      const result = await recordingManager.stopRecording({ endContextTime: stopTransport.contextTime });
+      stopRecording();
+
+      const segments = recordingSegmentsRef.current;
+      const lastIndex = segments.length - 1;
+      let finalSegments = segments;
+      if (result.audioBuffer && result.durationMs > 0) {
+        const { blobId, durationMs } = await persistRecordedMedia(
+          result.audioBuffer,
+          `recording_final_${Date.now()}`
+        );
+        const finalClip = createClip(blobId, result.startTimeMs, durationMs);
+        finalSegments = segments.map((seg, idx) => (
+          idx === lastIndex ? { ...seg, blobId, clip: finalClip } : seg
+        ));
       }
-      
-      // Start with existing clips (excluding previous recording clips)
-      const recordingClipIds = new Set(finalSegments.filter(s => s.clip).map(s => s.clip.id));
-      let updatedClips = track.clips.filter(c => !recordingClipIds.has(c.id));
-      
-      // Process overwrites for each segment and add clips
-      for (const segment of finalSegments) {
-        if (segment.clip) {
-          const segStart = segment.startTimeMs;
-          const segEnd = segment.startTimeMs + (segment.clip.cropEndMs - segment.clip.cropStartMs);
-          
-          // Apply overwrites for this segment
-          updatedClips = processRecordingOverwrites(segStart, segEnd, updatedClips);
-          
-          // Add the segment clip
-          updatedClips = [...updatedClips, segment.clip];
-        }
-      }
-      
-      // Update the track with processed clips
+
+      const segmentClips = finalSegments.filter((segment) => segment.clip).map((segment) => segment.clip);
+
+      // Re-insert every segment of the take in order: clear what each one
+      // overwrote, then add the clip. Loop-wrap segments that are still being
+      // stored merge themselves in when they finish.
       updateProject((proj) => ({
         ...proj,
-        tracks: proj.tracks.map(t => 
-          t.id === selectedTrackId 
-            ? { ...t, clips: updatedClips }
-            : t
-        ),
+        tracks: proj.tracks.map((t) => {
+          if (t.id !== trackId) return t;
+          const recordingClipIds = new Set(segmentClips.map((clip) => clip.id));
+          let updatedClips = t.clips.filter((clip) => !recordingClipIds.has(clip.id));
+          for (const clip of segmentClips) {
+            const clipEnd = clip.timelineStartMs + (clip.cropEndMs - clip.cropStartMs);
+            updatedClips = processRecordingOverwrites(clip.timelineStartMs, clipEnd, updatedClips);
+            updatedClips = [...updatedClips, clip];
+          }
+          return { ...t, clips: updatedClips };
+        }),
       }), 'Finalize recording');
-      
+
       // Clear recording state
       setRecordingSegments([]);
       recordingOriginalClipsRef.current = null;
@@ -2217,12 +2328,14 @@ function Editor({
     } catch (error) {
       console.error('Recording failed:', error);
       alert('Recording failed: ' + error.message);
+      recordingManager.cancelRecording();
       stopRecording();
       setRecordingSegments([]);
       recordingOriginalClipsRef.current = null;
     } finally {
       releaseRecordingLock();
     }
+    return stopTimelineMs;
   };
 
   finalizeRecordingRef.current = finalizeRecording;
@@ -2248,13 +2361,30 @@ function Editor({
     }
 
     if (isRecording) {
-      // Stop recording
-      await finalizeRecording();
+      // Stop recording. Snapshot the audio clock first, pause the transport
+      // at that exact position right away, then let the take finish storing.
+      const transport = audioManager.getTransportPosition();
+      const finalizePromise = finalizeRecording(transport);
+      if (Number.isFinite(Number(transport.timelineMs))) {
+        setCurrentTime(Number(transport.timelineMs));
+      }
       pause();
-      await audioManager.pause(currentTimeMs);
+      await audioManager.pause(Number.isFinite(Number(transport.timelineMs)) ? Number(transport.timelineMs) : currentTimeMs);
+      await finalizePromise;
     } else {
-      // Start recording
+      // Start recording. Arming is async (mic open, lock, playback start);
+      // ignore repeated presses until it has settled.
+      if (isArmingRecordingRef.current) return;
+      isArmingRecordingRef.current = true;
       try {
+        // Resolve the delay to trim first (this also opens the microphone).
+        // Prompt for a measurement before touching any recording lock.
+        const offsetInfo = await resolveRecordingOffsetForTake();
+        if (offsetInfo.offsetMs == null) {
+          void startRecordingDelayMeasurement();
+          return;
+        }
+
         if (isHostedSession) {
           if (!caps.canRecordTo(selectedTrackId)) {
             alert('You do not have permission to record to this track.');
@@ -2290,28 +2420,54 @@ function Editor({
         }
 
         const track = project.tracks.find(t => t.id === selectedTrackId);
-        const offsetMs = normalizeRecordingOffset(recordingOffsetMs);
-        
-        await recordingManager.startRecording(selectedTrackId, currentTimeMs);
+        const offsetMs = normalizeRecordingOffset(offsetInfo.offsetMs);
+        await recordingManager.ensureCapture({ deviceId: getActiveInputDeviceId() });
 
-        startRecording();
-        
-        // Initialize first recording segment
-        recordingStartTimeRef.current = currentTimeMs;
-        setRecordingSegments([{ startTimeMs: currentTimeMs, offsetMs }]);
-        
         // Store original clips state
         recordingOriginalClipsRef.current = track ? JSON.parse(JSON.stringify(track.clips)) : [];
-        
-        // Start playing if not already playing
-        if (!isPlaying) {
-          play();
+
+        // Anchor the take on the audio clock. If the transport is stopped,
+        // start it and wait for the exact instant playback is scheduled; if
+        // it is already rolling, read the clock and timeline together.
+        let startContextTime;
+        let timelineStartMs;
+        if (!isPlaying || !audioManager.isPlaying) {
+          const started = audioManager.waitForPlaybackStart(5000);
+          timelineStartMs = currentTimeMs;
+          startRecording();
+          recordingStartTimeRef.current = timelineStartMs;
+          setRecordingSegments([{ startTimeMs: timelineStartMs, offsetMs }]);
+          if (!isPlaying) {
+            play();
+          }
+          const event = await started;
+          startContextTime = event.contextTime;
+          timelineStartMs = Number(event.timelineMs) || 0;
+        } else {
+          const transport = audioManager.getTransportPosition();
+          startContextTime = transport.contextTime;
+          timelineStartMs = transport.timelineMs;
+          startRecording();
         }
+
+        recordingManager.beginRecording({
+          trackId: selectedTrackId,
+          startContextTime,
+          timelineStartMs,
+          roundTripMs: offsetMs,
+        });
+        recordingStartTimeRef.current = timelineStartMs;
+        setRecordingSegments([{ startTimeMs: timelineStartMs, offsetMs }]);
       } catch (error) {
         console.error('Failed to start recording:', error);
         alert('Failed to start recording: ' + error.message);
+        recordingManager.cancelRecording();
+        stopRecording();
         setRecordingSegments([]);
+        recordingOriginalClipsRef.current = null;
         releaseRecordingLock();
+      } finally {
+        isArmingRecordingRef.current = false;
       }
     }
   };
@@ -4564,7 +4720,7 @@ function Editor({
         }}
       />
 
-      {settingsOpen && !isAdvancedMixSession && !isLocalRecordingSession && (
+      {settingsOpen && !isAdvancedMixSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-full max-w-lg rounded-lg border border-gray-700 bg-gray-800 shadow-xl">
             <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
@@ -4589,7 +4745,7 @@ function Editor({
                 >
                   Playback and Devices
                 </button>
-                {caps.canEditProjectSettings ? (
+                {caps.canEditProjectSettings && !isLocalRecordingSession ? (
                   <button
                     type="button"
                     onClick={() => setSettingsTab('project')}
@@ -4604,16 +4760,19 @@ function Editor({
                 ) : null}
               </div>
 
-              {settingsTab === 'playback' || !caps.canEditProjectSettings ? (
+              {settingsTab === 'playback' || !caps.canEditProjectSettings || isLocalRecordingSession ? (
                 <PlaybackDevicesSettingsPanel
                   audioSettings={audioSettings}
                   setAudioSettings={setAudioSettings}
                   audioInputs={audioInputs}
                   audioOutputs={audioOutputs}
                   monoOutputActive={audioSettings.forceMonoOutput === true || outputChannelCount <= 1}
-                  onRefreshDevices={refreshAudioDevices}
                   outputChannelCount={outputChannelCount}
                   playbackPanLawDb={playbackPanLawDb}
+                  recordingDelay={recordingDelayStatus}
+                  measuringRecordingDelay={measuringRecordingDelay}
+                  recordingDelayError={recordingDelayError}
+                  onMeasureRecordingDelay={startRecordingDelayMeasurement}
                 />
               ) : (
                 <ProjectSettingsPanel
@@ -4639,6 +4798,7 @@ function Editor({
           </div>
         </div>
       )}
+
     </div>
   );
 }

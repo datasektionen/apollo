@@ -73,7 +73,7 @@ The main app surfaces are:
 - create server-backed projects
 - import ZIP-based projects into the server
 - import audio files into tracks
-- record directly in the browser
+- record directly in the browser, with the recording delay measured per microphone/output pair so takes land in time with the project (see [`docs/recording-sync.md`](docs/recording-sync.md))
 - edit clips in a timeline without destructively changing source media
 - organize tracks and groups
 - export preset-based rehearsal outputs

@@ -16,12 +16,12 @@ describe('playbackOutput', () => {
     const normalized = normalizePlaybackDeviceSettings({
       defaultPanLawDb: -4.5,
       forceMonoOutput: true,
-      recordingOffsetMs: '12',
+      recordingOffsetMs: '12.6',
     });
 
     expect(normalized.stereoPanLawDb).toBe(-4.5);
     expect(normalized.forceMonoOutput).toBe(true);
-    expect(normalized.recordingOffsetMs).toBe(12);
+    expect(normalized.recordingOffsetMs).toBe(13);
   });
 
   it('treats mono hardware or forced mono as mono output', () => {

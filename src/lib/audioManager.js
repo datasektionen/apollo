@@ -90,6 +90,7 @@ export class AudioManager {
     this.outputClockPrimed = false;
     this.previousOutputDeviceIds = new Set();
     this.playbackInterruptedListeners = new Set();
+    this.playbackStartedListeners = new Set();
     this.hardwareLifecycleAttached = false;
     this.isConfiguringOutput = false;
     this.boundContextStateChange = null;
@@ -315,6 +316,9 @@ export class AudioManager {
       }
       this.applyMasterGain();
       this.scheduleProjectClips(project, currentTimeMs, options, playbackRequestId, at, false);
+      if (this.isPlaybackRequestCurrent(playbackRequestId)) {
+        this.notifyPlaybackStarted({ contextTime: at, timelineMs: Number(currentTimeMs) || 0 });
+      }
     } finally {
       if (this.initializingPlaybackRequestId === playbackRequestId) {
         this.isInitializingPlayback = false;
@@ -332,7 +336,7 @@ export class AudioManager {
     const seekMs = Math.max(0, Number(currentTimeMs) || 0);
     if (!this.isPlaying || !this.audioContext) {
       this.pauseTime = seekMs;
-      return;
+      return null;
     }
 
     const playbackRequestId = ++this.playbackRequestId;
@@ -343,7 +347,7 @@ export class AudioManager {
       await this.resume();
       if (!this.isPlaybackRequestCurrent(playbackRequestId) || !this.isPlaying) {
         this.pauseTime = seekMs;
-        return;
+        return null;
       }
     }
 
@@ -353,6 +357,84 @@ export class AudioManager {
 
     this.stopActiveBufferSources(at, 'Failed to pause sources for seek.', 'audio:seek-stop-source');
     this.scheduleProjectClips(project, seekMs, options, playbackRequestId, at, true);
+    // The audio-clock instant at which playback jumped. Recording uses this
+    // to split a take exactly where the loop wrapped.
+    return { contextTime: at, timelineMs: seekMs };
+  }
+
+  /**
+   * Audio-clock time in seconds (the clock buffer sources are scheduled on).
+   */
+  getContextTime() {
+    return this.audioContext ? this.audioContext.currentTime : 0;
+  }
+
+  /**
+   * Timeline position (ms) that was playing at a given audio-clock time.
+   * Only meaningful while playing; falls back to the paused position.
+   */
+  timelineMsAtContextTime(contextTime) {
+    if (!this.isPlaying || !this.audioContext) return this.pauseTime;
+    return (Number(contextTime) - this.startTime) * 1000;
+  }
+
+  /**
+   * Snapshot of the transport read from a single audio-clock sample so the
+   * context time and timeline position describe the same instant.
+   */
+  getTransportPosition() {
+    const contextTime = this.getContextTime();
+    return {
+      contextTime,
+      timelineMs: this.timelineMsAtContextTime(contextTime),
+      isPlaying: this.isPlaying,
+    };
+  }
+
+  subscribePlaybackStarted(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.playbackStartedListeners.add(listener);
+    return () => {
+      this.playbackStartedListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Resolve with `{ contextTime, timelineMs }` the next time play() schedules
+   * audio. Used to arm recording on the exact instant playback starts.
+   */
+  waitForPlaybackStart(timeoutMs = 5000) {
+    return new Promise((resolve, reject) => {
+      let timeoutId = null;
+      const unsubscribe = this.subscribePlaybackStarted((event) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        unsubscribe();
+        resolve(event);
+      });
+      timeoutId = setTimeout(() => {
+        unsubscribe();
+        reject(new Error('Timed out waiting for playback to start.'));
+      }, timeoutMs);
+    });
+  }
+
+  notifyPlaybackStarted(event) {
+    for (const listener of Array.from(this.playbackStartedListeners)) {
+      try {
+        listener(event);
+      } catch (error) {
+        console.warn('Playback start listener failed:', error);
+      }
+    }
+  }
+
+  /**
+   * Node to feed test signals into so they travel the same output path as
+   * project playback (limiter, ceiling, selected sink) without depending on
+   * the project master volume.
+   */
+  getCalibrationInputNode() {
+    return this.masterLimiterNode || this.masterCeilingNode || this.masterGainNode;
   }
 
   getClipSourceKey(trackId, clipId) {

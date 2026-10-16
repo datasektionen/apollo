@@ -2871,7 +2871,6 @@ function PlayerDashboard({
                       audioInputs={audioInputs}
                       audioOutputs={audioOutputs}
                       monoOutputActive={monoOutputActive}
-                      onRefreshDevices={refreshAudioDevices}
                       outputChannelCount={outputChannelCount}
                       playbackPanLawDb={playbackPanLawDb}
                     />

@@ -1,12 +1,53 @@
 import { DEFAULT_PAN_LAW_DB, normalizePanLawDb } from './audio';
 
+export const RECORDING_OFFSET_MODES = Object.freeze({
+  AUTO: 'auto',
+  MANUAL: 'manual',
+});
+
 export const DEFAULT_PLAYBACK_DEVICE_SETTINGS = {
   inputDeviceId: '',
   outputDeviceId: '',
+  // 'auto' uses a measured round trip for the current input/output pair;
+  // 'manual' uses recordingOffsetMs as typed by the user.
+  recordingOffsetMode: RECORDING_OFFSET_MODES.AUTO,
   recordingOffsetMs: 0,
+  // Measured round trips keyed by `${inputDeviceId}|${outputDeviceId}`.
+  recordingCalibrations: {},
   stereoPanLawDb: DEFAULT_PAN_LAW_DB,
   forceMonoOutput: false,
 };
+
+export function normalizeRecordingCalibration(record) {
+  if (!record || typeof record !== 'object') return null;
+  const roundTripMs = Number(record.roundTripMs);
+  if (!Number.isFinite(roundTripMs) || roundTripMs < 0) return null;
+  const toFinite = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+  return {
+    roundTripMs,
+    spreadMs: toFinite(record.spreadMs),
+    sigmaMs: toFinite(record.sigmaMs),
+    uncertaintyMs: toFinite(record.uncertaintyMs),
+    measuredAt: toFinite(record.measuredAt),
+    sampleRate: toFinite(record.sampleRate),
+    outputLatencyMs: toFinite(record.outputLatencyMs),
+    baseLatencyMs: toFinite(record.baseLatencyMs),
+    inputLabel: String(record.inputLabel || ''),
+    outputLabel: String(record.outputLabel || ''),
+    // Absent on older measurements, which were only stored after the 1 ms bar.
+    stable: record.stable !== false,
+  };
+}
+
+function normalizeRecordingCalibrations(value) {
+  if (!value || typeof value !== 'object') return {};
+  const next = {};
+  for (const [key, record] of Object.entries(value)) {
+    const normalized = normalizeRecordingCalibration(record);
+    if (normalized) next[String(key)] = normalized;
+  }
+  return next;
+}
 
 export function normalizePlaybackDeviceSettings(settings = {}) {
   const next = {
@@ -17,8 +58,12 @@ export function normalizePlaybackDeviceSettings(settings = {}) {
   const legacyDefaultPanLawDb = settings?.defaultPanLawDb;
   const requestedStereoPanLawDb = settings?.stereoPanLawDb;
   next.recordingOffsetMs = Number.isFinite(Number(next.recordingOffsetMs))
-    ? Number(next.recordingOffsetMs)
+    ? Math.max(0, Math.round(Number(next.recordingOffsetMs)))
     : DEFAULT_PLAYBACK_DEVICE_SETTINGS.recordingOffsetMs;
+  next.recordingOffsetMode = next.recordingOffsetMode === RECORDING_OFFSET_MODES.MANUAL
+    ? RECORDING_OFFSET_MODES.MANUAL
+    : RECORDING_OFFSET_MODES.AUTO;
+  next.recordingCalibrations = normalizeRecordingCalibrations(next.recordingCalibrations);
   next.stereoPanLawDb = normalizePanLawDb(
     requestedStereoPanLawDb ?? legacyDefaultPanLawDb ?? DEFAULT_PLAYBACK_DEVICE_SETTINGS.stereoPanLawDb
   );

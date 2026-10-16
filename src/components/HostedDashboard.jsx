@@ -730,7 +730,6 @@ function HostedDashboard({
                 audioInputs={audioInputs}
                 audioOutputs={audioOutputs}
                 monoOutputActive={audioSettings.forceMonoOutput === true || outputChannelCount <= 1}
-                onRefreshDevices={refreshAudioDevices}
                 outputChannelCount={outputChannelCount}
                 playbackPanLawDb={playbackPanLawDb}
               />
