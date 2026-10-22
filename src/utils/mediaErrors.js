@@ -84,6 +84,20 @@ export function isClipMediaMissing(clip, missingBlobIds, mediaCache = null) {
   return Boolean(missingBlobIds?.has?.(clip.blobId));
 }
 
+export function formatMediaDownloadFailure({ mediaId, projectId, error } = {}) {
+  const status = Number(error?.status);
+  const statusLabel = Number.isInteger(status) && status > 0 ? `HTTP ${status}` : 'request failed';
+  const serverMessage = String(error?.serverError || error?.message || 'Unknown error');
+  const id = String(mediaId || '').trim() || 'unknown';
+  const project = String(projectId || '').trim();
+  const target = project ? `media ${id} for project ${project}` : `media ${id}`;
+  let message = `Failed to download ${target} (${statusLabel}): ${serverMessage}`;
+  if (serverMessage.includes('not available through the selected project')) {
+    message += ' This project has no link to that file. A copy already stored in this browser can still play, but anyone who has to download it fails the same way. That link is missing when the same audio is uploaded again while the previous copy is still in quarantine.';
+  }
+  return message;
+}
+
 export function buildBlobReferenceErrorMessage(project, blobId, targetLabel = 'clip audio') {
   const references = getBlobClipReferences(project, blobId);
 

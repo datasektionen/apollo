@@ -1,7 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { createClip, createEmptyProject, createTrack } from '../../types/project';
 import { attachTrackNode, createGroupNode } from '../trackTree';
-import { buildBlobReferenceErrorMessage, isClipMediaMissing } from '../mediaErrors';
+import { buildBlobReferenceErrorMessage, formatMediaDownloadFailure, isClipMediaMissing } from '../mediaErrors';
+
+describe('formatMediaDownloadFailure', () => {
+  it('names the media, project, status, and server message', () => {
+    const message = formatMediaDownloadFailure({
+      mediaId: 'cbd5ce29-ce23-4e5f-a4b0-5df1627be659',
+      projectId: '179f22cc-0994-4c6f-a3d6-5810a6b7ce27',
+      error: {
+        status: 403,
+        serverError: 'That media is not available through the selected project',
+      },
+    });
+
+    expect(message).toContain('cbd5ce29-ce23-4e5f-a4b0-5df1627be659');
+    expect(message).toContain('179f22cc-0994-4c6f-a3d6-5810a6b7ce27');
+    expect(message).toContain('HTTP 403');
+    expect(message).toContain('That media is not available through the selected project');
+    expect(message).toContain('quarantine');
+  });
+
+  it('keeps other download failures to the status and server message', () => {
+    expect(formatMediaDownloadFailure({
+      mediaId: 'blob-a',
+      error: { status: 404, message: 'Media not found' },
+    })).toBe('Failed to download media blob-a (HTTP 404): Media not found');
+  });
+});
 
 describe('isClipMediaMissing', () => {
   it('treats clips without a blob id as missing', () => {

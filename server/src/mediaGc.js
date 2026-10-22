@@ -127,7 +127,10 @@ export async function refreshMediaUnreferencedAt(client, mediaIds, { quarantined
   return tombstoned.rowCount;
 }
 
-export async function syncProjectMediaRefs(client, projectId, snapshot, { quarantinedBy = null } = {}) {
+export async function syncProjectMediaRefs(client, projectId, snapshot, {
+  quarantinedBy = null,
+  relinkQuarantined = false,
+} = {}) {
   const desired = collectSnapshotMediaIds(snapshot);
   const previousResult = await client.query(
     `SELECT media_id AS "mediaId"
@@ -138,14 +141,16 @@ export async function syncProjectMediaRefs(client, projectId, snapshot, { quaran
   const previousIds = previousResult.rows.map((row) => row.mediaId);
 
   if (desired.length > 0) {
+    // GC leaves quarantined rows unlinked so a manual quarantine sticks.
+    // Project saves pass relinkQuarantined. A new ref then clears the tombstone.
     await client.query(
       `INSERT INTO project_media_refs(project_id, media_id, snapshot_id)
        SELECT $1, m.id, NULL
        FROM unnest($2::text[]) AS t(id)
        JOIN media_objects m ON m.id = t.id
-       WHERE m.unreferenced_at IS NULL
+       WHERE ($3::boolean OR m.unreferenced_at IS NULL)
        ON CONFLICT (project_id, media_id) DO NOTHING`,
-      [projectId, desired]
+      [projectId, desired, Boolean(relinkQuarantined)]
     );
   }
 

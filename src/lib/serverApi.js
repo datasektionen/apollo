@@ -1,5 +1,6 @@
 import { createEmptyProject } from '../types/project';
 import { createId } from '../utils/id';
+import { formatMediaDownloadFailure } from '../utils/mediaErrors';
 
 const API_PREFIX = '/api';
 let currentServerSession = null;
@@ -82,13 +83,20 @@ async function apiFetch(path, options = {}, session = null, retryOnAuth = true) 
 
   if (!response.ok) {
     let errorMessage = `${response.status} ${response.statusText}`;
+    let serverError = null;
     try {
       const body = await response.json();
-      if (body?.error) errorMessage = body.error;
+      if (body?.error) {
+        serverError = String(body.error);
+        errorMessage = serverError;
+      }
     } catch {
       // ignore parse failure
     }
-    throw new Error(errorMessage);
+    const error = new Error(errorMessage);
+    error.status = response.status;
+    error.serverError = serverError;
+    throw error;
   }
 
   const contentType = response.headers.get('content-type') || '';
@@ -675,13 +683,23 @@ export async function resolveMedia(mediaIds, session, options = {}) {
 
 export async function downloadMediaBlob(mediaId, session, options = {}) {
   const params = new URLSearchParams();
-  if (options?.projectId) {
-    params.set('projectId', String(options.projectId));
+  const projectId = options?.projectId ? String(options.projectId) : '';
+  if (projectId) {
+    params.set('projectId', projectId);
   }
-  const response = await apiFetch(`/api/media/${encodeURIComponent(mediaId)}${params.toString() ? `?${params.toString()}` : ''}`, {
-    method: 'GET',
-  }, session);
-  return await response.blob();
+  try {
+    const response = await apiFetch(`/api/media/${encodeURIComponent(mediaId)}${params.toString() ? `?${params.toString()}` : ''}`, {
+      method: 'GET',
+    }, session);
+    return await response.blob();
+  } catch (error) {
+    const message = formatMediaDownloadFailure({ mediaId, projectId, error });
+    console.error(message);
+    const wrapped = new Error(message);
+    wrapped.status = error?.status;
+    wrapped.serverError = error?.serverError || null;
+    throw wrapped;
+  }
 }
 
 export async function forceCheckpoint(projectId, session) {

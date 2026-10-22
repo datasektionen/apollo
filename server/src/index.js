@@ -666,7 +666,10 @@ async function appendProjectOp({ projectId, userId, clientOpId, op }) {
       [projectId, nextSeq, JSON.stringify(nextSnapshot), shouldCheckpoint]
     );
 
-    await syncProjectMediaRefs(client, projectId, nextSnapshot, { quarantinedBy: userId });
+    await syncProjectMediaRefs(client, projectId, nextSnapshot, {
+      quarantinedBy: userId,
+      relinkQuarantined: true,
+    });
 
     if (shouldCheckpoint) {
       await client.query(
@@ -2829,7 +2832,10 @@ app.post('/api/projects', requireAuth, async (req, res) => {
 
       await replaceProjectAccessTags(client, projectId, snapshot);
 
-      await syncProjectMediaRefs(client, projectId, snapshot, { quarantinedBy: req.user.id });
+      await syncProjectMediaRefs(client, projectId, snapshot, {
+        quarantinedBy: req.user.id,
+        relinkQuarantined: true,
+      });
 
       await client.query('COMMIT');
     } catch (error) {
@@ -4874,14 +4880,35 @@ app.post('/api/media/register', requireAuth, async (req, res) => {
     }
 
     const existing = await pool.query(
-      `SELECT id
+      `SELECT id, unreferenced_at AS "unreferencedAt"
        FROM media_objects
-       WHERE sha256 = $1 OR id = $2`,
+       WHERE sha256 = $1 OR id = $2
+       ORDER BY (unreferenced_at IS NULL) DESC, created_at ASC
+       LIMIT 1`,
       [sha256, mediaId]
     );
 
     if (existing.rowCount > 0) {
-      res.json({ mediaId: existing.rows[0].id, exists: true });
+      const row = existing.rows[0];
+      // Re-uploading the same bytes must bring a quarantined object back into
+      // service. Otherwise the client keeps the old id, skips the byte upload,
+      // and the project save cannot attach a ref while unreferenced_at is set.
+      if (row.unreferencedAt) {
+        await pool.query(
+          `UPDATE media_objects
+           SET unreferenced_at = NULL,
+               retained = FALSE,
+               quarantined_by = NULL
+           WHERE id = $1
+             AND unreferenced_at IS NOT NULL`,
+          [row.id]
+        );
+      }
+      res.json({
+        mediaId: row.id,
+        exists: true,
+        restoredFromQuarantine: Boolean(row.unreferencedAt),
+      });
       return;
     }
 

@@ -1375,6 +1375,7 @@ function PlayerDashboard({
         return;
       }
       playError = error;
+      console.error('Playback failed.', error);
       audioManager.stop();
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
       setHasRealtimeMetronome(false);
