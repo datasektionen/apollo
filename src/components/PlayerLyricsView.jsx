@@ -226,7 +226,7 @@ function PlayerLyricsView({ lyrics, currentTimeMs = 0, durationMs = 0, isLoading
                   aria-current={isCurrent ? 'true' : undefined}
                   title={canSeek ? 'Jump to this lyric' : undefined}
                   onClick={() => handleSeekLine(line)}
-                  className={`block w-full whitespace-pre-wrap break-words rounded-lg text-left text-2xl font-bold leading-snug transition-colors sm:text-3xl disabled:cursor-default disabled:opacity-100 ${colorClass} ${canSeek ? 'cursor-pointer hover:text-white' : 'cursor-default'}`}
+                  className={`block w-full whitespace-pre-wrap break-words rounded-lg text-left text-[1.75rem] font-bold leading-snug transition-colors sm:text-[2.125rem] disabled:cursor-default disabled:opacity-100 ${colorClass} ${canSeek ? 'cursor-pointer hover:text-white' : 'cursor-default'}`}
                 >
                   {text}
                 </button>
