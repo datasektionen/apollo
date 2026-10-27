@@ -112,6 +112,7 @@ import {
   ADVANCED_MIX_PRACTICE_FOCUS_NUMERIC_STEPS,
   ADVANCED_MIX_PRACTICE_FOCUS_SLIDER_POSITIONS,
   ADVANCED_MIX_PRACTICE_FOCUS_STEPS,
+  buildAdvancedPlaybackSnapshot,
   isAdvancedMixPreset,
   normalizeAdvancedMixState,
 } from '../utils/advancedMix';
@@ -307,22 +308,6 @@ function getPlayerPlayOptions(playback = {}, extra = {}) {
   };
 }
 
-function buildAdvancedPlaybackSnapshot(baseSnapshot, item) {
-  if (!isAdvancedMixPreset(item?.presetId)) return baseSnapshot;
-  const advancedState = normalizeAdvancedMixState(item?.advancedMix || {});
-  const source = advancedState.snapshot && typeof advancedState.snapshot === 'object'
-    ? advancedState.snapshot
-    : baseSnapshot;
-  return {
-    ...source,
-    projectId: baseSnapshot?.projectId || item?.projectId || source?.projectId,
-    sourceProjectId: baseSnapshot?.projectId || item?.projectId || source?.sourceProjectId || null,
-    projectName: item?.name || source?.projectName || baseSnapshot?.projectName || 'Advanced Mix',
-    musicalNumber: baseSnapshot?.musicalNumber ?? source?.musicalNumber ?? '0.0',
-    showId: baseSnapshot?.showId ?? source?.showId ?? null,
-    showName: baseSnapshot?.showName ?? source?.showName ?? '',
-  };
-}
 
 function CreditsDialog({ state, onClose }) {
   if (!state) return null;

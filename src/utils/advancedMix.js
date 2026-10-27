@@ -235,6 +235,24 @@ export function normalizeAdvancedMixState(value = {}) {
   };
 }
 
+export function buildAdvancedPlaybackSnapshot(baseSnapshot, item) {
+  if (!isAdvancedMixPreset(item?.presetId)) return baseSnapshot;
+  const advancedState = normalizeAdvancedMixState(item?.advancedMix || {});
+  const source = advancedState.snapshot && typeof advancedState.snapshot === 'object'
+    ? advancedState.snapshot
+    : baseSnapshot;
+  return {
+    ...source,
+    lyrics: baseSnapshot?.lyrics ?? null,
+    projectId: baseSnapshot?.projectId || item?.projectId || source?.projectId,
+    sourceProjectId: baseSnapshot?.projectId || item?.projectId || source?.sourceProjectId || null,
+    projectName: item?.name || source?.projectName || baseSnapshot?.projectName || 'Advanced Mix',
+    musicalNumber: baseSnapshot?.musicalNumber ?? source?.musicalNumber ?? '0.0',
+    showId: baseSnapshot?.showId ?? source?.showId ?? null,
+    showName: baseSnapshot?.showName ?? source?.showName ?? '',
+  };
+}
+
 export function createAdvancedMixEditorProject(baseProject, mix) {
   const state = normalizeAdvancedMixState(mix?.advancedMix || {});
   return createProjectForMix(baseProject, mix?.id, mix?.name, state.snapshot);
