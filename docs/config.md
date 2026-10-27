@@ -33,6 +33,7 @@ This file documents the environment variables used by Apollo.
 | `MEDIA_GC_TTL_HOURS` | How long unused audio blobs stay on disk after the last project stops referencing them. | `168` (7 days) |
 | `MEDIA_GC_HOUR` | Local server hour when expired-media cleanup runs once per night. | `4` (04:00) |
 | `MEDIA_GC_ATTACH_GRACE_SECONDS` | Delay before a newly uploaded blob with no project reference is marked unused. Avoids quarantining in-flight uploads. | `3600` |
+| `DEFAULT_LYRIC_LANGUAGE` | Default lyric language for projects. Only `sv` and `en` are accepted. | `sv` |
 
 ## Sessions
 

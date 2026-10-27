@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { AccessTypeInfoButton, GrantRulesTable } from '../GrantRulesTable';
+import { LYRICS_TRACK_SCOPE_ID } from '../../../shared/accessRules.js';
 
 beforeAll(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -89,6 +90,51 @@ describe('GrantRulesTable', () => {
       id: 'direct-1',
       permissionKey: 'project_reader',
     }));
+    view.unmount();
+  });
+
+  it('shows Lyrics at the top of the track selector with a separator', async () => {
+    const lyricsCatalog = {
+      ...catalog,
+      tracks: [{
+        id: LYRICS_TRACK_SCOPE_ID,
+        name: 'Lyrics',
+        isVirtual: true,
+        projectId: 'project-1',
+        showId: 'show-1',
+        groupValues: [],
+        partValues: [],
+      }, {
+        id: 'vocal-track',
+        name: 'Lead vocal',
+        projectId: 'project-1',
+        showId: 'show-1',
+        groupValues: [],
+        partValues: [],
+      }],
+    };
+    const lyricsGrant = {
+      id: 'lyrics-grant',
+      permissionKey: 'track_manager',
+      permissionLabel: 'Track manager',
+      scopeType: 'track',
+      scopeShowId: 'show-1',
+      scopeProjectId: 'project-1',
+      scopeTrackId: LYRICS_TRACK_SCOPE_ID,
+      sourceType: 'direct',
+    };
+    const view = render(
+      <GrantRulesTable grants={[lyricsGrant]} catalog={lyricsCatalog} canEdit onChange={vi.fn()} onRemove={vi.fn()} />
+    );
+
+    expect(view.container.textContent).toContain('Lyrics');
+    expect(view.container.textContent).not.toContain('built-in');
+    await act(async () => view.container.querySelector('button[aria-label="Edit"]').click());
+    const trackSelect = [...view.container.querySelectorAll('select')].at(-1);
+    const lyricsOption = trackSelect.querySelector(`option[value="${LYRICS_TRACK_SCOPE_ID}"]`);
+    expect(lyricsOption.textContent).toBe('Lyrics');
+    expect(lyricsOption.nextElementSibling.disabled).toBe(true);
+    expect(lyricsOption.nextElementSibling.textContent).toContain('─');
     view.unmount();
   });
 

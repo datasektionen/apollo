@@ -13,6 +13,8 @@ function useKeyboardShortcuts({
   onUndo,
   onRedo,
   onToggleLoop,
+  onToggleLyricsLane,
+  onConfirmLyricPlacement,
   onDeleteTrack,
   onAddTrack,
   onAddSubtrack,
@@ -45,14 +47,28 @@ function useKeyboardShortcuts({
         return;
       }
 
+      // P - Place the next lyric start while synced lyric placement is active.
+      if (e.code === 'KeyP' && !e.repeat && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (onConfirmLyricPlacement) {
+          e.preventDefault();
+          onConfirmLyricPlacement();
+        }
+      }
+
       // R - Record
       if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         onRecord?.();
       }
 
+      // Shift+L - Toggle the Lyrics lane. Plain L remains the loop shortcut.
+      if (e.code === 'KeyL' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        onToggleLyricsLane?.();
+      }
+
       // L - Toggle Loop
-      if (e.code === 'KeyL' && !e.ctrlKey && !e.metaKey) {
+      if (e.code === 'KeyL' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         onToggleLoop?.();
       }
@@ -128,6 +144,8 @@ function useKeyboardShortcuts({
     onUndo,
     onRedo,
     onToggleLoop,
+    onToggleLyricsLane,
+    onConfirmLyricPlacement,
     onDeleteTrack,
     onAddTrack,
     onAddSubtrack,

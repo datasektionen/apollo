@@ -1,3 +1,5 @@
+import { LYRICS_TRACK_SCOPE_ID } from '../../shared/accessRules.js';
+
 export const ALL_SCOPE_VALUE = '__all__';
 
 export const PERMISSION_HELP = {
@@ -7,7 +9,7 @@ export const PERMISSION_HELP = {
   project_manager: 'Full control of the selected musical numbers and everything inside them.',
   project_creator: 'Can create new musical numbers inside the selected shows.',
   project_reader: 'Can see musical numbers in the DAW dashboard and listen to their tutti mixes, but cannot open them.',
-  track_manager: 'Full control of tracks in the selected scope, including descendant subtracks.',
+  track_manager: 'Full control of tracks in the selected scope. Selecting Lyrics grants lyric-only editing.',
   track_creator: 'Can create tracks or subtracks in the selected scope. Created tracks become fully manageable by you.',
   track_reader: 'Can open musical numbers in the DAW and create mixes.',
 };
@@ -170,7 +172,9 @@ export function grantScopeCells(grant = {}, catalog = {}) {
     project: namedValue(Boolean(grant.scopeProjectId), projectName),
     group: namedValue(Boolean(grant.scopeGroupNameValue), groupName),
     part: namedValue(Boolean(grant.scopePartNameValue), partName),
-    track: namedValue(Boolean(grant.scopeTrackId), trackName),
+    track: String(grant.scopeTrackId || '') === LYRICS_TRACK_SCOPE_ID
+      ? { kind: 'virtual', text: trackName || 'Lyrics' }
+      : namedValue(Boolean(grant.scopeTrackId), trackName),
   };
 
   return SCOPE_COLUMNS.map((column) => (

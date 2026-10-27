@@ -501,7 +501,7 @@ export async function audioBufferToFlacBlob(audioBuffer) {
       channelCount,
       FLAC_BITS_PER_SAMPLE,
       FLAC_COMPRESSION_LEVEL,
-      0,
+      frameCount,
       false,
       0
     );

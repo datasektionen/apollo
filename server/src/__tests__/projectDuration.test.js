@@ -6,7 +6,8 @@ describe('snapshotDurationMsSql', () => {
     const sql = snapshotDurationMsSql('ph');
     expect(sql).toContain("ph.latest_snapshot_json -> 'tracks'");
     expect(sql).toContain("clip->>'cropEndMs'");
-    expect(sql).toContain("clip->>'sourceDurationMs'");
+    expect(sql).not.toContain("clip->>'sourceDurationMs'");
+    expect(sql).toContain('GREATEST(0,');
     expect(sql).toContain("clip->>'timelineStartMs'");
   });
 });

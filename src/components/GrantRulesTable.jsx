@@ -34,6 +34,13 @@ function ScopeValue({ cell }) {
   if (cell.kind === 'na') {
     return <span className="text-sm text-gray-600">—</span>;
   }
+  if (cell.kind === 'virtual') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-indigo-800/50 bg-indigo-950/30 px-2 py-0.5 text-xs font-semibold text-indigo-100">
+        {cell.text}
+      </span>
+    );
+  }
   if (cell.kind === 'all') {
     return (
       <span className="inline-flex rounded-full border border-dashed border-gray-700 bg-gray-950 px-2 py-0.5 text-xs font-semibold text-gray-500">
@@ -65,7 +72,11 @@ function ScopeSelect({
   disabled,
   options,
   labelForOption,
+  pinVirtualOption = false,
 }) {
+  const virtualOptions = pinVirtualOption ? options.filter((option) => option.isVirtual) : [];
+  const regularOptions = pinVirtualOption ? options.filter((option) => !option.isVirtual) : options;
+
   return (
     <select
       value={value}
@@ -74,7 +85,13 @@ function ScopeSelect({
       className={selectClass}
     >
       <option value={ALL_SCOPE_VALUE}>All</option>
-      {options.map((option) => (
+      {virtualOptions.map((option) => (
+        <option key={option.id || option.value} value={option.id || option.value}>
+          {labelForOption(option)}
+        </option>
+      ))}
+      {virtualOptions.length && (regularOptions.length || pinVirtualOption) ? <option key="scope-divider" disabled value="__scope_divider__">──────────</option> : null}
+      {regularOptions.map((option) => (
         <option key={option.id || option.value} value={option.id || option.value}>
           {labelForOption(option)}
         </option>
@@ -92,7 +109,6 @@ function GrantEditRow({
 }) {
   const form = useGrantForm({ catalog, initialGrant: grant });
   const showNumberSelect = form.hasProjectScope && form.scopeShowId !== ALL_SCOPE_VALUE;
-  const showTrackSelect = form.hasTrackScope && form.scopeProjectId !== ALL_SCOPE_VALUE;
   const onChangeRef = useRef(onChange);
   const skipEmitRef = useRef(true);
   onChangeRef.current = onChange;
@@ -152,7 +168,7 @@ function GrantEditRow({
           <ScopeSelect
             value={form.groupScopeValue}
             onChange={form.setGroupScopeValue}
-            disabled={disabled}
+            disabled={disabled || form.isLyricsTrackScope}
             options={form.groupOptions}
             labelForOption={(option) => option.label}
           />
@@ -163,7 +179,7 @@ function GrantEditRow({
           <ScopeSelect
             value={form.partScopeValue}
             onChange={form.setPartScopeValue}
-            disabled={disabled}
+            disabled={disabled || form.isLyricsTrackScope}
             options={form.partOptions}
             labelForOption={(option) => option.label}
           />
@@ -171,15 +187,14 @@ function GrantEditRow({
       </td>
       <td className="min-w-0 px-2 py-2 align-top">
         {form.hasTrackScope ? (
-          showTrackSelect ? (
-            <ScopeSelect
-              value={form.scopeTrackId}
-              onChange={form.setScopeTrackId}
-              disabled={disabled}
-              options={form.trackOptions}
-              labelForOption={(track) => track.name}
-            />
-          ) : <LockedSelect label="All" />
+          <ScopeSelect
+            value={form.scopeTrackId}
+            onChange={form.setScopeTrackId}
+            disabled={disabled}
+            options={form.trackOptions}
+            labelForOption={(track) => track.name}
+            pinVirtualOption
+          />
         ) : <LockedSelect label="—" />}
       </td>
       <td className="px-2 py-2 align-top text-right">

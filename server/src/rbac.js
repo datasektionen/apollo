@@ -28,6 +28,7 @@ import {
   GROUP_PARENT_ROLES,
   TRACK_NODE_TYPE_GROUP,
   TRACK_NODE_TYPE_AUDIO,
+  LYRICS_TRACK_SCOPE_ID,
   ProjectWriteRejectedError,
   isProjectWriteRejectedError,
   WRITE_REJECTED_CODE,
@@ -55,6 +56,7 @@ import {
   projectLevelWriteEnabled,
   hasTrackLevelWrite,
   canExportProject,
+  canEditProjectLyrics,
   snapshotTrackMap,
   snapshotGroupNodeMap,
   snapshotTrackNodeMap,
@@ -62,6 +64,7 @@ import {
   trackWriteRestrictedShapeChanged,
   normalizeGroupForComparison,
   normalizeTopLevelForRestrictedWrite,
+  normalizeLyricsForRestrictedWriteComparison,
   trackMatchesGrantedScopeEntry,
   isTrackArtist,
   trackIsEditable,
@@ -1493,6 +1496,11 @@ function structuralScopeMatchesProject(shape, project = null, trackInfoById = nu
     return String(shape.scopeProjectId || '') === String(project?.id || '');
   }
   if (shape.scopeType === RBAC_SCOPE_TRACK) {
+    if (String(shape.scopeTrackId || '') === LYRICS_TRACK_SCOPE_ID) {
+      return Boolean(project?.id)
+        && (!shape.scopeProjectId || String(shape.scopeProjectId) === String(project.id))
+        && (!shape.scopeShowId || String(shape.scopeShowId) === String(project.showId || ''));
+    }
     if (!trackInfoById) return false;
     return Array.from(trackInfoById.values()).some((trackInfo) => structuralScopeMatchesTrack(trackInfo, shape, project));
   }
@@ -1527,6 +1535,7 @@ function emptyProjectAccessSummary() {
     canManageProject: false,
     canCreateTracks: false,
     canManageTracks: false,
+    canManageLyrics: false,
     canEditAllTracks: false,
     canExportProject: false,
     canListenTutti: false,
@@ -1839,6 +1848,14 @@ function buildProjectAccessSummary(userId, project, grants = [], projectTags = n
     }
 
     if (permissionKey === PERMISSION_TRACK_MANAGER) {
+      const shape = normalizeGrantShape(grant);
+      if (shape.scopeType === RBAC_SCOPE_TRACK && shape.scopeTrackId === LYRICS_TRACK_SCOPE_ID) {
+        summary.canSeeProject = true;
+        summary.canOpenProject = true;
+        summary.canManageLyrics = true;
+        mergeGrantedScope(manageableTrackScopes, grant);
+        continue;
+      }
       summary.canSeeProject = true;
       summary.canOpenProject = true;
       summary.canCreateTracks = true;
@@ -2243,6 +2260,23 @@ export async function getProjectAccessCatalog(db = pool) {
 
     walk(null, { groupValues: [], partValues: [] });
   }
+  for (const project of projectsResult.rows) {
+    tracks.push({
+      id: LYRICS_TRACK_SCOPE_ID,
+      nodeId: LYRICS_TRACK_SCOPE_ID,
+      type: 'virtual',
+      kind: 'lyrics',
+      name: 'Lyrics',
+      isVirtual: true,
+      groupValues: [],
+      partValues: [],
+      projectId: project.id,
+      projectName: project.name || '',
+      musicalNumber: project.musicalNumber || '',
+      showId: project.showId || null,
+      showName: project.showName || '',
+    });
+  }
   return {
     shows: showsResult.rows,
     projects: projectsResult.rows,
@@ -2399,11 +2433,35 @@ async function resolveGrantPayload(input, db = pool) {
   if (scopeType === RBAC_SCOPE_TRACK) {
     const scopeProjectId = normalizeText(input?.scopeProjectId ?? input?.projectTargetProjectId);
     const scopeTrackId = normalizeText(input?.scopeTrackId ?? input?.trackScopeValue);
-    if (!scopeProjectId) {
-      throw new Error('scopeProjectId is required for track-scoped grants');
-    }
     if (!scopeTrackId) {
       throw new Error('scopeTrackId is required for track-scoped grants');
+    }
+    if (scopeTrackId === LYRICS_TRACK_SCOPE_ID && !scopeProjectId) {
+      const scopeShowId = normalizeText(input?.scopeShowId ?? input?.showTargetShowId);
+      let showName = '';
+      if (scopeShowId) {
+        const showResult = await db.query(
+          `SELECT id, name
+           FROM shows
+           WHERE id = $1`,
+          [scopeShowId]
+        );
+        if (showResult.rowCount === 0) throw new Error('Selected show not found');
+        showName = showResult.rows[0].name || '';
+      }
+      return {
+        permissionKey,
+        scopeType,
+        scopeShowId: scopeShowId || null,
+        scopeProjectId: null,
+        scopeTrackId,
+        scopeNameValue: null,
+        scopeLabel: `${showName ? `${showName} / ` : ''}Lyrics`,
+        ...filterFields,
+      };
+    }
+    if (!scopeProjectId) {
+      throw new Error('scopeProjectId is required for track-scoped grants');
     }
     const projectResult = await db.query(
       `SELECT p.id,
@@ -2424,6 +2482,18 @@ async function resolveGrantPayload(input, db = pool) {
       throw new Error('Selected project not found');
     }
     const project = projectResult.rows[0];
+    if (scopeTrackId === LYRICS_TRACK_SCOPE_ID) {
+      return {
+        permissionKey,
+        scopeType,
+        scopeShowId: project.showId || null,
+        scopeProjectId,
+        scopeTrackId,
+        scopeNameValue: null,
+        scopeLabel: `${project.showName ? `${project.showName} / ` : ''}${project.musicalNumber ? `${project.musicalNumber} - ` : ''}${project.name} / Lyrics`,
+        ...filterFields,
+      };
+    }
     const snapshotTracks = Array.isArray(project?.snapshot?.tracks) ? project.snapshot.tracks : [];
     const snapshotTrackById = new Map(snapshotTracks.map((entry) => [String(entry?.id || ''), entry]));
     const normalizedNodes = buildNormalizedTrackTree(project?.snapshot || {});
@@ -2988,6 +3058,7 @@ export async function validateAndTransformProjectWrite({
   access,
   currentSnapshot,
   nextSnapshot,
+  defaultLyricLanguage = 'sv',
 }) {
   if (projectLevelWriteEnabled(access)) {
     const retainScopes = Array.isArray(access?.projectManagerRetainScopes)
@@ -3017,7 +3088,15 @@ export async function validateAndTransformProjectWrite({
     throw new ProjectWriteRejectedError('You do not have permission to edit this project');
   }
 
-  if (stableJson(normalizeTopLevelForRestrictedWrite(currentSnapshot)) !== stableJson(normalizeTopLevelForRestrictedWrite(nextSnapshot))) {
+  if (
+    stableJson(normalizeLyricsForRestrictedWriteComparison(currentSnapshot?.lyrics, defaultLyricLanguage))
+      !== stableJson(normalizeLyricsForRestrictedWriteComparison(nextSnapshot?.lyrics, defaultLyricLanguage))
+    && !canEditProjectLyrics(access)
+  ) {
+    throw new ProjectWriteRejectedError('You need write access to the Lyrics track to edit lyrics');
+  }
+
+  if (stableJson(normalizeTopLevelForRestrictedWrite(currentSnapshot, defaultLyricLanguage)) !== stableJson(normalizeTopLevelForRestrictedWrite(nextSnapshot, defaultLyricLanguage))) {
     throw new ProjectWriteRejectedError('Project-level settings require project manager access');
   }
 

@@ -38,6 +38,7 @@ function buildDefaultLocalProjectState(project, options = {}) {
     collapsedGroupIds: Array.isArray(defaultCollapsedGroupIds)
       ? normalizeCollapsedGroupIds(defaultCollapsedGroupIds)
       : collapsedGroupIdsFromProject(project),
+    lyricsLaneVisible: false,
   };
 }
 
@@ -46,6 +47,7 @@ function normalizeLocalProjectState(state, project, options = {}) {
   return {
     loop: normalizeLocalLoop(state?.loop || fallback.loop, fallback.loop),
     collapsedGroupIds: normalizeCollapsedGroupIds(state?.collapsedGroupIds ?? fallback.collapsedGroupIds),
+    lyricsLaneVisible: state?.lyricsLaneVisible === true,
   };
 }
 
@@ -156,6 +158,15 @@ export default function useLocalProjectViewState(project, options = {}) {
     }));
   }, [updateLocalState]);
 
+  const setLyricsLaneVisible = useCallback((updater) => {
+    updateLocalState((current) => ({
+      ...current,
+      lyricsLaneVisible: typeof updater === 'function'
+        ? updater(current.lyricsLaneVisible) === true
+        : updater === true,
+    }));
+  }, [updateLocalState]);
+
   const setGroupCollapsed = useCallback((groupNodeId, collapsed) => {
     const id = String(groupNodeId || '').trim();
     if (!id) return;
@@ -200,7 +211,9 @@ export default function useLocalProjectViewState(project, options = {}) {
   return {
     localProject,
     localLoop: localState?.loop || DEFAULT_LOCAL_LOOP,
+    lyricsLaneVisible: localState?.lyricsLaneVisible === true,
     setLocalLoop,
+    setLyricsLaneVisible,
     setGroupCollapsed,
     setGroupsCollapsed,
   };

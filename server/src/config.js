@@ -142,6 +142,7 @@ const mediaRoot = resolveMediaRoot();
 const oidcIssuer = buildOidcIssuer();
 const oidcPublicIssuer = buildOidcPublicIssuer(oidcIssuer);
 const publicBaseUrl = buildPublicBaseUrl();
+const defaultLyricLanguage = String(process.env.DEFAULT_LYRIC_LANGUAGE || 'sv').trim().toLowerCase() === 'en' ? 'en' : 'sv';
 
 export const config = {
   port: Number(process.env.API_PORT || 8787),
@@ -153,6 +154,7 @@ export const config = {
   refreshTokenTtlDays: Number(process.env.REFRESH_TOKEN_TTL_DAYS || 7),
   mediaRoot,
   maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES || 524288000),
+  defaultLyricLanguage,
   lockTimeoutSeconds: Number(process.env.RECORD_LOCK_TIMEOUT_SECONDS || 30),
   checkpointEveryOps: Number(process.env.CHECKPOINT_EVERY_OPS || 100),
   checkpointEverySeconds: Number(process.env.CHECKPOINT_EVERY_SECONDS || 30),

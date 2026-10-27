@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { saveProject, saveUndoAction, loadUndoHistory } from '../lib/db';
-import { createEmptyProject, normalizeExportSettings, normalizeProjectPublished } from '../types/project';
+import { createEmptyProject, normalizeExportSettings, normalizeProjectLyrics, normalizeProjectPublished } from '../types/project';
 import { normalizeAutoPanSettings, normalizeProjectAutoPan } from '../utils/choirAutoPan';
 import { normalizeTrackTree, reorderTracksByTree } from '../utils/trackTree';
 import { reportUserError } from '../utils/errorReporter';
@@ -86,11 +86,12 @@ const useStore = create((set, get) => ({
   /**
    * Load existing project
    */
-  loadProject: async (projectData) => {
+  loadProject: async (projectData, options = {}) => {
     const { panLawDb: legacyPanLawDb, ...restProjectData } = projectData || {};
     const normalizedProject = reorderTracksByTree(normalizeTrackTree(normalizeProjectAutoPan({
       ...restProjectData,
       published: normalizeProjectPublished(restProjectData.published ?? restProjectData.publish),
+      lyrics: normalizeProjectLyrics(restProjectData.lyrics, options.defaultLyricLanguage),
       exportSettings: normalizeExportSettings({
         ...(restProjectData.exportSettings || {}),
         legacyPanLawDb,
@@ -170,7 +171,7 @@ const useStore = create((set, get) => ({
       get().triggerAutosave();
     }
   },
-  
+
   /**
    * Undo last action
    */

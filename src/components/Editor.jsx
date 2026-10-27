@@ -1,9 +1,11 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import {
   ArrowLeft,
+  AudioLines,
   ChevronsLeftRightEllipsis,
   Circle,
   Download,
+  FileText,
   HeadphoneOff,
   Headphones,
   Lock,
@@ -28,6 +30,7 @@ import TrackList from './TrackList';
 import Timeline from './Timeline';
 import ExportDialog from './ExportDialog';
 import CreditsEditorDialog from './CreditsEditorDialog';
+import LyricsEditorDialog from './LyricsEditorDialog';
 import { dbToVolume, volumeToDb } from '../utils/audio';
 import { applyChoirAutoPanToProject } from '../utils/choirAutoPan';
 import { PlaybackDevicesSettingsPanel, ProjectSettingsPanel } from './SettingsPanels';
@@ -50,6 +53,11 @@ import useProjectCapabilities, {
 import { findProjectWriteViolation, hasTrackLevelWrite } from '../../shared/accessRules.js';
 import { commitLocalProjectSession, downloadMediaBlob, forceCheckpoint } from '../lib/serverApi';
 import { createId } from '../utils/id';
+import {
+  constrainLyricInsertionStart,
+  getLyricPlacementPreviewStart,
+  pruneShortEmptyLyricLines,
+} from '../utils/lyricTimeline';
 import {
   prepareMediaForImportSource,
   prepareRecordedMedia,
@@ -311,6 +319,7 @@ function Editor({
 
   const [showFileImport, setShowFileImport] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showLyricsDialog, setShowLyricsDialog] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState('playback');
   const [masterVolume, setMasterVolume] = useState(() => toFiniteNumber(project?.masterVolume, 100));
@@ -318,6 +327,7 @@ function Editor({
   const [masterDragTooltip, setMasterDragTooltip] = useState(null);
   const [showDisconnectedIndicator, setShowDisconnectedIndicator] = useState(false);
   const [trackListContextMenu, setTrackListContextMenu] = useState(null);
+  const [lyricsTrackContextMenu, setLyricsTrackContextMenu] = useState(null);
   const [trackCreditsEditor, setTrackCreditsEditor] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [selectedRowKind, setSelectedRowKind] = useState(null);
@@ -388,6 +398,38 @@ function Editor({
     showId: remoteSession?.showId || project?.showId || null,
     mode: editorMode,
   });
+  const advancedMixDefaultCollapsedGroupIds = useMemo(() => (
+    isAdvancedMixSession
+      ? (project?.trackTree || [])
+        .filter((node) => node?.kind === 'group' && node.id)
+        .map((node) => node.id)
+      : []
+  ), [isAdvancedMixSession, project?.trackTree]);
+  const {
+    localProject,
+    lyricsLaneVisible,
+    setLyricsLaneVisible,
+    setLocalLoop,
+    setGroupCollapsed,
+    setGroupsCollapsed,
+  } = useLocalProjectViewState(project, {
+    persist: !isAdvancedMixSession,
+    resetKey: isAdvancedMixSession ? advancedMixSession?.mix?.id : null,
+    defaultCollapsedGroupIds: isAdvancedMixSession ? advancedMixDefaultCollapsedGroupIds : null,
+  });
+
+  useEffect(() => {
+    setLyricsTrackContextMenu(null);
+  }, [project?.projectId]);
+
+  const lyricsSyncActive = project?.lyrics?.useSyncedLyrics === true;
+  const lyricsTrackShown = lyricsLaneVisible && !isLocalRecordingSession && !isAdvancedMixSession;
+  const canEditVisibleLyrics = lyricsTrackShown && caps.canEditLyrics;
+  const canEditSyncedLyrics = canEditVisibleLyrics && lyricsSyncActive;
+
+  useEffect(() => {
+    if (isAdvancedMixSession || isLocalRecordingSession) setShowLyricsDialog(false);
+  }, [isAdvancedMixSession, isLocalRecordingSession]);
   const canSoloTracksInProject = caps.canSolo;
   // Local recording sessions commit through POST /local-session, which requires
   // track-level write access on the source project regardless of editor mode.
@@ -578,6 +620,7 @@ function Editor({
         showId: remoteSession?.showId || currentProject?.showId || null,
       },
       projectCreatedByUserId: null,
+      defaultLyricLanguage: 'sv',
     });
     if (violation) {
       const now = Date.now();
@@ -590,6 +633,56 @@ function Editor({
     }
     rawUpdateProject(nextProject, actionDescription, options);
   }, [editorMode, rawUpdateProject, remoteSession?.projectAccess, remoteSession?.serverProjectId, remoteSession?.showId, remoteUserId]);
+
+  const handleAddLyricLine = useCallback((requestedStartMs) => {
+    if (!canEditSyncedLyrics) return null;
+    const durationMs = (project?.tracks || []).reduce((projectEnd, track) => (
+      (track.clips || []).reduce((trackEnd, clip) => Math.max(
+        trackEnd,
+        Number(clip.timelineStartMs || 0) + Math.max(0, Number(clip.cropEndMs || 0) - Number(clip.cropStartMs || 0)),
+      ), projectEnd)
+    ), 0);
+    const { startMs, deletedLineIds } = constrainLyricInsertionStart(
+      project?.lyrics?.lines || [],
+      requestedStartMs,
+      durationMs,
+    );
+    if (startMs == null) return null;
+    const line = { id: createId(), text: '', startMs };
+    const deletedIds = new Set(deletedLineIds);
+    updateProject((current) => {
+      const lines = (current.lyrics?.lines || []).filter((candidate) => !deletedIds.has(candidate.id));
+      const nextLineIndex = lines.findIndex((candidate) => candidate.startMs != null && Number(candidate.startMs) > startMs);
+      lines.splice(nextLineIndex >= 0 ? nextLineIndex : lines.length, 0, line);
+      return { ...current, lyrics: { ...(current.lyrics || {}), lines } };
+    }, 'Add lyric line');
+    return line.id;
+  }, [canEditSyncedLyrics, project?.lyrics?.lines, project?.tracks, updateProject]);
+
+  const handleConfirmLyricPlacement = useCallback(() => {
+    if (!canEditSyncedLyrics || !project) return;
+    const lines = project.lyrics?.lines || [];
+    const pendingIndex = lines.findIndex((line) => line.startMs == null || line.startMs === '' || !Number.isFinite(Number(line.startMs)));
+    if (pendingIndex < 0) return;
+    const durationMs = project.tracks.reduce((projectEnd, track) => (
+      track.clips.reduce((trackEnd, clip) => Math.max(
+        trackEnd,
+        Number(clip.timelineStartMs || 0) + Math.max(0, Number(clip.cropEndMs || 0) - Number(clip.cropStartMs || 0)),
+      ), projectEnd)
+    ), 0);
+    const startMs = getLyricPlacementPreviewStart(lines, pendingIndex, currentTimeMs, durationMs);
+    if (startMs == null) return;
+    const pendingLineId = lines[pendingIndex].id;
+    updateProject((current) => ({
+      ...current,
+      lyrics: {
+        ...(current.lyrics || {}),
+        lines: pruneShortEmptyLyricLines((current.lyrics?.lines || []).map((line) => line.id === pendingLineId
+          ? { id: line.id, text: line.text, startMs }
+          : line), durationMs),
+      },
+    }), 'Place lyric line');
+  }, [canEditSyncedLyrics, currentTimeMs, project, updateProject]);
 
   const startLocalRecordingSession = useCallback(() => {
     if (!project) return;
@@ -766,23 +859,6 @@ function Editor({
   useEffect(() => {
     lockErrorByTrackIdRef.current = lockErrorByTrackId || {};
   }, [lockErrorByTrackId]);
-  const advancedMixDefaultCollapsedGroupIds = useMemo(() => (
-    isAdvancedMixSession
-      ? (project?.trackTree || [])
-        .filter((node) => node?.kind === 'group' && node.id)
-        .map((node) => node.id)
-      : []
-  ), [isAdvancedMixSession, project?.trackTree]);
-  const {
-    localProject,
-    setLocalLoop,
-    setGroupCollapsed,
-    setGroupsCollapsed,
-  } = useLocalProjectViewState(project, {
-    persist: !isAdvancedMixSession,
-    resetKey: isAdvancedMixSession ? advancedMixSession?.mix?.id : null,
-    defaultCollapsedGroupIds: isAdvancedMixSession ? advancedMixDefaultCollapsedGroupIds : null,
-  });
   const viewProject = localProject || project;
 
   useEffect(() => {
@@ -4057,11 +4133,30 @@ function Editor({
     }
   };
 
+  const handleToggleLyricsLane = useCallback(() => {
+    setLyricsTrackContextMenu(null);
+    setLyricsLaneVisible((visible) => !visible);
+  }, [setLyricsLaneVisible]);
+
+  const handleToggleLyricsSync = useCallback(() => {
+    if (!canEditVisibleLyrics) return;
+    setLyricsLaneVisible(true);
+    updateProject((current) => ({
+      ...current,
+      lyrics: {
+        ...(current.lyrics || {}),
+        useSyncedLyrics: !Boolean(current.lyrics?.useSyncedLyrics),
+      },
+    }), 'Toggle synced lyrics');
+  }, [canEditVisibleLyrics, setLyricsLaneVisible, updateProject]);
+
   useKeyboardShortcuts({
     enabled: !showFileImport,
     onPlayPause: handlePlay,
     onRecord: handleRecord,
     onToggleLoop: handleToggleLoop,
+    onToggleLyricsLane: !showLyricsDialog && !isAdvancedMixSession && !isLocalRecordingSession ? handleToggleLyricsLane : null,
+    onConfirmLyricPlacement: canEditSyncedLyrics ? handleConfirmLyricPlacement : null,
     onUndo: undo,
     onRedo: redo,
     onDeleteTrack: structuralEditsAllowed && caps.canEditAnyTrack ? handleDeleteTrack : null,
@@ -4570,12 +4665,81 @@ function Editor({
           scrollContainerRef={timelineScrollRef}
           missingMediaBlobIds={missingMediaBlobIds}
           onReloadMissingMedia={reloadMissingMedia}
+          onAddLyricLine={canEditSyncedLyrics ? handleAddLyricLine : null}
+          showLyricsLane={lyricsTrackShown}
+          canEditLyrics={canEditSyncedLyrics}
+          lyricsSyncActive={lyricsSyncActive}
         >
-          {({ header, tracks, zoomOverlay }) => (
-            <div className="relative grid grid-cols-[384px_1fr] grid-rows-[24px_minmax(0,1fr)] h-full min-h-0 min-w-0">
+          {({ header, tracks, zoomOverlay, lyricsLane }) => (
+            <div className={`relative grid grid-cols-[384px_1fr] ${lyricsTrackShown ? 'grid-rows-[24px_44px_minmax(0,1fr)]' : 'grid-rows-[24px_minmax(0,1fr)]'} h-full min-h-0 min-w-0`}>
               <div className="bg-gray-800 border-b border-r border-gray-700" />
               <div className="relative z-50 overflow-visible min-w-0">{header}</div>
-              <div className="absolute top-[32px] right-3 z-40 pointer-events-auto">{zoomOverlay}</div>
+              {lyricsTrackShown ? (
+                <>
+                  <div
+                    className="flex h-11 items-center justify-between border-b border-r border-gray-700 bg-gray-850 px-3"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setLyricsTrackContextMenu({ x: event.clientX, y: event.clientY });
+                    }}
+                  >
+                    <span className="truncate text-xs font-semibold uppercase tracking-wide text-gray-300">Lyrics</span>
+                    <div className="ml-2 flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        className={`rounded p-1.5 ${lyricsSyncActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-40`}
+                        onClick={handleToggleLyricsSync}
+                        disabled={!caps.canEditLyrics}
+                        title="Use synced lyrics"
+                        aria-label="Use synced lyrics"
+                        aria-pressed={lyricsSyncActive}
+                      >
+                        <AudioLines size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded p-1.5 text-gray-300 hover:bg-gray-700 hover:text-white"
+                        onClick={() => setShowLyricsDialog(true)}
+                        title="Edit lyrics"
+                        aria-label="Edit lyrics"
+                      ><FileText size={16} /></button>
+                    </div>
+                  </div>
+                  <div className="h-11 min-w-0 overflow-hidden">{lyricsLane}</div>
+                  {lyricsTrackContextMenu ? (
+                    <>
+                      <div
+                        className="fixed inset-0 z-[119]"
+                        aria-hidden="true"
+                        onMouseDown={() => setLyricsTrackContextMenu(null)}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          setLyricsTrackContextMenu({ x: event.clientX, y: event.clientY });
+                        }}
+                      />
+                      <div
+                        role="menu"
+                        aria-label="Lyrics track options"
+                        className="fixed z-[120] min-w-[160px] overflow-hidden rounded-md border border-gray-700 bg-gray-800 py-1 shadow-lg"
+                        style={{ left: lyricsTrackContextMenu.x, top: lyricsTrackContextMenu.y }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="w-full px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-gray-700"
+                          onClick={() => {
+                            setLyricsLaneVisible(false);
+                            setLyricsTrackContextMenu(null);
+                          }}
+                        >Hide lyrics track</button>
+                      </div>
+                    </>
+                  ) : null}
+                </>
+              ) : null}
+              <div className={`absolute ${lyricsTrackShown ? 'top-[76px]' : 'top-[32px]'} right-3 z-40 pointer-events-auto`}>{zoomOverlay}</div>
               <div
                 ref={timelineRowsScrollAreaRef}
                 className="col-span-2 min-h-0 overflow-y-auto scrollbar-hidden relative z-10"
@@ -4719,6 +4883,16 @@ function Editor({
           applyTrackArtistRefs(trackCreditsEditor.trackId, artistRefs);
         }}
       />
+
+      {!isAdvancedMixSession && !isLocalRecordingSession ? (
+        <LyricsEditorDialog
+          open={showLyricsDialog}
+          project={project}
+          updateProject={updateProject}
+          canEditLyrics={canEditVisibleLyrics}
+          onClose={() => setShowLyricsDialog(false)}
+        />
+      ) : null}
 
       {settingsOpen && !isAdvancedMixSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">

@@ -15,6 +15,8 @@ Notes:
 | `Space` | Play/Pause |
 | `R` | Start/Stop recording |
 | `L` | Toggle loop enabled/disabled |
+| `Shift + L` | Show/hide the Lyrics track |
+| `P` | Place the next lyric start while synced placement is active |
 | `Primary + Z` | Undo |
 | `Primary + Y` | Redo |
 | `Primary + Shift + Z` | Redo |
@@ -34,6 +36,13 @@ Notes:
 | `Alt + Shift + F` | Toggle fold recursively for selected/parent group |
 | `M` | Toggle mute on selected track |
 | `S` | Toggle solo on selected track |
+
+## Lyrics
+
+- Use `Shift`-double-click on a lyric bar or empty lane space to add a lyric line; the Lyrics editor is also available from the lane header.
+- Toggle `Use synced lyrics` in the Lyrics lane; the setting is saved with the project. While enabled, press `P` at each line’s start. The mode remains enabled until you toggle it off.
+- Drag a lyric bar to move its start. `Shift`-click a bar or use `Shift` + `Left`/`Right` to select a contiguous range, then drag any selected bar to move them together.
+- Double-click a lyric bar to edit its text. `Shift`-double-click a bar or empty lane space to insert a line.
 
 ## Clip Editing
 

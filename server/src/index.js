@@ -117,6 +117,29 @@ import { collectCreditInvolvements, groupInvolvementsByArtist } from './playerSe
 
 const PROJECT_SNAPSHOT_DURATION_MS_SQL = snapshotDurationMsSql('ph');
 
+function withDefaultProjectLyrics(snapshot = {}) {
+  const lyrics = snapshot?.lyrics && typeof snapshot.lyrics === 'object' ? snapshot.lyrics : {};
+  return {
+    ...snapshot,
+    lyrics: {
+      ...lyrics,
+      language: lyrics.language === 'en' || lyrics.language === 'sv'
+        ? lyrics.language
+        : config.defaultLyricLanguage,
+      useSyncedLyrics: lyrics.useSyncedLyrics === true,
+      lines: Array.isArray(lyrics.lines) ? lyrics.lines.flatMap((line) => {
+        if (!line || typeof line !== 'object') return [];
+        const startMs = line.startMs == null || line.startMs === '' ? null : Number(line.startMs);
+        return [{
+          id: String(line.id || ''),
+          text: String(line.text ?? ''),
+          startMs: Number.isFinite(startMs) ? Math.max(0, Math.round(startMs)) : null,
+        }];
+      }) : [],
+    },
+  };
+}
+
 const app = express();
 const server = http.createServer(app);
 const wsServer = new WebSocketServer({ noServer: true });
@@ -341,6 +364,7 @@ function attachProjectAccess(row, permissionMap) {
     canCreateProjects: Boolean(access?.canCreateProjects),
     canCreateTracks: Boolean(access?.canCreateTracks),
     canManageTracks: Boolean(access?.canManageTracks),
+    canManageLyrics: Boolean(access?.canManageLyrics),
     canEditAllTracks: Boolean(access?.canEditAllTracks),
     canListenTutti: Boolean(access?.canListenTutti),
     canReadProject: Boolean(access?.canOpenProject),
@@ -385,6 +409,7 @@ function canWriteProjectTracks(access) {
   return Boolean(
     access?.canCreateTracks
     || access?.canManageTracks
+    || access?.canManageLyrics
     || access?.canManageProject
   );
 }
@@ -581,6 +606,7 @@ async function appendProjectOp({ projectId, userId, clientOpId, op }) {
       access,
       currentSnapshot,
       nextSnapshot: provisionalNextSnapshot,
+      defaultLyricLanguage: config.defaultLyricLanguage,
     });
     const sharedSnapshot = preserveLocalOnlyProjectFields(validatedSnapshot, currentSnapshot);
     const nextSnapshot = {
@@ -1550,6 +1576,7 @@ async function buildEffectiveProjectPermissions(projectId) {
       canCreateProjects: Boolean(access.canCreateProjects),
       canCreateTracks: Boolean(access.canCreateTracks),
       canManageTracks: Boolean(access.canManageTracks),
+      canManageLyrics: Boolean(access.canManageLyrics),
       canEditAllTracks: Boolean(access.canEditAllTracks),
       canListenTutti: Boolean(access.canListenTutti),
       canReadProject: Boolean(access.canOpenProject),
@@ -2792,7 +2819,7 @@ app.post('/api/projects', requireAuth, async (req, res) => {
     }
 
     const projectId = String(req.body?.projectId || randomUUID());
-    const snapshot = initialSnapshot && typeof initialSnapshot === 'object'
+    const snapshot = withDefaultProjectLyrics(initialSnapshot && typeof initialSnapshot === 'object'
       ? { ...initialSnapshot, projectId, projectName: name, musicalNumber: requestedMusicalNumber, published: requestedPublished, showId: show.id, showName: show.name, credits: normalizeProjectCredits(initialSnapshot.credits || {}) }
       : {
         projectId,
@@ -2806,8 +2833,9 @@ app.post('/api/projects', requireAuth, async (req, res) => {
         credits: normalizeProjectCredits({}),
         tracks: [],
         trackTree: [],
+        lyrics: { language: config.defaultLyricLanguage, lines: [] },
         loop: { enabled: false, startMs: 0, endMs: 0 },
-      };
+      });
 
     const client = await pool.connect();
     try {
@@ -3099,6 +3127,9 @@ app.get('/api/projects/:id/bootstrap', requireAuth, async (req, res) => {
       ...payload,
       access,
       purpose,
+      runtimeConfig: {
+        defaultLyricLanguage: config.defaultLyricLanguage,
+      },
     });
   } catch (error) {
     console.error(error);

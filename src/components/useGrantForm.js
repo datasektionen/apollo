@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ALL_SCOPE_VALUE, PERMISSION_SCOPE_FLOW } from './grantAccess';
+import { LYRICS_TRACK_SCOPE_ID } from '../../shared/accessRules.js';
 
 function draftFromGrant(grant) {
   return {
@@ -104,10 +105,14 @@ export function useGrantForm({
   const partOptions = partScopeValue !== ALL_SCOPE_VALUE && !derivedPartOptions.some((option) => option.value === partScopeValue)
     ? [...derivedPartOptions, { value: partScopeValue, label: partLabelByValue.get(partScopeValue) || partScopeValue }]
     : derivedPartOptions;
-  const trackOptions = scopedTrackOptions.filter((track) => (
-    (groupScopeValue === ALL_SCOPE_VALUE || (track.groupValues || []).includes(groupScopeValue))
-    && (partScopeValue === ALL_SCOPE_VALUE || (track.partValues || []).includes(partScopeValue))
-  ));
+  const trackOptions = [
+    { id: LYRICS_TRACK_SCOPE_ID, name: 'Lyrics', isVirtual: true, groupValues: [], partValues: [] },
+    ...(scopeProjectId === ALL_SCOPE_VALUE ? [] : scopedTrackOptions.filter((track) => (
+      !track.isVirtual
+      && (groupScopeValue === ALL_SCOPE_VALUE || (track.groupValues || []).includes(groupScopeValue))
+      && (partScopeValue === ALL_SCOPE_VALUE || (track.partValues || []).includes(partScopeValue))
+    ))),
+  ];
 
   useEffect(() => {
     if (!hasShowScope) setScopeShowId(ALL_SCOPE_VALUE);
@@ -178,6 +183,12 @@ export function useGrantForm({
     }
   }, [scopeTrackId, trackOptions]);
 
+  useEffect(() => {
+    if (scopeTrackId !== LYRICS_TRACK_SCOPE_ID) return;
+    setGroupScopeValue(ALL_SCOPE_VALUE);
+    setPartScopeValue(ALL_SCOPE_VALUE);
+  }, [scopeTrackId]);
+
   const effectiveScopeType = (() => {
     if (hasTrackScope && scopeTrackId !== ALL_SCOPE_VALUE) return 'track';
     if (hasProjectScope && scopeProjectId !== ALL_SCOPE_VALUE) return 'project';
@@ -201,15 +212,15 @@ export function useGrantForm({
     permissionKey,
     scopeType: effectiveScopeType,
     scopeShowId: effectiveScopeType === 'show' || effectiveScopeType === 'project' || effectiveScopeType === 'track'
-      ? scopeShowId
+      ? (scopeShowId === ALL_SCOPE_VALUE ? null : scopeShowId)
       : null,
     scopeProjectId: effectiveScopeType === 'project' || effectiveScopeType === 'track'
-      ? scopeProjectId
+      ? (scopeProjectId === ALL_SCOPE_VALUE ? null : scopeProjectId)
       : null,
     scopeTrackId: effectiveScopeType === 'track' ? scopeTrackId : null,
     scopeNameValue: null,
-    scopeGroupNameValue: hasGroupScope && groupScopeValue !== ALL_SCOPE_VALUE ? groupScopeValue : null,
-    scopePartNameValue: hasPartScope && partScopeValue !== ALL_SCOPE_VALUE ? partScopeValue : null,
+    scopeGroupNameValue: scopeTrackId !== LYRICS_TRACK_SCOPE_ID && hasGroupScope && groupScopeValue !== ALL_SCOPE_VALUE ? groupScopeValue : null,
+    scopePartNameValue: scopeTrackId !== LYRICS_TRACK_SCOPE_ID && hasPartScope && partScopeValue !== ALL_SCOPE_VALUE ? partScopeValue : null,
   });
 
   return {
@@ -239,6 +250,10 @@ export function useGrantForm({
     scopeTrackId,
     setScopeTrackId: (value) => {
       scopeTouchedRef.current = true;
+      if (value === LYRICS_TRACK_SCOPE_ID) {
+        setGroupScopeValue(ALL_SCOPE_VALUE);
+        setPartScopeValue(ALL_SCOPE_VALUE);
+      }
       setScopeTrackId(value);
     },
     hasShowScope,
@@ -246,6 +261,7 @@ export function useGrantForm({
     hasGroupScope,
     hasPartScope,
     hasTrackScope,
+    isLyricsTrackScope: scopeTrackId === LYRICS_TRACK_SCOPE_ID,
     showOptions,
     projectOptions,
     groupOptions,

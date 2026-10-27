@@ -13,8 +13,11 @@ import {
   grantFieldsFromBody,
   isProjectWriteRejectedError,
   resolveProjectAccessFromGrantRows,
+  buildProjectAccessSummary,
+  getProjectAccessCatalog,
   validateAndTransformProjectWrite,
 } from '../rbac.js';
+import { canEditProjectLyrics, LYRICS_TRACK_SCOPE_ID } from '../../../shared/accessRules.js';
 
 describe('extractProjectAccessTags', () => {
   it('collects unique normalized group tags from the track tree', () => {
@@ -46,6 +49,56 @@ describe('extractProjectAccessTags', () => {
       { tagType: 'group_name', tagValue: 'soprano', displayName: 'Soprano' },
       { tagType: 'part_name', tagValue: 'choir', displayName: 'Choir' },
     ]);
+  });
+});
+
+describe('RBAC track catalog', () => {
+  it('includes the built-in Lyrics track for every project', async () => {
+    const db = {
+      query: async (sql) => {
+        if (sql.includes('FROM shows')) return { rows: [] };
+        if (sql.includes('FROM projects p')) {
+          return { rows: [{ id: 'project-1', name: 'Song', musicalNumber: '1.1', showId: 'show-1', showName: 'Show' }] };
+        }
+        if (sql.includes('FROM project_heads')) {
+          return { rows: [{ projectId: 'project-1', snapshot: { tracks: [], trackTree: [] } }] };
+        }
+        if (sql.includes('FROM project_access_tags')) return { rows: [] };
+        return { rows: [] };
+      },
+    };
+
+    const catalog = await getProjectAccessCatalog(db);
+    expect(catalog.tracks).toContainEqual(expect.objectContaining({
+      id: LYRICS_TRACK_SCOPE_ID,
+      name: 'Lyrics',
+      isVirtual: true,
+      projectId: 'project-1',
+    }));
+  });
+
+  it('keeps a track-manager grant for the virtual Lyrics track in the project access summary', () => {
+    const summary = buildProjectAccessSummary('writer', {
+      id: 'project-1',
+      showId: 'show-1',
+    }, [{
+      permissionKey: 'track_manager',
+      scopeType: 'track',
+      scopeProjectId: 'project-1',
+      scopeShowId: 'show-1',
+      scopeTrackId: LYRICS_TRACK_SCOPE_ID,
+      scopeLabel: 'Show / Song / Lyrics',
+    }], null, false, {
+      tracks: [{ id: 'audio-1', name: 'Lead', role: 'lead', clips: [] }],
+      trackTree: [{ id: 'audio-node-1', kind: 'track', trackId: 'audio-1', parentId: null }],
+    });
+
+    expect(summary.canManageTracks).toBe(false);
+    expect(canEditProjectLyrics(summary)).toBe(true);
+    expect(summary.manageableTrackScopes).toContainEqual(expect.objectContaining({
+      type: 'track',
+      trackId: LYRICS_TRACK_SCOPE_ID,
+    }));
   });
 });
 
@@ -357,6 +410,61 @@ describe('validateAndTransformProjectWrite', () => {
         published: true,
       },
     })).rejects.toThrow('Project-level settings require project manager access');
+  });
+
+  it('only allows lyrics changes to project managers or managers scoped to Lyrics', async () => {
+    const currentSnapshot = {
+      projectId: 'project-1',
+      projectName: 'Test',
+      musicalNumber: '1.1',
+      published: false,
+      sampleRate: 44100,
+      masterVolume: 100,
+      showId: 'show-1',
+      tracks: [],
+      trackTree: [],
+      loop: { enabled: false, startMs: 0, endMs: 0 },
+    };
+    const nextSnapshot = {
+      ...currentSnapshot,
+      lyrics: {
+        language: 'en',
+        useSyncedLyrics: true,
+        lines: [{ id: 'line-1', text: 'Hello', startMs: 0, endMs: 500, source: 'dsp', confidence: 0.6 }],
+      },
+    };
+    const project = { id: 'project-1', createdByUserId: 'owner-1', showId: 'show-1' };
+
+    await expect(validateAndTransformProjectWrite({
+      userId: 'user-4',
+      project,
+      access: { canManageTracks: true },
+      currentSnapshot,
+      nextSnapshot,
+      defaultLyricLanguage: 'en',
+    })).rejects.toThrow('You need write access to the Lyrics track to edit lyrics');
+
+    await expect(validateAndTransformProjectWrite({
+      userId: 'user-4',
+      project,
+      access: {
+        canManageTracks: true,
+        canCreateTracks: true,
+        manageableTrackScopes: [{ type: 'track', trackId: LYRICS_TRACK_SCOPE_ID, label: 'Lyrics' }],
+      },
+      currentSnapshot,
+      nextSnapshot,
+      defaultLyricLanguage: 'en',
+    })).resolves.toMatchObject({ lyrics: nextSnapshot.lyrics });
+
+    await expect(validateAndTransformProjectWrite({
+      userId: 'user-4',
+      project,
+      access: { canManageProject: true },
+      currentSnapshot,
+      nextSnapshot,
+      defaultLyricLanguage: 'en',
+    })).resolves.toBe(nextSnapshot);
   });
 
   it('rejects solo changes when the writer cannot edit every track', async () => {

@@ -11,17 +11,25 @@ import { audioManager } from '../lib/audioManager';
 import Waveform from './Waveform';
 import { calculateGlobalPeakAmplitude } from '../utils/waveformUtils';
 import { getEffectiveTrackMix, getGroupDescendantTrackIdsByGroup, getTrackHeight, normalizeTrackTree } from '../utils/trackTree';
-import { 
-  constrainClipMove, 
-  constrainCropStart, 
-  constrainCropEnd, 
+import {
+  constrainClipMove,
+  constrainCropStart,
+  constrainCropEnd,
   canAddClip,
-  findSafePosition 
+  findSafePosition
 } from '../utils/clipCollision';
 import { isPrimaryModifierPressed } from '../utils/keyboard';
 import { reportUserError } from '../utils/errorReporter';
 import { createId } from '../utils/id';
 import { isClipMediaMissing } from '../utils/mediaErrors';
+import {
+  calculateLyricStartMovePreview,
+  getLyricLineEndMs,
+  getLyricLineRange,
+  getLyricPlacementPreviewStart,
+  getPlacedLyricLines,
+  pruneShortEmptyLyricLines,
+} from '../utils/lyricTimeline';
 
 const TIMELINE_VIEWPORT_WIDTH = 1920; // Default viewport width (updated dynamically)
 const MIN_VISIBLE_DURATION_MS = 8000; // Minimum duration to show when zoomed out
@@ -36,6 +44,7 @@ const MISSING_CLIP_WAVEFORM_COLOR = 'rgba(248, 113, 113, 0.9)';
 const GROUP_CLIP_WAVEFORM_COLOR = 'rgba(123, 173, 255, 0.55)';
 const GROUP_MISSING_CLIP_WAVEFORM_COLOR = 'rgba(248, 113, 113, 0.55)';
 const REMOTE_CLIP_ANIMATION_MS = 800;
+
 const RULER_INTERVALS_MS = [
   100, 200, 500,
   1000, 2000, 5000,
@@ -64,11 +73,11 @@ const getTrackYPosition = (rows, rowIndex) => {
  * Timeline component
  * Displays tracks, clips, and waveforms with editing capabilities
  */
-function Timeline({ 
-  project, 
+function Timeline({
+  project,
   rows = [],
   remoteAnimation = null,
-  currentTimeMs, 
+  currentTimeMs,
   isPlaying,
   isRecording,
   recordingSegments,
@@ -93,6 +102,10 @@ function Timeline({
   sharedVerticalScroll = false,
   missingMediaBlobIds = null,
   onReloadMissingMedia = null,
+  onAddLyricLine = null,
+  showLyricsLane = false,
+  canEditLyrics = false,
+  lyricsSyncActive = false,
   children,
 }) {
   const timelineRef = useRef(null);
@@ -106,6 +119,11 @@ function Timeline({
   const [selectedClipIds, setSelectedClipIds] = useState([]);
   const [selectedClipHistory, setSelectedClipHistory] = useState([]);
   const [selectedClipId, setSelectedClipId] = useState(null);
+  const [selectedLyricLineIds, setSelectedLyricLineIds] = useState([]);
+  const [focusedLyricLineId, setFocusedLyricLineId] = useState(null);
+  const [lyricPreview, setLyricPreview] = useState(null);
+  const [editingLyricLineId, setEditingLyricLineId] = useState(null);
+  const [editingLyricText, setEditingLyricText] = useState('');
   const [clipboardClip, setClipboardClip] = useState(null);
   const [rulerDragState, setRulerDragState] = useState(null);
   const [loopMarkerDragState, setLoopMarkerDragState] = useState(null);
@@ -114,6 +132,10 @@ function Timeline({
   const dragPreviewRef = useRef(null);
   const dragMoveRafRef = useRef(null);
   const dragMovePointRef = useRef(null);
+  const lyricDragRef = useRef(null);
+  const lyricTextEditCancelledRef = useRef(false);
+  const lyricSelectionAnchorRef = useRef(null);
+  const suppressLyricClickRef = useRef(false);
   const timelineSelectionRef = useRef(null);
   const timelineSelectionRafRef = useRef(null);
   const timelineSelectionPointRef = useRef(null);
@@ -128,6 +150,25 @@ function Timeline({
   const animatedClipLayoutByIdRef = useRef({});
   const clipAnimationFrameRef = useRef(null);
   const selectedClipIdSet = useMemo(() => new Set(selectedClipIds), [selectedClipIds]);
+
+  useEffect(() => {
+    setSelectedLyricLineIds([]);
+    setFocusedLyricLineId(null);
+    setEditingLyricLineId(null);
+    setLyricPreview(null);
+    lyricSelectionAnchorRef.current = null;
+    lyricDragRef.current = null;
+  }, [project.projectId]);
+
+  useEffect(() => {
+    if (showLyricsLane && lyricsSyncActive) return;
+    setSelectedLyricLineIds([]);
+    setFocusedLyricLineId(null);
+    setEditingLyricLineId(null);
+    setLyricPreview(null);
+    lyricSelectionAnchorRef.current = null;
+    lyricDragRef.current = null;
+  }, [showLyricsLane, lyricsSyncActive]);
   // Per-track permission gate (hosted projects). Clips on locked tracks can be
   // selected and inspected but not dragged, cropped or gain-edited.
   const isTrackEditable = useCallback(
@@ -185,7 +226,7 @@ function Timeline({
         setContainerWidth(timelineRef.current.clientWidth || TIMELINE_VIEWPORT_WIDTH);
       }
     };
-    
+
     updateWidth();
     window.addEventListener('resize', updateWidth);
     return () => window.removeEventListener('resize', updateWidth);
@@ -215,7 +256,7 @@ function Timeline({
       setGlobalPeakAmplitude(peak);
     }
   }, [project.tracks, loadedClipIds]);
-  
+
   useEffect(() => {
     const interval = setInterval(() => {
       if (!project) return;
@@ -350,6 +391,20 @@ function Timeline({
     setSelectedClipHistory([]);
     setSelectedClipId(null);
   };
+
+  const clearSelectedLyrics = () => {
+    setSelectedLyricLineIds([]);
+    setFocusedLyricLineId(null);
+    setEditingLyricLineId(null);
+    lyricSelectionAnchorRef.current = null;
+  };
+
+  useEffect(() => {
+    if (selectedClipIds.length === 0 && !selectedClipId) return;
+    if (selectedLyricLineIds.length > 0 || focusedLyricLineId || editingLyricLineId) {
+      clearSelectedLyrics();
+    }
+  }, [selectedClipIds, selectedClipId, selectedLyricLineIds, focusedLyricLineId, editingLyricLineId]);
 
   const getLastSelectedFromHistory = (selectedIds, history) => {
     const selectedSet = new Set(selectedIds);
@@ -536,14 +591,14 @@ function Timeline({
     }, 0);
     return Math.max(max, trackEnd);
   }, 0);
-  
+
   const calculatePaddedDuration = (durationMs, intervalMs) => {
     if (durationMs === 0) return 0;
     const paddingMs = Math.max(intervalMs, durationMs * 0.1);
     const paddedDuration = durationMs + paddingMs;
     return Math.ceil(paddedDuration / intervalMs) * intervalMs;
   };
-  
+
   const tempMinZoomDurationMs = Math.max(rawProjectDurationMs, MIN_VISIBLE_DURATION_MS);
   const tempPixelsPerMs = containerWidth / (visibleDurationMs || tempMinZoomDurationMs);
   const tempRulerIntervalMs = (() => {
@@ -557,7 +612,7 @@ function Timeline({
     }
     return bestInterval;
   })();
-  
+
   const projectDurationMs = calculatePaddedDuration(rawProjectDurationMs, tempRulerIntervalMs);
   const minZoomDurationMs = Math.max(projectDurationMs, MIN_VISIBLE_DURATION_MS);
   const maxZoomDurationMs = MAX_ZOOM_VISIBLE_MS;
@@ -565,13 +620,237 @@ function Timeline({
   const clampedVisibleMs = Math.max(maxZoomDurationMs, currentVisibleMs);
   const pixelsPerMs = containerWidth / clampedVisibleMs;
   const timelineWidthPx = Math.max(projectDurationMs, minZoomDurationMs) * pixelsPerMs;
-  
+
+  const beginLyricDrag = (event, line) => {
+    if (!canEditLyrics || event.button !== 0) return;
+    if (event.shiftKey || event.metaKey || event.ctrlKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    clearSelectedClips();
+    const alreadySelected = selectedLyricLineIds.includes(line.id);
+    const selectedIds = alreadySelected ? selectedLyricLineIds : [line.id];
+    setSelectedLyricLineIds(selectedIds);
+    if (!alreadySelected) {
+      lyricSelectionAnchorRef.current = line.id;
+      setFocusedLyricLineId(line.id);
+    }
+    const initial = {
+      lineIds: selectedIds,
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      baselineLines: (project.lyrics?.lines || []).map((candidate) => ({ ...candidate })),
+      previewByLineId: null,
+    };
+    lyricDragRef.current = initial;
+  };
+
+  useEffect(() => {
+    const handlePointerMove = (event) => {
+      const drag = lyricDragRef.current;
+      if (!drag || (drag.pointerId != null && event.pointerId != null && drag.pointerId !== event.pointerId)) return;
+      const deltaMs = Math.round((event.clientX - drag.clientX) / pixelsPerMs);
+      const previewByLineId = calculateLyricStartMovePreview(
+        drag.baselineLines,
+        drag.lineIds,
+        deltaMs,
+        rawProjectDurationMs,
+      );
+      if (!previewByLineId) return;
+      drag.previewByLineId = previewByLineId;
+      setLyricPreview({ byLineId: previewByLineId });
+    };
+
+    const handlePointerUp = (event) => {
+      const drag = lyricDragRef.current;
+      if (!drag || (drag.pointerId != null && event.pointerId != null && drag.pointerId !== event.pointerId)) return;
+      const previewByLineId = drag.previewByLineId;
+      lyricDragRef.current = null;
+      setLyricPreview(null);
+      const changedLineIds = new Set(Object.entries(previewByLineId || {})
+        .filter(([lineId, placement]) => {
+          const original = drag.baselineLines.find((line) => line.id === lineId);
+          return original && placement.startMs !== original.startMs;
+        })
+        .map(([lineId]) => lineId));
+      suppressLyricClickRef.current = changedLineIds.size > 0;
+      if (changedLineIds.size > 0) {
+        const movedLines = drag.baselineLines.map((line) => {
+          const placement = previewByLineId?.[line.id];
+          return placement && changedLineIds.has(line.id)
+            ? { id: line.id, text: line.text, startMs: placement.startMs }
+            : line;
+        });
+        const nextLines = pruneShortEmptyLyricLines(movedLines, rawProjectDurationMs);
+        const remainingIds = new Set(nextLines.map((line) => line.id));
+        setSelectedLyricLineIds((current) => current.filter((lineId) => remainingIds.has(lineId)));
+        if (focusedLyricLineId && !remainingIds.has(focusedLyricLineId)) {
+          const nextFocus = selectedLyricLineIds.find((lineId) => remainingIds.has(lineId)) || null;
+          setFocusedLyricLineId(nextFocus);
+          lyricSelectionAnchorRef.current = nextFocus;
+        }
+        updateProject((current) => {
+          const currentLines = (current.lyrics?.lines || []).map((line) => {
+            const placement = previewByLineId?.[line.id];
+            return placement && changedLineIds.has(line.id)
+              ? { id: line.id, text: line.text, startMs: placement.startMs }
+              : line;
+          });
+          return {
+            ...current,
+            lyrics: {
+              ...(current.lyrics || {}),
+              lines: pruneShortEmptyLyricLines(currentLines, rawProjectDurationMs),
+            },
+          };
+        }, changedLineIds.size > 1 ? 'Move lyric lines' : 'Move lyric line');
+      }
+    };
+
+    const handlePointerCancel = (event) => {
+      const drag = lyricDragRef.current;
+      if (!drag || (drag.pointerId != null && event.pointerId != null && drag.pointerId !== event.pointerId)) return;
+      lyricDragRef.current = null;
+      setLyricPreview(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerCancel);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+    };
+  }, [focusedLyricLineId, pixelsPerMs, project, rawProjectDurationMs, selectedLyricLineIds, updateProject]);
+
+  const deleteSelectedLyricLines = () => {
+    if (!canEditLyrics || selectedLyricLineIds.length === 0) return;
+    const selected = new Set(selectedLyricLineIds);
+    updateProject((current) => ({
+      ...current,
+      lyrics: {
+        ...(current.lyrics || {}),
+        lines: (current.lyrics?.lines || []).filter((line) => !selected.has(line.id)),
+      },
+    }), selected.size > 1 ? 'Delete lyric lines' : 'Delete lyric line');
+    setSelectedLyricLineIds([]);
+    setFocusedLyricLineId(null);
+    lyricSelectionAnchorRef.current = null;
+  };
+
+  const selectLyricLine = (event, lineId) => {
+    event.stopPropagation();
+    clearSelectedClips();
+    if (suppressLyricClickRef.current) {
+      suppressLyricClickRef.current = false;
+      return;
+    }
+    if (event.shiftKey) {
+      const anchorId = lyricSelectionAnchorRef.current || focusedLyricLineId || lineId;
+      lyricSelectionAnchorRef.current = anchorId;
+      setSelectedLyricLineIds(getLyricLineRange(project.lyrics?.lines || [], anchorId, lineId));
+    } else {
+      lyricSelectionAnchorRef.current = lineId;
+      setSelectedLyricLineIds([lineId]);
+    }
+    setFocusedLyricLineId(lineId);
+  };
+
+  const navigateLyricSelection = (direction, extendRange = false) => {
+    const orderedIds = getPlacedLyricLines(project.lyrics?.lines || []).map(({ line }) => line.id);
+    if (!orderedIds.length) return false;
+    const currentId = focusedLyricLineId || selectedLyricLineIds[selectedLyricLineIds.length - 1];
+    const currentIndex = orderedIds.indexOf(currentId);
+    if (currentIndex < 0) return false;
+    const targetIndex = Math.max(0, Math.min(orderedIds.length - 1, currentIndex + direction));
+    const targetId = orderedIds[targetIndex];
+    clearSelectedClips();
+    if (extendRange) {
+      const anchorId = lyricSelectionAnchorRef.current || currentId;
+      lyricSelectionAnchorRef.current = anchorId;
+      setSelectedLyricLineIds(getLyricLineRange(project.lyrics?.lines || [], anchorId, targetId));
+    } else {
+      lyricSelectionAnchorRef.current = targetId;
+      setSelectedLyricLineIds([targetId]);
+    }
+    setFocusedLyricLineId(targetId);
+    return true;
+  };
+
+  const saveLyricText = (lineId) => {
+    const existingLines = project.lyrics?.lines || [];
+    const line = existingLines.find((candidate) => candidate.id === lineId);
+    if (line) {
+      const editedLines = existingLines.map((candidate) => candidate.id === lineId
+        ? { id: candidate.id, text: editingLyricText, startMs: candidate.startMs ?? null }
+        : candidate);
+      const nextLines = pruneShortEmptyLyricLines(editedLines, rawProjectDurationMs);
+      const changed = nextLines.length !== existingLines.length || nextLines.some((candidate, index) => (
+        candidate.id !== existingLines[index]?.id
+        || candidate.text !== existingLines[index]?.text
+        || candidate.startMs !== existingLines[index]?.startMs
+      ));
+      if (changed) {
+        updateProject((current) => ({
+          ...current,
+          lyrics: {
+            ...(current.lyrics || {}),
+            lines: pruneShortEmptyLyricLines((current.lyrics?.lines || []).map((candidate) => candidate.id === lineId
+              ? { id: candidate.id, text: editingLyricText, startMs: candidate.startMs ?? null }
+              : candidate), rawProjectDurationMs),
+          },
+        }), 'Edit lyric line');
+      }
+    }
+    setEditingLyricLineId(null);
+  };
+
+  const startLyricTextEdit = (line) => {
+    if (!canEditLyrics) return;
+    clearSelectedClips();
+    lyricSelectionAnchorRef.current = line.id;
+    setSelectedLyricLineIds([line.id]);
+    setFocusedLyricLineId(line.id);
+    lyricTextEditCancelledRef.current = false;
+    setEditingLyricLineId(line.id);
+    setEditingLyricText(line.text || '');
+  };
+
+  const editLyricText = (event, line) => {
+    event.preventDefault();
+    event.stopPropagation();
+    startLyricTextEdit(line);
+  };
+
+  const lyricStartAtClientX = (clientX, target) => {
+    const lane = target?.closest?.('[aria-label="Lyrics timeline lane"]');
+    if (!lane) return 0;
+    const positionPx = clientX - lane.getBoundingClientRect().left + scrollLeft;
+    return Math.max(0, Math.min(rawProjectDurationMs, Math.round(positionPx / pixelsPerMs)));
+  };
+
+  const insertLyricAtPointer = (event) => {
+    const lineId = onAddLyricLine?.(lyricStartAtClientX(event.clientX, event.currentTarget));
+    if (lineId) startLyricTextEdit({ id: lineId, text: '' });
+  };
+
+  const handleLyricBarDoubleClick = (event, line) => {
+    if (!canEditLyrics) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.shiftKey) {
+      insertLyricAtPointer(event);
+      return;
+    }
+    editLyricText(event, line);
+  };
+
   const zoomSliderValue = minZoomDurationMs > maxZoomDurationMs
     ? Math.log(clampedVisibleMs / maxZoomDurationMs) / Math.log(minZoomDurationMs / maxZoomDurationMs)
     : 0;
   // UI direction: left = zoomed out, right = zoomed in.
   const zoomSliderUiValue = 1 - zoomSliderValue;
-  
+
   const sliderValueToDuration = (value) => {
     if (minZoomDurationMs <= maxZoomDurationMs) return maxZoomDurationMs;
     return maxZoomDurationMs * Math.pow(minZoomDurationMs / maxZoomDurationMs, value);
@@ -581,7 +860,7 @@ function Timeline({
     shouldCenterOnPlayheadAfterZoomRef.current = true;
     setVisibleDurationMs(nextVisibleDurationMs);
   };
-  
+
   const formatVisibleDuration = (durationMs) => {
     const seconds = durationMs / 1000;
     if (seconds < 1) return `${Math.round(durationMs)}ms`;
@@ -590,7 +869,7 @@ function Timeline({
     const remainingSeconds = Math.round(seconds % 60);
     return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
   };
-  
+
   const calculateRulerInterval = () => {
     const targetPixelsPerInterval = 80;
     const msPerInterval = targetPixelsPerInterval / pixelsPerMs;
@@ -602,7 +881,7 @@ function Timeline({
     }
     return bestInterval;
   };
-  
+
   const rulerIntervalMs = calculateRulerInterval();
 
   useEffect(() => {
@@ -623,7 +902,7 @@ function Timeline({
     setScrollLeft(targetScrollLeft);
     shouldCenterOnPlayheadAfterZoomRef.current = false;
   }, [pixelsPerMs, timelineWidthPx, containerWidth, currentTimeMs]);
-  
+
   const formatRulerTime = (ms, intervalMs) => {
     // Zoomed in: show decisecond precision.
     if (intervalMs < 1000) {
@@ -651,18 +930,18 @@ function Timeline({
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
-  
+
   useEffect(() => {
     if (visibleDurationMs === null && prevProjectDurationRef.current !== null) {
       const prevDuration = prevProjectDurationRef.current;
       const currentDuration = projectDurationMs;
-      
+
       if (prevDuration !== currentDuration) {
         const preservedDuration = Math.max(prevDuration, MIN_VISIBLE_DURATION_MS);
         setVisibleDurationMs(preservedDuration);
       }
     }
-    
+
     prevProjectDurationRef.current = projectDurationMs;
   }, [projectDurationMs, visibleDurationMs]);
 
@@ -846,6 +1125,7 @@ function Timeline({
 
   const handleTimelineMouseDown = (e) => {
     if (e.button !== 0 || dragState) return;
+    clearSelectedLyrics();
     e.preventDefault();
     const point = getTimelineContentPoint(e.clientX, e.clientY);
     if (!point) return;
@@ -867,6 +1147,7 @@ function Timeline({
 
   const handleClipClick = (e, clip, trackId) => {
     e.stopPropagation();
+    clearSelectedLyrics();
     const clipId = clip.id;
     const isToggleSelect = isPrimaryModifierPressed(e) && !e.shiftKey;
     const isRangeSelect = e.shiftKey;
@@ -923,6 +1204,7 @@ function Timeline({
   const handleClipMouseDown = (e, clip, track) => {
     e.preventDefault();
     e.stopPropagation();
+    if (e.button === 0) clearSelectedLyrics();
 
     if (e.button === 0 && (e.shiftKey || isPrimaryModifierPressed(e))) {
       const row = trackRowByTrackId.get(track.id);
@@ -1601,10 +1883,10 @@ function Timeline({
   }, [selectedClipId, selectedClipIds, selectedClipHistory, project.tracks]);
 
   useEffect(() => {
-    if (!shortcutsEnabled && !deleteClipShortcutEnabled) return;
+    if (!shortcutsEnabled && !deleteClipShortcutEnabled && !(canEditLyrics && selectedLyricLineIds.length > 0)) return;
 
     const handleKeyDown = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
 
       const hasTrackSelection = selectedRowKind !== 'group' && Boolean(selectedTrackId);
       const selectedTrack = hasTrackSelection ? project.tracks.find(t => t.id === selectedTrackId) : null;
@@ -1615,6 +1897,34 @@ function Timeline({
         : null;
       const selectedClip = focusedSelectedEntry?.clip
         || (selectedTrack ? selectedTrack.clips.find(c => c.id === selectedClipId) : null);
+
+      if (canEditLyrics && selectedLyricLineIds.length > 0
+        && !e.ctrlKey && !e.metaKey && !e.altKey
+        && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateLyricSelection(e.code === 'ArrowRight' ? 1 : -1, e.shiftKey);
+        return;
+      }
+
+      if (canEditLyrics && selectedLyricLineIds.length > 0
+        && e.code === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const lineId = focusedLyricLineId || selectedLyricLineIds[selectedLyricLineIds.length - 1];
+        const line = (project.lyrics?.lines || []).find((candidate) => candidate.id === lineId);
+        if (line) {
+          e.preventDefault();
+          e.stopPropagation();
+          startLyricTextEdit(line);
+          return;
+        }
+      }
+
+      if (!advancedMixLocked && canEditLyrics && selectedLyricLineIds.length > 0
+        && (e.code === 'Delete' || e.code === 'Backspace')) {
+        e.preventDefault();
+        deleteSelectedLyricLines();
+        return;
+      }
 
       if (advancedMixLocked && (e.code === 'Delete' || e.code === 'Backspace') && (hasSelectedClips || hasTrackSelection)) {
         e.preventDefault();
@@ -1961,6 +2271,9 @@ function Timeline({
   }, [
     shortcutsEnabled,
     deleteClipShortcutEnabled,
+    canEditLyrics,
+    selectedLyricLineIds,
+    focusedLyricLineId,
     advancedMixLocked,
     canSoloTracks,
     isTrackEditable,
@@ -2000,7 +2313,7 @@ function Timeline({
     const hasLoop = project.loop.startMs !== undefined && project.loop.endMs !== undefined;
     const clickedLoop = hasLoop && timeMs >= project.loop.startMs && timeMs <= project.loop.endMs;
     const mode = clickedLoop ? 'move' : 'create';
-    
+
     setRulerDragState({
       startTimeMs: timeMs,
       startX: e.clientX,
@@ -2016,7 +2329,7 @@ function Timeline({
     e.preventDefault();
     e.stopPropagation();
     if (e.button !== 0) return; // Only left click
-    
+
     setLoopMarkerDragState({
       markerType, // 'start' or 'end'
       initialStartMs: project.loop.startMs,
@@ -2029,12 +2342,12 @@ function Timeline({
 
     const handleMouseMove = (e) => {
       const deltaX = Math.abs(e.clientX - rulerDragState.startX);
-      
+
       // Consider it a drag if mouse moved more than 5 pixels
       if (deltaX > 5 && !rulerDragState.isDragging) {
         setRulerDragState(prev => ({ ...prev, isDragging: true }));
       }
-      
+
       if (rulerDragState.isDragging) {
         const rect = rulerScrollRef.current.getBoundingClientRect();
         const x = e.clientX - rect.left + scrollLeft;
@@ -2078,7 +2391,7 @@ function Timeline({
         if (rulerDragState.mode === 'move') {
           const finalStartMs = rulerDragState.currentStartMs ?? rulerDragState.initialLoopStartMs;
           const finalEndMs = rulerDragState.currentEndMs ?? rulerDragState.initialLoopEndMs;
-          if (finalStartMs !== rulerDragState.initialLoopStartMs || 
+          if (finalStartMs !== rulerDragState.initialLoopStartMs ||
               finalEndMs !== rulerDragState.initialLoopEndMs) {
             updateLoop((loop) => ({
               ...loop,
@@ -2091,10 +2404,10 @@ function Timeline({
           const rect = rulerScrollRef.current.getBoundingClientRect();
           const x = e.clientX - rect.left + scrollLeft;
           const endTimeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
-          
+
           const startMs = Math.min(rulerDragState.startTimeMs, endTimeMs);
           const endMs = Math.max(rulerDragState.startTimeMs, endTimeMs);
-          
+
           // Only create loop if there's a meaningful range (at least 100ms)
           if (endMs - startMs >= 100) {
             updateLoop(() => ({
@@ -2112,7 +2425,7 @@ function Timeline({
       } else {
         onSeek(rulerDragState.startTimeMs);
       }
-      
+
       setRulerDragState(null);
     };
 
@@ -2133,10 +2446,10 @@ function Timeline({
       const rect = rulerScrollRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left + scrollLeft;
       const timeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
-      
+
       let newStartMs = loopMarkerDragState.initialStartMs;
       let newEndMs = loopMarkerDragState.initialEndMs;
-      
+
       if (loopMarkerDragState.markerType === 'start') {
         // Dragging start marker - allow crossing past end
         newStartMs = timeMs;
@@ -2144,7 +2457,7 @@ function Timeline({
         // Dragging end marker - allow crossing past start
         newEndMs = timeMs;
       }
-      
+
       // Update the drag state to store current values for visual update
       setLoopMarkerDragState(prev => ({
         ...prev,
@@ -2159,9 +2472,9 @@ function Timeline({
       const rawEndMs = loopMarkerDragState.currentEndMs ?? loopMarkerDragState.initialEndMs;
       const finalStartMs = Math.min(rawStartMs, rawEndMs);
       const finalEndMs = Math.max(rawStartMs, rawEndMs);
-      
+
       // Only create undo entry if values actually changed
-      if (finalStartMs !== loopMarkerDragState.initialStartMs || 
+      if (finalStartMs !== loopMarkerDragState.initialStartMs ||
           finalEndMs !== loopMarkerDragState.initialEndMs) {
         updateLoop((loop) => ({
           ...loop,
@@ -2194,7 +2507,7 @@ function Timeline({
         e.preventDefault();
         const delta = e.deltaY * 0.001; // Inverted: scroll up = zoom in, scroll down = zoom out
         const newSliderValue = Math.max(0, Math.min(1, zoomSliderValue + delta));
-        
+
         if (newSliderValue >= 0.99) {
           applyZoomDuration(null);
         } else {
@@ -2228,7 +2541,7 @@ function Timeline({
     const timelineElement = timelineRef.current;
     const tracksElement = tracksScrollRef.current;
     const rulerElement = rulerScrollRef.current;
-    
+
     if (timelineElement) {
       timelineElement.addEventListener('wheel', handleWheel, { passive: false });
     }
@@ -2251,13 +2564,13 @@ function Timeline({
       }
     };
   }, [zoomSliderValue, minZoomDurationMs, maxZoomDurationMs]);
-  
+
   const handleZoomIn = () => {
     const newSliderValue = Math.max(0, zoomSliderValue - 0.1);
     const newDuration = sliderValueToDuration(newSliderValue);
     applyZoomDuration(newDuration);
   };
-  
+
   const handleZoomOut = () => {
     const newSliderValue = Math.min(1, zoomSliderValue + 0.1);
     if (newSliderValue >= 0.99) {
@@ -2271,7 +2584,7 @@ function Timeline({
       }
     }
   };
-  
+
   const handleSliderChange = (e) => {
     const uiValue = parseFloat(e.target.value);
     const value = 1 - uiValue;
@@ -2305,11 +2618,138 @@ function Timeline({
     </div>
   );
 
+  const lyricsLane = showLyricsLane ? (
+    <div
+      className="relative h-11 w-full overflow-hidden border-b border-gray-700 bg-gray-900"
+      aria-label="Lyrics timeline lane"
+      onDoubleClick={(event) => {
+        if (!event.shiftKey || !canEditLyrics) return;
+        event.preventDefault();
+        insertLyricAtPointer(event);
+      }}
+    >
+      <div
+        className="absolute inset-y-0"
+        style={{ left: `${-scrollLeft}px`, width: `${timelineWidthPx}px` }}
+      >
+        <div className="absolute inset-0 bg-gray-800/40" />
+        {(() => {
+          const lyricLines = project.lyrics?.lines || [];
+          const placedLines = getPlacedLyricLines(lyricLines);
+          const pendingIndex = lyricsSyncActive && canEditLyrics
+            ? lyricLines.findIndex((line) => line.startMs == null || line.startMs === '' || !Number.isFinite(Number(line.startMs)))
+            : -1;
+          const pendingLine = pendingIndex >= 0 ? lyricLines[pendingIndex] : null;
+          const pendingStartMs = pendingLine
+            ? getLyricPlacementPreviewStart(lyricLines, pendingIndex, currentTimeMs, rawProjectDurationMs)
+            : null;
+          const displayedPlacedLines = (lyricsSyncActive ? placedLines : [])
+            .map((entry) => ({
+              ...entry,
+              startMs: lyricPreview?.byLineId?.[entry.line.id]?.startMs ?? entry.startMs,
+            }))
+            .sort((left, right) => left.startMs - right.startMs);
+          return (
+            <>
+              {displayedPlacedLines.map(({ line, startMs }) => {
+                const endMs = getLyricLineEndMs(displayedPlacedLines, line.id, rawProjectDurationMs);
+                const leftPx = startMs * pixelsPerMs;
+                const widthPx = Math.max(2, (endMs - startMs) * pixelsPerMs);
+                const selected = selectedLyricLineIds.includes(line.id);
+                const isEditing = editingLyricLineId === line.id;
+                return (
+                  <div
+                    key={line.id}
+                    data-lyric-line="true"
+                    className={`absolute top-[5px] box-border h-[34px] overflow-hidden rounded border border-indigo-400 bg-indigo-900/80 text-xs shadow-sm ${selected ? 'ring-1 ring-white/80' : ''} ${canEditLyrics ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
+                    style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                    title={line.text || '(empty lyric line)'}
+                    onPointerDown={(event) => beginLyricDrag(event, line)}
+                    onClick={(event) => selectLyricLine(event, line.id)}
+                    onDoubleClick={(event) => handleLyricBarDoubleClick(event, line)}
+                  >
+                    <div className="flex h-full min-w-0 items-center overflow-hidden px-1.5">
+                      {isEditing ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          value={editingLyricText}
+                          aria-label={`Lyrics for ${line.text || 'lyric line'}`}
+                          className="h-full w-full min-w-0 bg-transparent text-xs text-white outline-none"
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          onChange={(event) => setEditingLyricText(event.target.value)}
+                          onBlur={() => {
+                            if (lyricTextEditCancelledRef.current) {
+                              lyricTextEditCancelledRef.current = false;
+                              setEditingLyricLineId(null);
+                              return;
+                            }
+                            saveLyricText(line.id);
+                          }}
+                          onKeyDown={(event) => {
+                            event.stopPropagation();
+                            if (event.key === 'Enter') event.currentTarget.blur();
+                            if (event.key === 'Escape') {
+                              lyricTextEditCancelledRef.current = true;
+                              event.currentTarget.blur();
+                            }
+                          }}
+                        />
+                      ) : (
+                        <span
+                          className="min-w-0 flex-1 overflow-hidden whitespace-nowrap font-medium"
+                          style={{
+                            maskImage: 'linear-gradient(to right, black 0, black calc(100% - 14px), transparent 100%)',
+                            WebkitMaskImage: 'linear-gradient(to right, black 0, black calc(100% - 14px), transparent 100%)',
+                          }}
+                        >{line.text || <span className="italic opacity-60">Empty line</span>}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {pendingLine && pendingStartMs != null ? (() => {
+                const nextPlacedStart = displayedPlacedLines
+                  .map((entry) => entry.startMs)
+                  .filter((startMs) => startMs > pendingStartMs)
+                  .sort((left, right) => left - right)[0] ?? rawProjectDurationMs;
+                const endMs = Math.max(pendingStartMs, nextPlacedStart);
+                return (
+                  <div
+                    key="lyrics-placement-preview"
+                    className="absolute top-[5px] box-border h-[34px] overflow-hidden rounded border border-dashed border-indigo-200 bg-indigo-950 text-xs text-indigo-100"
+                    style={{ left: `${pendingStartMs * pixelsPerMs}px`, width: `${Math.max(2, (endMs - pendingStartMs) * pixelsPerMs)}px` }}
+                    title={'press "P" to place this line at playhead'}
+                  >
+                    <div className="flex h-full items-center overflow-hidden px-1.5">
+                      <span
+                        className="overflow-hidden whitespace-nowrap font-medium"
+                        style={{
+                          maskImage: 'linear-gradient(to right, black 0, black calc(100% - 14px), transparent 100%)',
+                          WebkitMaskImage: 'linear-gradient(to right, black 0, black calc(100% - 14px), transparent 100%)',
+                        }}
+                      >{pendingLine.text || 'Next lyric'}</span>
+                    </div>
+                  </div>
+                );
+              })() : null}
+            </>
+          );
+        })()}
+        <div
+          className="absolute top-0 z-20 h-full w-0.5 bg-red-400/80 pointer-events-none"
+          style={{ left: `${currentTimeMs * pixelsPerMs}px` }}
+        />
+      </div>
+    </div>
+  ) : null;
+
   const header = (
     <div className="relative flex flex-col overflow-visible w-full min-w-0">
       {/* Timeline Ruler */}
       <div className="bg-gray-850 flex overflow-visible" style={{ height: '24px' }}>
-        <div 
+        <div
           ref={rulerScrollRef}
           className="flex-1 overflow-x-scroll overflow-y-visible ruler-scrollbar-hidden w-full min-w-0"
           onScroll={(e) => {
@@ -2320,20 +2760,20 @@ function Timeline({
             setScrollLeft(newScrollLeft);
           }}
         >
-          <div 
-            style={{ width: `${timelineWidthPx}px`, height: '24px' }} 
+          <div
+            style={{ width: `${timelineWidthPx}px`, height: '24px' }}
             className="relative cursor-pointer"
             onMouseDown={handleRulerMouseDown}
             onDragStart={handleNativeDragStart}
           >
             <div className="absolute left-0 right-0 top-0 h-[23px] overflow-hidden">
               {/* Time markers */}
-            {Array.from({ 
-              length: Math.ceil(Math.max(minZoomDurationMs, clampedVisibleMs) / rulerIntervalMs) + 1 
+            {Array.from({
+              length: Math.ceil(Math.max(minZoomDurationMs, clampedVisibleMs) / rulerIntervalMs) + 1
             }).map((_, i) => {
               const timeMs = i * rulerIntervalMs;
               if (timeMs * pixelsPerMs > timelineWidthPx + 50) return null;
-              
+
               return (
                 <div
                   key={i}
@@ -2361,17 +2801,17 @@ function Timeline({
                   />
                 );
               }
-              
+
               if (project.loop.startMs !== undefined && project.loop.endMs !== undefined) {
-              const rawStartMs = loopMarkerDragState?.currentStartMs 
+              const rawStartMs = loopMarkerDragState?.currentStartMs
                 ?? (rulerDragState?.mode === 'move' ? rulerDragState.currentStartMs : undefined)
                 ?? project.loop.startMs;
-              const rawEndMs = loopMarkerDragState?.currentEndMs 
+              const rawEndMs = loopMarkerDragState?.currentEndMs
                 ?? (rulerDragState?.mode === 'move' ? rulerDragState.currentEndMs : undefined)
                 ?? project.loop.endMs;
               const displayStartMs = Math.min(rawStartMs, rawEndMs);
               const displayEndMs = Math.max(rawStartMs, rawEndMs);
-              
+
               return (
                   <div
                     className={`absolute top-0 bottom-0 pointer-events-none ${
@@ -2384,7 +2824,7 @@ function Timeline({
                   />
                 );
               }
-              
+
               return null;
             })()}
             </div>
@@ -2410,12 +2850,12 @@ function Timeline({
                   />
                 );
               }
-              
+
             if (project.loop.startMs !== undefined && project.loop.endMs !== undefined) {
-              const displayStartMs = loopMarkerDragState?.currentStartMs 
+              const displayStartMs = loopMarkerDragState?.currentStartMs
                 ?? (rulerDragState?.mode === 'move' ? rulerDragState.currentStartMs : undefined)
                 ?? project.loop.startMs;
-              
+
               return (
                 <div
                   className={`absolute top-0 bottom-px w-1 cursor-ew-resize ${
@@ -2428,7 +2868,7 @@ function Timeline({
                 />
               );
             }
-            
+
             return null;
             })()}
 
@@ -2444,12 +2884,12 @@ function Timeline({
                   />
                 );
               }
-              
+
             if (project.loop.startMs !== undefined && project.loop.endMs !== undefined) {
-              const displayEndMs = loopMarkerDragState?.currentEndMs 
+              const displayEndMs = loopMarkerDragState?.currentEndMs
                 ?? (rulerDragState?.mode === 'move' ? rulerDragState.currentEndMs : undefined)
                 ?? project.loop.endMs;
-              
+
               return (
                 <div
                   className={`absolute top-0 bottom-px w-1 cursor-ew-resize ${
@@ -2462,7 +2902,7 @@ function Timeline({
                 />
               );
             }
-            
+
             return null;
             })()}
           </div>
@@ -2472,14 +2912,14 @@ function Timeline({
   );
 
   const tracks = (
-    <div 
+    <div
       ref={timelineRef}
       className={`${sharedVerticalScroll ? 'relative' : 'flex-1 overflow-hidden relative'} h-full bg-gray-900 w-full min-w-0`}
       onMouseDown={handleTimelineMouseDown}
       onDragStart={handleNativeDragStart}
       onContextMenu={handleContextMenu}
     >
-      <div 
+      <div
         ref={(el) => {
           tracksScrollRef.current = el;
           if (internalScrollRef) {
@@ -2776,13 +3216,14 @@ function Timeline({
   );
 
   if (typeof children === 'function') {
-    return children({ header, tracks, zoomOverlay });
+    return children({ header, tracks, zoomOverlay, lyricsLane });
   }
 
   return (
     <div className={`${sharedVerticalScroll ? '' : 'flex-1'} flex flex-col bg-gray-900 ${sharedVerticalScroll ? '' : 'overflow-hidden'} relative`} style={{ minWidth: 0 }}>
       <div className="absolute top-9 right-3 z-50">{zoomOverlay}</div>
       {header}
+      {lyricsLane}
       {tracks}
     </div>
   );

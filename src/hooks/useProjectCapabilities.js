@@ -6,6 +6,7 @@ import {
   canExportProject,
   canManageGroups,
   canChangeTrackRoles,
+  canEditProjectLyrics,
   collectTrackBindingInfo,
   hasTrackLevelWrite,
   projectLevelWriteEnabled,
@@ -26,6 +27,7 @@ function permissiveCapabilities(mode) {
     hasAccessInfo: false,
     isReadOnly: false,
     canEditProjectSettings: true,
+    canEditLyrics: mode !== EDITOR_MODE_HOSTED,
     canManageGroups: true,
     canChangeTrackRoles: true,
     canCreateTracks: true,
@@ -114,7 +116,10 @@ export function computeProjectCapabilities({
   // Hosted session without an access summary (older server): stay permissive
   // and let the server reject, matching the historical behaviour.
   if (!access || typeof access !== 'object') {
-    return permissiveCapabilities(mode);
+    return {
+      ...permissiveCapabilities(mode),
+      canEditLyrics: false,
+    };
   }
 
   const projectDescriptor = {
@@ -185,6 +190,7 @@ export function computeProjectCapabilities({
     hasAccessInfo: true,
     isReadOnly: !trackLevelWrite,
     canEditProjectSettings: canEditProjectSettings(access),
+    canEditLyrics: canEditProjectLyrics(access),
     canManageGroups: canManageGroups(access),
     canChangeTrackRoles: canChangeTrackRoles(access),
     canCreateTracks,
@@ -194,7 +200,7 @@ export function computeProjectCapabilities({
     canImport: canCreateTracks,
     canSolo,
     canExport: canExportProject(access),
-    canEditAnyTrack: trackLevelWrite && (editableTrackIds.size > 0 || tracks.length === 0 || canCreateTracks),
+    canEditAnyTrack: trackLevelWrite && (editableTrackIds.size > 0 || canCreateTracks),
     canEditTrack,
     canRecordTo: canEditTrack,
     explainTrackAccess,

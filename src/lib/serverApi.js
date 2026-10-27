@@ -224,7 +224,9 @@ export async function createServerProject(name, session, options = null) {
       showId: options?.showId || snapshot.showId || null,
       musicalNumber: snapshot.musicalNumber,
       projectId,
-      initialSnapshot: snapshot,
+      ...(options?.initialSnapshot && typeof options.initialSnapshot === 'object'
+        ? { initialSnapshot: snapshot }
+        : {}),
     },
   }, session);
   return payload;

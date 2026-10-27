@@ -12,6 +12,7 @@ export const RBAC_SCOPE_PROJECT = 'project';
 export const RBAC_SCOPE_TRACK = 'track';
 export const RBAC_SCOPE_GROUP_NAME = 'group_name';
 export const RBAC_SCOPE_PART_NAME = 'part_name';
+export const LYRICS_TRACK_SCOPE_ID = '__apollo_virtual_lyrics_track__';
 export const RBAC_SCOPE_TYPES = [
   RBAC_SCOPE_ALL,
   RBAC_SCOPE_SHOW,
@@ -546,7 +547,7 @@ export function projectLevelWriteEnabled(access) {
 }
 
 export function hasTrackLevelWrite(access) {
-  return Boolean(access?.canCreateTracks || access?.canManageTracks || projectLevelWriteEnabled(access));
+  return Boolean(access?.canCreateTracks || access?.canManageTracks || access?.canManageLyrics || projectLevelWriteEnabled(access));
 }
 
 // Export (rendered mixes, stems, project ZIP) is a project-manager action. The
@@ -558,6 +559,28 @@ export function canExportProject(access) {
 
 export function canEditProjectSettings(access) {
   return projectLevelWriteEnabled(access);
+}
+
+// Lyrics are a built-in project track, editable through its virtual track scope
+// or the existing project/show/all track-manager scopes.
+export function canEditProjectLyrics(access) {
+  if (projectLevelWriteEnabled(access)) return true;
+  if (access?.canManageLyrics) return true;
+  if (!access?.canManageTracks) return false;
+  const scopes = Array.isArray(access?.manageableTrackScopes) ? access.manageableTrackScopes : [];
+  return scopes.some((scope) => {
+    if (!scope) return false;
+    if (scope.groupNameValue || scope.partNameValue) return false;
+    if (scope.type === RBAC_SCOPE_ALL || scope.type === RBAC_SCOPE_PROJECT || scope.type === RBAC_SCOPE_SHOW) {
+      // These scopes are already narrowed to the active project by the server's
+      // per-project access summary, so they cover its always-present Lyrics row.
+      return true;
+    }
+    if (scope.type === RBAC_SCOPE_TRACK) {
+      return String(scope.trackId || scope.value || '') === LYRICS_TRACK_SCOPE_ID;
+    }
+    return false;
+  });
 }
 
 export function canManageGroups(access) {
@@ -667,7 +690,7 @@ export function normalizeGroupForComparison(node = {}) {
   };
 }
 
-export function normalizeTopLevelForRestrictedWrite(snapshot = {}) {
+export function normalizeTopLevelForRestrictedWrite(snapshot = {}, defaultLyricLanguage = 'sv') {
   return {
     projectId: snapshot.projectId,
     projectName: snapshot.projectName,
@@ -678,6 +701,21 @@ export function normalizeTopLevelForRestrictedWrite(snapshot = {}) {
     autoPan: snapshot.autoPan || null,
     exportSettings: snapshot.exportSettings || null,
     credits: snapshot.credits || null,
+  };
+}
+
+export function normalizeLyricsForRestrictedWriteComparison(lyrics, defaultLanguage = 'sv') {
+  const value = lyrics && typeof lyrics === 'object' ? lyrics : {};
+  return {
+    language: value.language === 'en' || value.language === 'sv'
+      ? value.language
+      : (defaultLanguage === 'en' ? 'en' : 'sv'),
+    useSyncedLyrics: value.useSyncedLyrics === true,
+    lines: (Array.isArray(value.lines) ? value.lines : []).map((line) => ({
+      id: normalizeText(line?.id),
+      text: String(line?.text ?? ''),
+      startMs: line?.startMs == null || line?.startMs === '' ? null : toNumber(line.startMs, null),
+    })),
   };
 }
 
@@ -746,7 +784,9 @@ export function canEditAllTracksInSnapshot({
 }) {
   if (!hasTrackLevelWrite(access)) return false;
   const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  if (!tracks.length) return true;
+  if (!tracks.length) {
+    return Boolean(access?.canCreateTracks || access?.canManageTracks || projectLevelWriteEnabled(access));
+  }
   const trackInfoById = collectTrackBindingInfo(snapshot);
   return tracks.every((track) => trackIsEditable(
     trackInfoById.get(track?.id),
@@ -914,6 +954,7 @@ export function findProjectWriteViolation({
   userId,
   project = null,
   projectCreatedByUserId = null,
+  defaultLyricLanguage = 'sv',
 }) {
   if (!currentSnapshot || !nextSnapshot || currentSnapshot === nextSnapshot) return null;
   if (projectLevelWriteEnabled(access)) return null;
@@ -921,7 +962,15 @@ export function findProjectWriteViolation({
     return 'You do not have permission to edit this project';
   }
 
-  if (stableJson(normalizeTopLevelForRestrictedWrite(currentSnapshot)) !== stableJson(normalizeTopLevelForRestrictedWrite(nextSnapshot))) {
+  if (
+    stableJson(normalizeLyricsForRestrictedWriteComparison(currentSnapshot?.lyrics, defaultLyricLanguage))
+      !== stableJson(normalizeLyricsForRestrictedWriteComparison(nextSnapshot?.lyrics, defaultLyricLanguage))
+    && !canEditProjectLyrics(access)
+  ) {
+    return 'You need write access to the Lyrics track to edit lyrics';
+  }
+
+  if (stableJson(normalizeTopLevelForRestrictedWrite(currentSnapshot, defaultLyricLanguage)) !== stableJson(normalizeTopLevelForRestrictedWrite(nextSnapshot, defaultLyricLanguage))) {
     return 'Project-level settings require project manager access';
   }
 

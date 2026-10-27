@@ -288,7 +288,9 @@ function App() {
       summarizeProjectForLoadLog(payload?.snapshot, 'Project snapshot');
       await withLoadStep(
         'Load snapshot into editor store',
-        async () => loadProjectToStore(payload.snapshot)
+        async () => loadProjectToStore(payload.snapshot, {
+          defaultLyricLanguage: payload?.runtimeConfig?.defaultLyricLanguage,
+        })
       );
       await withLoadStep(
         'Save remote project metadata',

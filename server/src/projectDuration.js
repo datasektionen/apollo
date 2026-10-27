@@ -13,15 +13,10 @@ export function snapshotDurationMsSql(headsAlias = 'ph') {
   const timelineStartMs = jsonbMsOrZero('clip', 'timelineStartMs');
   const cropStartMs = jsonbMsOrZero('clip', 'cropStartMs');
   const cropEndMs = jsonbMsOrZero('clip', 'cropEndMs');
-  const sourceDurationMs = jsonbMsOrZero('clip', 'sourceDurationMs');
   return `COALESCE((
     SELECT MAX(
       ${timelineStartMs}
-      + GREATEST(
-          0,
-          (CASE WHEN ${cropEndMs} > ${cropStartMs} THEN ${cropEndMs} ELSE ${sourceDurationMs} END)
-          - ${cropStartMs}
-        )
+      + GREATEST(0, ${cropEndMs} - ${cropStartMs})
     )
     FROM jsonb_array_elements(
       CASE

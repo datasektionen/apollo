@@ -106,13 +106,16 @@ describe('computeProjectCapabilities modes', () => {
     expect(permissive.hasAccessInfo).toBe(false);
     expect(permissive.canExport).toBe(true);
     expect(permissive.canEditTrack('sop')).toBe(true);
+    expect(permissive.canEditLyrics).toBe(true);
 
     const advanced = computeProjectCapabilities({ access: { canManageProject: false }, project: makeProject(), userId: USER, mode: EDITOR_MODE_ADVANCED_MIX });
     expect(advanced.canEditProjectSettings).toBe(true);
+    expect(advanced.canEditLyrics).toBe(true);
 
     const hostedNoAccess = computeProjectCapabilities({ access: null, project: makeProject(), userId: USER, mode: EDITOR_MODE_HOSTED });
     expect(hostedNoAccess.hasAccessInfo).toBe(false);
     expect(hostedNoAccess.isReadOnly).toBe(false);
+    expect(hostedNoAccess.canEditLyrics).toBe(false);
   });
 });
 
@@ -122,6 +125,7 @@ describe('computeProjectCapabilities permission matrix', () => {
     expect(caps.hasAccessInfo).toBe(true);
     expect(caps.isReadOnly).toBe(true);
     expect(caps.canExport).toBe(false);
+    expect(caps.canEditLyrics).toBe(false);
     expect(caps.canEditProjectSettings).toBe(false);
     expect(caps.canManageGroups).toBe(false);
     expect(caps.canCreateTracks).toBe(false);
@@ -134,6 +138,7 @@ describe('computeProjectCapabilities permission matrix', () => {
   it('track_reader: can open and create mixes but not change anything', () => {
     const { caps } = capsFor(TRACK_READER_GRANTS, { userId: 'user-9' });
     expect(caps.isReadOnly).toBe(true);
+    expect(caps.canEditLyrics).toBe(false);
     expect(caps.canExport).toBe(false);
     expect(caps.canEditTrack('lead')).toBe(false);
     expect(caps.canCreateTracks).toBe(false);
@@ -142,6 +147,7 @@ describe('computeProjectCapabilities permission matrix', () => {
   it('track_creator scoped to a group: can create inside the group and edit own tracks only', () => {
     const { caps } = capsFor(CHOIR_CREATOR_GRANTS);
     expect(caps.isReadOnly).toBe(false);
+    expect(caps.canEditLyrics).toBe(false);
     expect(caps.canExport).toBe(false);
     expect(caps.canEditProjectSettings).toBe(false);
     expect(caps.canManageGroups).toBe(false);
@@ -186,6 +192,7 @@ describe('computeProjectCapabilities permission matrix', () => {
     const { caps } = capsFor(PROJECT_MANAGER_GRANTS, { userId: 'user-9' });
     expect(caps.isReadOnly).toBe(false);
     expect(caps.canExport).toBe(true);
+    expect(caps.canEditLyrics).toBe(true);
     expect(caps.canEditProjectSettings).toBe(true);
     expect(caps.canManageGroups).toBe(true);
     expect(caps.canChangeTrackRoles).toBe(true);
@@ -197,10 +204,12 @@ describe('computeProjectCapabilities permission matrix', () => {
   it('project owner and admin behave like project managers', () => {
     const owner = capsFor([], { userId: OWNER }).caps;
     expect(owner.canExport).toBe(true);
+    expect(owner.canEditLyrics).toBe(true);
     expect(owner.canEditTrack('mine')).toBe(true);
 
     const admin = capsFor([], { userId: 'admin-1', isAdmin: true }).caps;
     expect(admin.canExport).toBe(true);
+    expect(admin.canEditLyrics).toBe(true);
     expect(admin.canSolo).toBe(true);
   });
 

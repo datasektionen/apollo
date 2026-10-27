@@ -2,16 +2,20 @@ import { describe, expect, it } from 'vitest';
 import {
   ProjectWriteRejectedError,
   WRITE_REJECTED_CODE,
+  LYRICS_TRACK_SCOPE_ID,
   applyTrackAccessStamps,
   canCreateTrackInProject,
   canChangeTrackRoles,
   canEditAllTracksInSnapshot,
   canEditProjectSettings,
+  canEditProjectLyrics,
   canExportProject,
   canManageGroups,
   collectTrackAccessStamps,
   collectTrackBindingInfo,
   hasTrackLevelWrite,
+  findProjectWriteViolation,
+  normalizeTopLevelForRestrictedWrite,
   isProjectWriteRejectedError,
   projectLevelWriteEnabled,
   trackAccessStampsDiffer,
@@ -56,12 +60,14 @@ describe('project-level predicates', () => {
     expect(projectLevelWriteEnabled(manager)).toBe(true);
     expect(canExportProject(manager)).toBe(true);
     expect(canEditProjectSettings(manager)).toBe(true);
+    expect(canEditProjectLyrics(manager)).toBe(true);
     expect(canManageGroups(manager)).toBe(true);
     expect(canChangeTrackRoles(manager)).toBe(true);
 
     expect(projectLevelWriteEnabled(trackWriter)).toBe(false);
     expect(canExportProject(trackWriter)).toBe(false);
     expect(canEditProjectSettings(trackWriter)).toBe(false);
+    expect(canEditProjectLyrics(trackWriter)).toBe(false);
     expect(canManageGroups(trackWriter)).toBe(false);
     expect(canChangeTrackRoles(trackWriter)).toBe(false);
     expect(canExportProject(null)).toBe(false);
@@ -72,6 +78,62 @@ describe('project-level predicates', () => {
     expect(hasTrackLevelWrite({ canCreateTracks: true })).toBe(true);
     expect(hasTrackLevelWrite({ canManageTracks: true })).toBe(true);
     expect(hasTrackLevelWrite({ canManageProject: true })).toBe(true);
+  });
+});
+
+describe('project lyric write permissions', () => {
+  it('treats Lyrics as a scoped track while retaining project-level settings restrictions', () => {
+    const currentSnapshot = { ...snapshotWithChoir() };
+    const nextSnapshot = {
+      ...currentSnapshot,
+      lyrics: {
+        language: 'en',
+        lines: [{ id: 'line-1', text: 'Sing', startMs: 0, endMs: 500, source: 'dsp', confidence: 0.5 }],
+      },
+    };
+    const access = { canManageProject: false, canManageTracks: true };
+    expect(normalizeTopLevelForRestrictedWrite({ projectId: 'legacy' }).lyrics).toBeUndefined();
+    expect(normalizeTopLevelForRestrictedWrite({ projectId: 'legacy' }, 'en').lyrics).toBeUndefined();
+    expect(findProjectWriteViolation({ access, currentSnapshot, nextSnapshot, defaultLyricLanguage: 'en' }))
+      .toBe('You need write access to the Lyrics track to edit lyrics');
+    expect(findProjectWriteViolation({ access, currentSnapshot, nextSnapshot: currentSnapshot })).toBeNull();
+  });
+
+  it('treats the synced-lyrics preference as a protected Lyrics-track change', () => {
+    const currentSnapshot = {
+      ...snapshotWithChoir(),
+      lyrics: { language: 'sv', useSyncedLyrics: false, lines: [] },
+    };
+    const nextSnapshot = {
+      ...currentSnapshot,
+      lyrics: { ...currentSnapshot.lyrics, useSyncedLyrics: true },
+    };
+
+    expect(findProjectWriteViolation({
+      access: { canManageProject: false, canManageTracks: true },
+      currentSnapshot,
+      nextSnapshot,
+    })).toBe('You need write access to the Lyrics track to edit lyrics');
+  });
+
+  it('allows project/show managers, all-track managers, and managers assigned to the Lyrics track', () => {
+    expect(canEditProjectLyrics({ canManageProject: true })).toBe(true);
+    expect(canEditProjectLyrics({
+      canManageTracks: true,
+      manageableTrackScopes: [{ type: 'all', label: 'All' }],
+    })).toBe(true);
+    expect(canEditProjectLyrics({
+      canManageTracks: true,
+      manageableTrackScopes: [{ type: 'track', trackId: LYRICS_TRACK_SCOPE_ID, label: 'Lyrics' }],
+    })).toBe(true);
+    expect(canEditProjectLyrics({
+      canManageTracks: true,
+      manageableTrackScopes: [{ type: 'track', trackId: 'audio-track-1', label: 'Audio track' }],
+    })).toBe(false);
+    expect(canEditProjectLyrics({
+      canManageTracks: true,
+      manageableTrackScopes: [{ type: 'group_name', value: 'choir', label: 'Choir' }],
+    })).toBe(false);
   });
 });
 

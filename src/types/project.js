@@ -37,6 +37,34 @@ export const DEFAULT_EXPORT_SETTINGS = {
   forceMonoOutput: false,
 };
 
+export const DEFAULT_LYRIC_LANGUAGE = 'sv';
+
+export function normalizeLyricLanguage(value, fallback = DEFAULT_LYRIC_LANGUAGE) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'sv' || normalized === 'en') return normalized;
+  return fallback === 'en' ? 'en' : DEFAULT_LYRIC_LANGUAGE;
+}
+
+export function normalizeProjectLyrics(lyrics, defaultLanguage = DEFAULT_LYRIC_LANGUAGE) {
+  const source = lyrics && typeof lyrics === 'object' ? lyrics : {};
+  const lines = Array.isArray(source.lines) ? source.lines : [];
+  return {
+    language: normalizeLyricLanguage(source.language, normalizeLyricLanguage(defaultLanguage)),
+    useSyncedLyrics: source.useSyncedLyrics === true,
+    lines: lines.flatMap((line) => {
+      if (!line || typeof line !== 'object') return [];
+      const rawStartMs = line.startMs == null || line.startMs === '' ? null : Number(line.startMs);
+      const startMs = Number.isFinite(rawStartMs) ? Math.max(0, Math.round(rawStartMs)) : null;
+      const text = String(line.text ?? '');
+      return [{
+        id: String(line.id || createId()),
+        text,
+        startMs,
+      }];
+    }),
+  };
+}
+
 export function normalizeProjectPublished(value = false) {
   return value === true || String(value).trim().toLowerCase() === 'true';
 }
@@ -144,6 +172,7 @@ export function createEmptyProject(
       productionEngineering: [],
       performers: [],
     },
+    lyrics: normalizeProjectLyrics(null),
     trackTree: [],
     tracks: [],
     loop: { enabled: false, startMs: 0, endMs: 0 },

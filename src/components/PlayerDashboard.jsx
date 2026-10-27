@@ -8,6 +8,7 @@ import {
   Headphones,
   Loader2,
   Metronome,
+  MicVocal,
   MoreHorizontal,
   Pause,
   Play,
@@ -23,6 +24,7 @@ import {
 import { BrandWordmark } from './BrandLogo';
 import { PlayerSearchBar, PlayerSearchResults, usePlayerSearchResults } from './PlayerSearch';
 import { PlayerLibrarySidebar } from './PlayerLibrarySidebar';
+import PlayerLyricsView from './PlayerLyricsView';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
 import {
   PLAYER_SEARCH_TYPES,
@@ -164,6 +166,11 @@ function normalizePlayerPlaybackPreferences(settings = {}) {
       ? clampMetronomeVolume(metronomeVolume)
       : (legacyMetronomeMuted ? 0 : DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeVolume),
   };
+}
+
+function hasPlayerLyrics(lyrics) {
+  return Array.isArray(lyrics?.lines)
+    && lyrics.lines.some((line) => String(line?.text ?? '').trim().length > 0);
 }
 
 function pickRandomQueueIndex(currentIndex, totalCount) {
@@ -569,12 +576,14 @@ function PlayerDashboard({
   const [shuffleEnabled, setShuffleEnabled] = useState(false);
   const [loopMode, setLoopMode] = useState(PLAYER_LOOP_MODES.OFF);
   const [nowPlayingLabel, setNowPlayingLabel] = useState('');
+  const [currentPlaybackLyrics, setCurrentPlaybackLyrics] = useState(null);
   const [practicePanRange, setPracticePanRange] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.practicePanRange);
   const [practiceFocusControl, setPracticeFocusControl] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.practiceFocusControl);
   const [hasRealtimeMetronome, setHasRealtimeMetronome] = useState(false);
   const [metronomeVolume, setMetronomeVolume] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeVolume);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mainPanelView, setMainPanelView] = useState('library');
+  const [lyricsViewOpen, setLyricsViewOpen] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   const [searchType, setSearchType] = useState(PLAYER_SEARCH_TYPES.ALL);
   const [searchCredits, setSearchCredits] = useState([]);
@@ -1264,6 +1273,7 @@ function PlayerDashboard({
     if (!item?.projectId || !item?.presetId) return;
 
     setIsRendering(true);
+    setCurrentPlaybackLyrics(null);
     setError('');
     setHasRealtimeMetronome(false);
     const generation = ++playGenerationRef.current;
@@ -1369,6 +1379,9 @@ function PlayerDashboard({
         durationMs,
         liveMixableTrackIds,
       };
+      const playbackLyrics = playbackSnapshot?.lyrics || null;
+      setCurrentPlaybackLyrics(playbackLyrics);
+      if (!hasPlayerLyrics(playbackLyrics)) setLyricsViewOpen(false);
       setIsPlaying(true);
     } catch (error) {
       if (error?.name === 'StaleAudioLoad' || isCancelled()) {
@@ -1378,6 +1391,8 @@ function PlayerDashboard({
       console.error('Playback failed.', error);
       audioManager.stop();
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
+      setCurrentPlaybackLyrics(null);
+      setLyricsViewOpen(false);
       setHasRealtimeMetronome(false);
       setIsPlaying(false);
       setError(error.message || 'Playback failed');
@@ -2138,6 +2153,12 @@ function PlayerDashboard({
   }, [refreshPlayerData, session]);
 
   const activeQueueItem = activeQueueItems[activeIndex] || null;
+  const hasCurrentLyrics = hasPlayerLyrics(currentPlaybackLyrics);
+  const handleToggleLyricsView = () => {
+    if (!hasCurrentLyrics) return;
+    if (!lyricsViewOpen) setMainPanelView('library');
+    setLyricsViewOpen((open) => !open);
+  };
   const defaultTuttiCollectionId = defaultTuttiShowId ? `show:${defaultTuttiShowId}` : 'tutti';
   const selectedPlaylist = playlists.find((playlist) => playlist.id === selectedPlaylistId) || null;
   const loopLabel = loopMode === PLAYER_LOOP_MODES.OFF
@@ -2850,7 +2871,16 @@ function PlayerDashboard({
             />
 
             <div className="flex-1 min-w-0 rounded-lg border border-gray-700 bg-gray-800/80 flex flex-col overflow-hidden">
-              {mainPanelView === 'settings' ? (
+              {lyricsViewOpen ? (
+                <PlayerLyricsView
+                  lyrics={currentPlaybackLyrics}
+                  currentTimeMs={Math.round(currentTimeSec * 1000)}
+                  durationMs={Math.round(durationSec * 1000)}
+                  isLoading={isRendering}
+                  songTitle={nowPlayingLabel || activeQueueItem?.name || ''}
+                  onSeek={commitTimelineSeek}
+                />
+              ) : mainPanelView === 'settings' ? (
                 <>
                   <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
                     <div>
@@ -3602,7 +3632,19 @@ function PlayerDashboard({
             </div>
           </div>
 
-          <div className="flex min-h-[127px] flex-col items-end justify-center gap-[5px]">
+          <div className="flex min-h-[127px] items-center justify-end gap-4">
+            <button
+              type="button"
+              onClick={handleToggleLyricsView}
+              disabled={!hasCurrentLyrics}
+              className={`shrink-0 p-1.5 transition-colors ${!hasCurrentLyrics ? 'text-gray-400' : (lyricsViewOpen ? 'text-blue-300' : 'text-gray-400 hover:text-gray-200')} disabled:cursor-not-allowed disabled:opacity-30`}
+              title="Lyrics"
+              aria-label="Lyrics"
+              aria-pressed={lyricsViewOpen && hasCurrentLyrics}
+            >
+              <MicVocal size={20} />
+            </button>
+            <div className="flex min-h-[127px] flex-col items-end justify-center gap-[5px]">
             <div className="flex items-center gap-2">
               <button
                 onClick={handleToggleMute}
@@ -3905,6 +3947,7 @@ function PlayerDashboard({
                     </div>
               </>
                 ) : null}
+            </div>
           </div>
         </div>
         {error ? (

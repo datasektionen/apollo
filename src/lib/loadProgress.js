@@ -44,6 +44,9 @@ function flushServerPipeline(stems, now) {
   if (stems.activeDownloads > 0) stems.downloadBusyMs += dt;
   if (stems.activeConverts > 0) stems.convertBusyMs += dt;
   else if (stems.serverCached < stems.fetchTotal) stems.convertIdleMs += dt;
+  stems.downloadBusyMs = Math.round(stems.downloadBusyMs * 1e6) / 1e6;
+  stems.convertBusyMs = Math.round(stems.convertBusyMs * 1e6) / 1e6;
+  stems.convertIdleMs = Math.round(stems.convertIdleMs * 1e6) / 1e6;
 }
 
 export function readServerPipeline(stems, now = nowMs()) {
@@ -62,6 +65,7 @@ export function readServerPipeline(stems, now = nowMs()) {
   if (stems.activeDownloads > 0) times.downloadBusyMs += dt;
   if (stems.activeConverts > 0) times.convertBusyMs += dt;
   else if (stems.serverCached < stems.fetchTotal) times.convertIdleMs += dt;
+  for (const key of Object.keys(times)) times[key] = Math.round(times[key] * 1e6) / 1e6;
   return times;
 }
 
