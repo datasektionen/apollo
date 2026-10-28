@@ -130,19 +130,17 @@ const useStore = create((set, get) => ({
     const { project, undoStack, undoIndex, selectedTrackId, currentProjectId, selectedTrackByProjectId } = get();
     const { skipUndo = false, skipAutosave = false, skipDirty = false } = options;
     
-    // Save current state to undo
-    const undoAction = {
-      description: actionDescription,
-      state: JSON.parse(JSON.stringify(project)),
-    };
-    
-    // Update project
+    // Updaters are immutable; the same identity means no history or save work.
     const newProject = typeof updater === 'function' ? updater(project) : updater;
+    if (newProject === project) return;
     
-    // Add to undo stack (circular buffer, max 100)
+    // Keep detached snapshots for real undoable edits (circular buffer, max 100).
     const newUndoStack = skipUndo
       ? undoStack
-      : [...undoStack.slice(0, undoIndex), undoAction].slice(-100);
+      : [...undoStack.slice(0, undoIndex), {
+        description: actionDescription,
+        state: JSON.parse(JSON.stringify(project)),
+      }].slice(-100);
     
     let nextSelectedTrackId = selectedTrackId;
     if (newProject?.tracks?.length) {

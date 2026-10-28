@@ -223,6 +223,119 @@ describe('recordingManager capture engine', () => {
     expect(recordingManager.isRecording).toBe(false);
   });
 
+  async function finishWaveformTasks() {
+    for (let i = 0; i < 1000; i += 1) {
+      const capture = recordingManager.getWaveformSnapshot()?.capture;
+      if (!capture || !capture.getStats().pending) return;
+      await flushMicrotasks();
+    }
+    throw new Error('Recording summary tasks did not finish');
+  }
+
+  function readWaveform(capture, channel, start, end) {
+    const query = capture.createRangeQuery(channel, start, end);
+    for (let i = 0; i < 10000; i += 1) {
+      const step = query();
+      expect(step.rawSamples).toBeLessThanOrEqual(128);
+      if (step.done) return step.result;
+    }
+    throw new Error('Recording query did not finish');
+  }
+
+  it('builds preview outside the message handler and matches latency-correct extraction with gaps and channel changes', async () => {
+    const node = await openCapture();
+    const listener = vi.fn();
+    const unsubscribe = recordingManager.subscribeWaveform(listener);
+    recordingManager.beginRecording({ trackId: 't', startContextTime: 2200 / SAMPLE_RATE,
+      timelineStartMs: 12000, roundTripMs: 1 });
+    const capture = recordingManager.getWaveformSnapshot().capture;
+    node.emitFrames(2048, 256);
+    node.emitFrames(2400, 900, 2);
+    expect(capture.getStats().samplesScanned).toBe(0);
+    await finishWaveformTasks();
+    expect(recordingManager.getWaveformSnapshot()).toMatchObject({ recordingStartMs: 12000,
+      sourceStartFrame: 2248, sourceEndFrame: 3300, numberOfChannels: 2 });
+    const exact = recordingManager.extractFrames(2248, 3248);
+    for (let c = 0; c < 2; c += 1) {
+      const data = exact.getChannelData(c);
+      const range = readWaveform(capture, c, 2248, 3248);
+      expect(range).toEqual({ min: Math.min(...data), max: Math.max(...data),
+        count: data.length, sumSquares: data.reduce((sum, value) => sum + value * value, 0) });
+    }
+    expect(listener).toHaveBeenCalled();
+    unsubscribe();
+    listener.mockClear();
+    recordingManager.cancelRecording();
+    expect(listener).not.toHaveBeenCalled();
+    expect(capture.getStats()).toMatchObject({ bytes: 0, pending: 0, runs: 0 });
+  });
+
+  it('maps loop preview to the new source interval while preserving the previous latency tail', async () => {
+    const node = await openCapture();
+    recordingManager.beginRecording({ trackId: 't', startContextTime: 3000 / SAMPLE_RATE,
+      timelineStartMs: 5000, roundTripMs: 1 });
+    node.emitFrames(2048, 1452);
+    const closedPromise = recordingManager.splitSegment({ endContextTime: 3500 / SAMPLE_RATE, nextTimelineStartMs: 5000 });
+    expect(recordingManager.getWaveformSnapshot()).toMatchObject({ sourceStartFrame: 3548,
+      sourceEndFrame: 3548, recordingStartMs: 5000 });
+    node.emitFrames(3500, 900, 2);
+    const closed = await closedPromise;
+    expect(closed.audioBuffer.length).toBe(500);
+    expect(closed.audioBuffer.getChannelData(0)[0]).toBe(3048);
+    expect(closed.audioBuffer.getChannelData(0)[499]).toBe(3547);
+    await finishWaveformTasks();
+    const snapshot = recordingManager.getWaveformSnapshot();
+    expect(snapshot).toMatchObject({ sourceStartFrame: 3548, sourceEndFrame: 4400, numberOfChannels: 2 });
+    expect(readWaveform(snapshot.capture, 1, 3548, 3550)).toMatchObject({
+      min: 1003548, max: 1003549, count: 2,
+    });
+    const final = await recordingManager.stopRecording({ endContextTime: 3900 / SAMPLE_RATE });
+    expect(final.audioBuffer.getChannelData(0)[0]).toBe(3548);
+    expect(final.audioBuffer.getChannelData(0)[399]).toBe(3947);
+    expect(final.audioBuffer.length).toBe(400);
+    expect(recordingManager.getWaveformSnapshot()).toBeNull();
+  });
+
+  it('allows a new take while an older stop is still collecting its tail', async () => {
+    const node = await openCapture();
+    recordingManager.beginRecording({ trackId: 'old', startContextTime: 3000 / SAMPLE_RATE,
+      timelineStartMs: 0, roundTripMs: 1 });
+    node.emitFrames(2048, 1452);
+    const oldResult = recordingManager.stopRecording({ endContextTime: 3500 / SAMPLE_RATE });
+    await flushMicrotasks();
+    recordingManager.beginRecording({ trackId: 'new', startContextTime: 3600 / SAMPLE_RATE,
+      timelineStartMs: 1000, roundTripMs: 1 });
+    node.emitFrames(3500, 1000);
+    const old = await oldResult;
+    expect(old.trackId).toBe('old');
+    expect(old.audioBuffer.length).toBe(500);
+    expect(old.audioBuffer.getChannelData(0)[499]).toBe(3547);
+    await finishWaveformTasks();
+    expect(recordingManager.getWaveformSnapshot()).toMatchObject({ trackId: 'new', sourceStartFrame: 3648 });
+    const next = await recordingManager.stopRecording({ endContextTime: 4000 / SAMPLE_RATE });
+    expect(next.audioBuffer.getChannelData(0)[0]).toBe(3648);
+    expect(next.audioBuffer.length).toBe(400);
+  });
+
+  it('cancels an outstanding stop/tail immediately and never publishes a stale finalized segment', async () => {
+    const node = await openCapture();
+    recordingManager.beginRecording({ trackId: 't', startContextTime: 2200 / SAMPLE_RATE,
+      timelineStartMs: 0, roundTripMs: 1 });
+    node.emitFrames(2048, 1000);
+    const result = recordingManager.stopRecording({ endContextTime: 5000 / SAMPLE_RATE });
+    const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    await flushMicrotasks();
+    await flushMicrotasks();
+    recordingManager.cancelRecording();
+    await rejected;
+    expect(recordingManager.frameWaiters).toHaveLength(0);
+    expect(recordingManager.pendingSegments).toHaveLength(0);
+    expect(recordingManager.getWaveformSnapshot()).toBeNull();
+    node.emitFrames(3048, 3000);
+    await flushMicrotasks();
+    expect(recordingManager.getWaveformSnapshot()).toBeNull();
+  });
+
   it('keeps stereo input as two channels', async () => {
     const node = await openCapture();
     for (let frame = 2048; frame < SAMPLE_RATE; frame += 2048) node.emitFrames(frame, 2048, 2);

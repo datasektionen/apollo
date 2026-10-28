@@ -25,6 +25,8 @@ import {
   prefersSoftwareFlacDecode,
 } from './mediaEncoding';
 import { logLoadProgress, shortLoadId, withLoadStep } from './loadProgress';
+import { MediaBufferCache, mediaWaveformRevision, rememberMediaRevision } from './mediaBufferCache';
+import { waveformService } from './waveformService';
 
 const MASTER_LIMITER_THRESHOLD_DB = -1;
 const MASTER_LIMITER_KNEE_DB = 0;
@@ -68,7 +70,11 @@ export class AudioManager {
     this.masterLimiterNode = null;
     this.masterCeilingNode = null;
     this.masterOutputNode = null;
-    this.mediaCache = new Map(); // blobId -> AudioBuffer
+    this.mediaCache = new MediaBufferCache({
+          onSet: (blobId, buffer, options) => waveformService.ensureSource(blobId, buffer, options),
+          onDelete: (blobId, buffer) => waveformService.releaseSource(blobId, buffer),
+          onClear: () => waveformService.clear(),
+        });
     this.activeSources = new Map(); // trackId -> { source, gainNode, panNode }
     this.isPlaying = false;
     this.startTime = 0;
@@ -234,7 +240,7 @@ export class AudioManager {
   /**
    * Load audio buffer from blob (with caching)
    */
-  async loadAudioBuffer(blobId, blob) {
+  async loadAudioBuffer(blobId, blob, media = null) {
     // Check cache
     if (this.mediaCache.has(blobId)) {
       logLoadProgress(`AudioBuffer already in RAM (${shortLoadId(blobId)})`, {
@@ -282,6 +288,7 @@ export class AudioManager {
       );
     }
 
+    rememberMediaRevision(audioBuffer, mediaWaveformRevision(media));
     this.mediaCache.set(blobId, audioBuffer);
 
     return audioBuffer;

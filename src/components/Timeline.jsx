@@ -9,9 +9,16 @@ import {
 } from '../utils/audio';
 import { audioManager } from '../lib/audioManager';
 import Waveform from './Waveform';
-import { calculateGlobalPeakAmplitude } from '../utils/waveformUtils';
+import GroupWaveform from './GroupWaveform';
+import RecordingWaveform from './RecordingWaveform';
+import { waveformService } from '../lib/waveformService';
+import {
+  anchoredScroll, boundedRange, clampDuration, durationFromSlider, intersectsViewport, normalizeWheel,
+  rowAtY, rowOffsets, rulerInterval, scrollSegment, visibleRulerTicks, zoomAnchor,
+} from '../utils/timelineViewport';
 import { getEffectiveTrackMix, getGroupDescendantTrackIdsByGroup, getTrackHeight, normalizeTrackTree } from '../utils/trackTree';
 import {
+  applyClipPatches,
   constrainClipMove,
   constrainCropStart,
   constrainCropEnd,
@@ -31,9 +38,9 @@ import {
   pruneShortEmptyLyricLines,
 } from '../utils/lyricTimeline';
 
+const EMPTY_ROWS = [];
 const TIMELINE_VIEWPORT_WIDTH = 1920; // Default viewport width (updated dynamically)
 const MIN_VISIBLE_DURATION_MS = 8000; // Minimum duration to show when zoomed out
-const MAX_ZOOM_VISIBLE_MS = 500; // At max zoom, show 500ms across viewport
 const MIN_CLIP_DURATION_MS = 100;
 const MIN_CLIP_GAIN_DB = -24;
 const MAX_CLIP_GAIN_DB = 24;
@@ -41,17 +48,9 @@ const CLIP_BACKGROUND_COLOR = 'rgba(79, 142, 247, 0.3)';
 const CLIP_WAVEFORM_COLOR = 'rgba(79, 142, 247, 0.8)';
 const MISSING_CLIP_BACKGROUND_COLOR = 'rgba(220, 38, 38, 0.55)';
 const MISSING_CLIP_WAVEFORM_COLOR = 'rgba(248, 113, 113, 0.9)';
-const GROUP_CLIP_WAVEFORM_COLOR = 'rgba(123, 173, 255, 0.55)';
-const GROUP_MISSING_CLIP_WAVEFORM_COLOR = 'rgba(248, 113, 113, 0.55)';
+
 const REMOTE_CLIP_ANIMATION_MS = 800;
 
-const RULER_INTERVALS_MS = [
-  100, 200, 500,
-  1000, 2000, 5000,
-  10000, 20000, 30000,
-  60000, 120000,
-  300000, 600000, 1800000, 3600000,
-];
 
 function easeInOutQuint(t) {
   if (t < 0.5) {
@@ -60,14 +59,7 @@ function easeInOutQuint(t) {
   return 1 - Math.pow(-2 * t + 2, 5) / 2;
 }
 
-// Helper to calculate cumulative Y position for a row index
-const getTrackYPosition = (rows, rowIndex) => {
-  let yPosition = 0;
-  for (let i = 0; i < rowIndex; i++) {
-    yPosition += rows[i].height;
-  }
-  return yPosition;
-};
+
 
 /**
  * Timeline component
@@ -75,7 +67,7 @@ const getTrackYPosition = (rows, rowIndex) => {
  */
 function Timeline({
   project,
-  rows = [],
+  rows = EMPTY_ROWS,
   remoteAnimation = null,
   currentTimeMs,
   isPlaying,
@@ -111,9 +103,20 @@ function Timeline({
   const timelineRef = useRef(null);
   const rulerScrollRef = useRef(null);
   const tracksScrollRef = useRef(null);
-  const internalScrollRef = scrollContainerRef || useRef(null);
+  const fallbackScrollRef = useRef(null);
+  const internalScrollRef = scrollContainerRef || fallbackScrollRef;
+  const verticalScrollRef = useRef(null);
+  const [verticalViewport, setVerticalViewport] = useState({ top: 0, height: 0 });
+  const [mediaRevision, setMediaRevision] = useState(0);
+  const [displayMode, setDisplayMode] = useState('linear');
+  const [showRms, setShowRms] = useState(false);
+  const [showClipping, setShowClipping] = useState(false);
+  const [showSamples, setShowSamples] = useState(true);
+  const cancelledGestureRef = useRef(false);
   const [visibleDurationMs, setVisibleDurationMs] = useState(null);
   const [scrollLeft, setScrollLeft] = useState(0);
+  const [originPx, setOriginPx] = useState(0);
+  const originRef = useRef(0);
   const [dragState, setDragState] = useState(null);
   const [dragPreview, setDragPreview] = useState(null);
   const [selectedClipIds, setSelectedClipIds] = useState([]);
@@ -140,16 +143,51 @@ function Timeline({
   const timelineSelectionRafRef = useRef(null);
   const timelineSelectionPointRef = useRef(null);
   const timelineSelectionSuppressClickRef = useRef(false);
+  const selectionClickResetRafRef = useRef(null);
   const prevProjectDurationRef = useRef(null);
-  const shouldCenterOnPlayheadAfterZoomRef = useRef(false);
+  const pendingZoomAnchorRef = useRef(null);
   const [containerWidth, setContainerWidth] = useState(TIMELINE_VIEWPORT_WIDTH);
-  const [globalPeakAmplitude, setGlobalPeakAmplitude] = useState(1.0);
-  const [loadedClipIds, setLoadedClipIds] = useState(new Set());
+
   const [animatedClipLayoutById, setAnimatedClipLayoutById] = useState({});
   const errorBeepContextRef = useRef(null);
   const animatedClipLayoutByIdRef = useRef({});
   const clipAnimationFrameRef = useRef(null);
   const selectedClipIdSet = useMemo(() => new Set(selectedClipIds), [selectedClipIds]);
+  const cancelGestures = useCallback(() => {
+    cancelledGestureRef.current = true;
+    if (dragMoveRafRef.current !== null) cancelAnimationFrame(dragMoveRafRef.current);
+    if (timelineSelectionRafRef.current !== null) cancelAnimationFrame(timelineSelectionRafRef.current);
+    if (selectionClickResetRafRef.current !== null) cancelAnimationFrame(selectionClickResetRafRef.current);
+    selectionClickResetRafRef.current = null;
+    timelineSelectionSuppressClickRef.current = false;
+    dragMoveRafRef.current = timelineSelectionRafRef.current = null;
+    dragMovePointRef.current = timelineSelectionPointRef.current = null;
+    dragPreviewRef.current = timelineSelectionRef.current = lyricDragRef.current = null;
+    rightClickDragRef.current = false;
+    setDragState(null);
+    setDragPreview(null);
+    setTimelineSelectionState(null);
+    setRulerDragState(null);
+    setLoopMarkerDragState(null);
+    setLyricPreview(null);
+  }, []);
+  useLayoutEffect(() => {
+    cancelGestures();
+    return cancelGestures;
+  }, [project.projectId, cancelGestures]);
+  useEffect(() => {
+    const onKey = (event) => { if (event.key === 'Escape') cancelGestures(); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('blur', cancelGestures);
+    window.addEventListener('pointercancel', cancelGestures);
+    window.addEventListener('lostpointercapture', cancelGestures);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('blur', cancelGestures);
+      window.removeEventListener('pointercancel', cancelGestures);
+      window.removeEventListener('lostpointercapture', cancelGestures);
+    };
+  }, [cancelGestures]);
 
   useEffect(() => {
     setSelectedLyricLineIds([]);
@@ -219,73 +257,62 @@ function Timeline({
     }
   };
 
-  // Track actual container width
-  useEffect(() => {
-    const updateWidth = () => {
-      if (timelineRef.current) {
-        setContainerWidth(timelineRef.current.clientWidth || TIMELINE_VIEWPORT_WIDTH);
+  // The editor owns the vertical scroller; the inner element owns horizontal scroll.
+  useLayoutEffect(() => {
+    const horizontal = tracksScrollRef.current;
+    if (!horizontal) return;
+    let vertical = horizontal;
+    if (sharedVerticalScroll) {
+      for (let node = horizontal.parentElement; node; node = node.parentElement) {
+        if (/(auto|scroll)/.test(getComputedStyle(node).overflowY)) { vertical = node; break; }
       }
+    }
+    verticalScrollRef.current = vertical;
+    let frame;
+    const measure = () => {
+      frame = null;
+      const width = horizontal.clientWidth;
+      if (width > 0) setContainerWidth(width);
+      const top = vertical === horizontal ? horizontal.scrollTop
+        : vertical.getBoundingClientRect().top - horizontal.getBoundingClientRect().top;
+      const height = vertical.clientHeight;
+      setVerticalViewport((previous) => previous.top === top && previous.height === height ? previous : { top, height });
     };
+    const invalidate = () => { if (frame == null) frame = requestAnimationFrame(measure); };
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(invalidate) : null;
+    observer?.observe(horizontal);
+    if (vertical !== horizontal) observer?.observe(vertical);
+    vertical.addEventListener('scroll', invalidate, { passive: true });
+    window.addEventListener('resize', invalidate);
+    measure();
+    return () => {
+      if (frame != null) cancelAnimationFrame(frame);
+      observer?.disconnect();
+      vertical.removeEventListener('scroll', invalidate);
+      window.removeEventListener('resize', invalidate);
+      verticalScrollRef.current = null;
+    };
+  }, [sharedVerticalScroll, showLyricsLane]);
 
-    updateWidth();
-    window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
-  }, []);
-
-  // Calculate global peak amplitude for waveform normalization
+  // Media readiness is independent of summary readiness. No PCM scans or polling.
   useEffect(() => {
-    if (!project) return;
-    const currentlyLoaded = new Set();
-    let hasChanges = false;
-    project.tracks.forEach(track => {
-      track.clips.forEach(clip => {
-        if (audioManager.mediaCache.has(clip.blobId)) {
-          currentlyLoaded.add(clip.id);
-          if (!loadedClipIds.has(clip.id)) {
-            hasChanges = true;
-          }
-        }
-      });
-    });
-    if (currentlyLoaded.size !== loadedClipIds.size) {
-      hasChanges = true;
-    }
-    if (hasChanges) {
-      setLoadedClipIds(currentlyLoaded);
-      const peak = calculateGlobalPeakAmplitude(audioManager.mediaCache, project.tracks);
-      setGlobalPeakAmplitude(peak);
-    }
-  }, [project.tracks, loadedClipIds]);
+    const invalidate = () => setMediaRevision((revision) => revision + 1);
+    const unsubscribeMedia = audioManager.mediaCache.subscribe?.(invalidate);
+    const unsubscribeSource = waveformService.subscribe(invalidate);
+    return () => { unsubscribeMedia?.(); unsubscribeSource(); };
+  }, [project.projectId]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!project) return;
-      let hasNewLoads = false;
-      project.tracks.forEach(track => {
-        track.clips.forEach(clip => {
-          if (audioManager.mediaCache.has(clip.blobId) && !loadedClipIds.has(clip.id)) {
-            hasNewLoads = true;
-          }
-        });
-      });
-      if (hasNewLoads) {
-        const currentlyLoaded = new Set();
-        project.tracks.forEach(track => {
-          track.clips.forEach(clip => {
-            if (audioManager.mediaCache.has(clip.blobId)) {
-              currentlyLoaded.add(clip.id);
-            }
-          });
-        });
-        setLoadedClipIds(currentlyLoaded);
-        const peak = calculateGlobalPeakAmplitude(audioManager.mediaCache, project.tracks);
-        setGlobalPeakAmplitude(peak);
-      }
-    }, 500);
-    return () => clearInterval(interval);
-  }, [project, loadedClipIds]);
 
-  const timelineRows = rows && rows.length
+  const globalPeakAmplitude = useMemo(() => {
+    let peak = 0;
+    for (const id of new Set(project.tracks.flatMap((track) => track.clips.map((clip) => clip.blobId)))) {
+      const stats = waveformService.getSourceStats(id, audioManager.mediaCache.get(id));
+      if (Number.isFinite(stats?.sourcePeak)) peak = Math.max(peak, stats.sourcePeak);
+    }
+    return peak || 1;
+  }, [project.tracks, mediaRevision]);
+
+  const timelineRows = useMemo(() => rows && rows.length
     ? rows
     : (project.tracks || []).map((track) => ({
       kind: 'track',
@@ -293,7 +320,18 @@ function Timeline({
       track,
       depth: 0,
       height: getTrackHeight(track),
-    }));
+    })), [rows, project.tracks]);
+  const rowTops = useMemo(() => rowOffsets(timelineRows), [timelineRows]);
+
+  useEffect(() => {
+    if (!dragState) return;
+    const sourceChanged = dragState.mediaBuffers?.some(([id, buffer]) => audioManager.mediaCache.get(id) !== buffer);
+    const invalidSelection = Object.entries(dragState.initialByClipId || {}).some(([id, initial]) => {
+      const clip = project.tracks.find((track) => track.id === initial.trackId)?.clips.find((entry) => entry.id === id);
+      return !clip || clip.blobId !== initial.blobId || !isTrackEditable(initial.trackId);
+    });
+    if (sourceChanged || invalidSelection) cancelGestures();
+  }, [mediaRevision, dragState, project.tracks, isTrackEditable, cancelGestures]);
 
   const effectiveMix = useMemo(() => getEffectiveTrackMix(project), [project]);
   const trackStateById = effectiveMix.statesByTrackId;
@@ -510,7 +548,7 @@ function Timeline({
   };
 
   // Calculate total timeline height based on rendered rows
-  const totalTimelineHeight = timelineRows.reduce((sum, row) => sum + row.height, 0);
+  const totalTimelineHeight = rowTops[rowTops.length - 1];
 
   const groupTimelinePreviewByNodeId = useMemo(() => {
     const normalized = normalizeTrackTree(project);
@@ -544,7 +582,7 @@ function Timeline({
         }
         if (mutedByDescendantPath) continue;
         if (track.muted) continue;
-        for (const clip of track.clips) {
+        for (const clip of renderedClipsByTrackId.get(trackId) || track.clips) {
           if (clip?.muted) continue;
           const durationMs = Math.max(0, (clip.cropEndMs || 0) - (clip.cropStartMs || 0));
           if (durationMs <= 0) continue;
@@ -581,7 +619,7 @@ function Timeline({
     }
 
     return byGroupNodeId;
-  }, [project]);
+  }, [project, renderedClipsByTrackId]);
 
   // Calculate total timeline duration (in ms) based on furthest clip endpoint
   const rawProjectDurationMs = project.tracks.reduce((max, track) => {
@@ -601,25 +639,54 @@ function Timeline({
 
   const tempMinZoomDurationMs = Math.max(rawProjectDurationMs, MIN_VISIBLE_DURATION_MS);
   const tempPixelsPerMs = containerWidth / (visibleDurationMs || tempMinZoomDurationMs);
-  const tempRulerIntervalMs = (() => {
-    const targetPixelsPerInterval = 80;
-    const msPerInterval = targetPixelsPerInterval / tempPixelsPerMs;
-    let bestInterval = RULER_INTERVALS_MS[0];
-    for (const interval of RULER_INTERVALS_MS) {
-      if (Math.abs(interval - msPerInterval) < Math.abs(bestInterval - msPerInterval)) {
-        bestInterval = interval;
-      }
-    }
-    return bestInterval;
-  })();
+  const tempRulerIntervalMs = rulerInterval(tempPixelsPerMs);
 
   const projectDurationMs = calculatePaddedDuration(rawProjectDurationMs, tempRulerIntervalMs);
   const minZoomDurationMs = Math.max(projectDurationMs, MIN_VISIBLE_DURATION_MS);
-  const maxZoomDurationMs = MAX_ZOOM_VISIBLE_MS;
+  const sampleRate = useMemo(() => {
+    let rate = 0;
+    for (const track of project.tracks) for (const clip of track.clips) {
+      rate = Math.max(rate, audioManager.mediaCache.get(clip.blobId)?.sampleRate || 0);
+    }
+    return rate || 48000;
+  }, [project.tracks, mediaRevision]);
+  // Four CSS pixels per sample at maximum zoom; trimming keeps its 100ms minimum.
+  const maxZoomDurationMs = containerWidth * 1000 / (sampleRate * 4);
   const currentVisibleMs = visibleDurationMs === null ? minZoomDurationMs : visibleDurationMs;
-  const clampedVisibleMs = Math.max(maxZoomDurationMs, currentVisibleMs);
+  const clampedVisibleMs = clampDuration(currentVisibleMs, maxZoomDurationMs, minZoomDurationMs);
+  useEffect(() => {
+    if (visibleDurationMs !== null && visibleDurationMs !== clampedVisibleMs) setVisibleDurationMs(clampedVisibleMs);
+  }, [visibleDurationMs, clampedVisibleMs]);
   const pixelsPerMs = containerWidth / clampedVisibleMs;
   const timelineWidthPx = Math.max(projectDurationMs, minZoomDurationMs) * pixelsPerMs;
+  const segmentWidthPx = scrollSegment(scrollLeft, timelineWidthPx, containerWidth, originPx).width;
+  const logicalScrollLeft = () => originRef.current + (tracksScrollRef.current?.scrollLeft || 0);
+  const setLogicalScroll = (left) => {
+    const segment = scrollSegment(left, timelineWidthPx, containerWidth, originRef.current);
+    originRef.current = segment.origin;
+    setOriginPx(segment.origin);
+    setScrollLeft(segment.logical);
+    for (const element of [tracksScrollRef.current, rulerScrollRef.current]) {
+      if (!element) continue;
+      element.scrollLeft = segment.left;
+      element.style.setProperty('--scroll-left', `${segment.left}px`);
+    }
+  };
+  const segmentRange = (left, width) => boundedRange(left, width, originPx, segmentWidthPx);
+  // Off-segment markers stay offscreen without introducing enormous CSS offsets.
+  const localPosition = (logical) => Math.max(-100, Math.min(segmentWidthPx + 100, logical - originPx));
+  const groupSurfaceClipsByNodeId = useMemo(() => new Map([...groupTimelinePreviewByNodeId].map(([id, preview]) => [id,
+    preview.clips.flatMap((clip) => {
+      const range = boundedRange(clip.startMs * pixelsPerMs, clip.durationMs * pixelsPerMs, originPx, segmentWidthPx);
+      if (!range.width) return [];
+      const cropStartMs = clip.cropStartMs + range.skipped / pixelsPerMs;
+      return [{ ...clip, startMs: range.left / pixelsPerMs, durationMs: range.width / pixelsPerMs,
+        cropStartMs, cropEndMs: cropStartMs + range.width / pixelsPerMs }];
+    }),
+  ])), [groupTimelinePreviewByNodeId, pixelsPerMs, originPx, segmentWidthPx]);
+  useLayoutEffect(() => {
+    setLogicalScroll(Math.min(scrollLeft, Math.max(0, timelineWidthPx - containerWidth)));
+  }, [timelineWidthPx, containerWidth]);
 
   const beginLyricDrag = (event, line) => {
     if (!canEditLyrics || event.button !== 0) return;
@@ -634,10 +701,13 @@ function Timeline({
       lyricSelectionAnchorRef.current = line.id;
       setFocusedLyricLineId(line.id);
     }
+    cancelledGestureRef.current = false;
     const initial = {
+      projectId: project.projectId,
       lineIds: selectedIds,
       pointerId: event.pointerId,
       clientX: event.clientX,
+      startTimeMs: (event.clientX - tracksScrollRef.current.getBoundingClientRect().left + logicalScrollLeft()) / pixelsPerMs,
       baselineLines: (project.lyrics?.lines || []).map((candidate) => ({ ...candidate })),
       previewByLineId: null,
     };
@@ -648,7 +718,8 @@ function Timeline({
     const handlePointerMove = (event) => {
       const drag = lyricDragRef.current;
       if (!drag || (drag.pointerId != null && event.pointerId != null && drag.pointerId !== event.pointerId)) return;
-      const deltaMs = Math.round((event.clientX - drag.clientX) / pixelsPerMs);
+      const element = tracksScrollRef.current;
+      const deltaMs = Math.round((event.clientX - element.getBoundingClientRect().left + logicalScrollLeft()) / pixelsPerMs - drag.startTimeMs);
       const previewByLineId = calculateLyricStartMovePreview(
         drag.baselineLines,
         drag.lineIds,
@@ -663,6 +734,8 @@ function Timeline({
     const handlePointerUp = (event) => {
       const drag = lyricDragRef.current;
       if (!drag || (drag.pointerId != null && event.pointerId != null && drag.pointerId !== event.pointerId)) return;
+      if (cancelledGestureRef.current || !canEditLyrics) return;
+      handlePointerMove(event);
       const previewByLineId = drag.previewByLineId;
       lyricDragRef.current = null;
       setLyricPreview(null);
@@ -689,6 +762,11 @@ function Timeline({
           lyricSelectionAnchorRef.current = nextFocus;
         }
         updateProject((current) => {
+          if (!canEditLyrics || current.projectId !== drag.projectId || [...changedLineIds].some((id) => {
+            const baseline = drag.baselineLines.find((line) => line.id === id);
+            const latest = current.lyrics?.lines?.find((line) => line.id === id);
+            return !latest || latest.startMs !== baseline?.startMs;
+          })) return current;
           const currentLines = (current.lyrics?.lines || []).map((line) => {
             const placement = previewByLineId?.[line.id];
             return placement && changedLineIds.has(line.id)
@@ -721,7 +799,7 @@ function Timeline({
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerCancel);
     };
-  }, [focusedLyricLineId, pixelsPerMs, project, rawProjectDurationMs, selectedLyricLineIds, updateProject]);
+  }, [focusedLyricLineId, pixelsPerMs, project, rawProjectDurationMs, selectedLyricLineIds, updateProject, canEditLyrics]);
 
   const deleteSelectedLyricLines = () => {
     if (!canEditLyrics || selectedLyricLineIds.length === 0) return;
@@ -825,7 +903,7 @@ function Timeline({
   const lyricStartAtClientX = (clientX, target) => {
     const lane = target?.closest?.('[aria-label="Lyrics timeline lane"]');
     if (!lane) return 0;
-    const positionPx = clientX - lane.getBoundingClientRect().left + scrollLeft;
+    const positionPx = clientX - lane.getBoundingClientRect().left + logicalScrollLeft();
     return Math.max(0, Math.min(rawProjectDurationMs, Math.round(positionPx / pixelsPerMs)));
   };
 
@@ -852,58 +930,46 @@ function Timeline({
   const zoomSliderUiValue = 1 - zoomSliderValue;
 
   const sliderValueToDuration = (value) => {
-    if (minZoomDurationMs <= maxZoomDurationMs) return maxZoomDurationMs;
-    return maxZoomDurationMs * Math.pow(minZoomDurationMs / maxZoomDurationMs, value);
+    return durationFromSlider(value, maxZoomDurationMs, minZoomDurationMs);
   };
 
-  const applyZoomDuration = (nextVisibleDurationMs) => {
-    shouldCenterOnPlayheadAfterZoomRef.current = true;
-    setVisibleDurationMs(nextVisibleDurationMs);
+  const applyZoomDuration = (nextVisibleDurationMs, pointerX) => {
+    if (dragState || lyricDragRef.current || rulerDragState || loopMarkerDragState || timelineSelectionRef.current) return false;
+    const left = logicalScrollLeft();
+    pendingZoomAnchorRef.current = zoomAnchor(left, containerWidth, pixelsPerMs, currentTimeMs, pointerX);
+    setVisibleDurationMs(nextVisibleDurationMs === null ? null
+      : clampDuration(nextVisibleDurationMs, maxZoomDurationMs, minZoomDurationMs));
+    return true;
   };
 
   const formatVisibleDuration = (durationMs) => {
     const seconds = durationMs / 1000;
-    if (seconds < 1) return `${Math.round(durationMs)}ms`;
+    if (seconds < 1) return `${Number(durationMs.toPrecision(3))}ms`;
     if (seconds < 60) return `${seconds.toFixed(1)}s`;
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = Math.round(seconds % 60);
     return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
   };
 
-  const calculateRulerInterval = () => {
-    const targetPixelsPerInterval = 80;
-    const msPerInterval = targetPixelsPerInterval / pixelsPerMs;
-    let bestInterval = RULER_INTERVALS_MS[0];
-    for (const interval of RULER_INTERVALS_MS) {
-      if (Math.abs(interval - msPerInterval) < Math.abs(bestInterval - msPerInterval)) {
-        bestInterval = interval;
-      }
-    }
-    return bestInterval;
-  };
+  const rulerIntervalMs = rulerInterval(pixelsPerMs);
+  const rulerTicks = visibleRulerTicks(scrollLeft, containerWidth, pixelsPerMs, rulerIntervalMs, minZoomDurationMs);
 
-  const rulerIntervalMs = calculateRulerInterval();
-
-  useEffect(() => {
-    if (!shouldCenterOnPlayheadAfterZoomRef.current) return;
+  useLayoutEffect(() => {
+    if (!pendingZoomAnchorRef.current) return;
     const tracksElement = tracksScrollRef.current;
     if (!tracksElement) return;
 
-    const maxScrollLeft = Math.max(0, timelineWidthPx - containerWidth);
-    const targetScrollLeft = Math.max(
-      0,
-      Math.min(maxScrollLeft, (currentTimeMs * pixelsPerMs) - (containerWidth / 2))
-    );
+    const targetScrollLeft = anchoredScroll(pendingZoomAnchorRef.current, pixelsPerMs, containerWidth, timelineWidthPx);
 
-    tracksElement.scrollLeft = targetScrollLeft;
-    if (rulerScrollRef.current) {
-      rulerScrollRef.current.scrollLeft = targetScrollLeft;
-    }
-    setScrollLeft(targetScrollLeft);
-    shouldCenterOnPlayheadAfterZoomRef.current = false;
+    setLogicalScroll(targetScrollLeft);
+    pendingZoomAnchorRef.current = null;
   }, [pixelsPerMs, timelineWidthPx, containerWidth, currentTimeMs]);
 
   const formatRulerTime = (ms, intervalMs) => {
+    if (intervalMs < 100) {
+      const digits = Math.max(0, Math.ceil(-Math.log10(intervalMs)));
+      return `${Number(ms.toFixed(digits))}ms`;
+    }
     // Zoomed in: show decisecond precision.
     if (intervalMs < 1000) {
       const totalDeciseconds = Math.max(0, Math.round(ms / 100));
@@ -1072,7 +1138,7 @@ function Timeline({
     if (!scrollElement) return null;
     const rect = scrollElement.getBoundingClientRect();
     return {
-      x: clientX - rect.left + scrollElement.scrollLeft,
+      x: clientX - rect.left + logicalScrollLeft(),
       y: clientY - rect.top + scrollElement.scrollTop,
     };
   };
@@ -1096,7 +1162,7 @@ function Timeline({
     const selectedIds = [];
     timelineRows.forEach((row, rowIndex) => {
       if (row.kind !== 'track' || !row.track) return;
-      const trackY = getTrackYPosition(timelineRows, rowIndex);
+      const trackY = rowTops[rowIndex];
       const clipPadding = 8;
       const clipTop = trackY + clipPadding;
       const clipBottom = clipTop + Math.max(0, row.height - (clipPadding * 2));
@@ -1130,6 +1196,7 @@ function Timeline({
     const point = getTimelineContentPoint(e.clientX, e.clientY);
     if (!point) return;
 
+    cancelledGestureRef.current = false;
     const nextState = {
       startClientX: e.clientX,
       startClientY: e.clientY,
@@ -1196,6 +1263,29 @@ function Timeline({
     }
   };
 
+  const handleClipKeyDown = (event, clip, trackId) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      handleClipClick(event, clip, trackId);
+      return;
+    }
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || advancedMixLocked || !isTrackEditable(trackId)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const delta = (event.key === 'ArrowRight' ? 1 : -1) * (!event.altKey && event.shiftKey ? 10 : 1);
+    const patchFor = (current) => event.altKey
+      ? event.shiftKey ? { cropEndMs: current.cropEndMs + delta }
+        : { cropStartMs: current.cropStartMs + delta, timelineStartMs: current.timelineStartMs + delta }
+      : { timelineStartMs: current.timelineStartMs + delta };
+    if (applyClipPatches(project, { [clip.id]: patchFor(clip) }, {}, { canEditTrack: isTrackEditable }) === project) return;
+    updateProject((current) => {
+      if (current.projectId !== project.projectId) return current;
+      const latest = current.tracks.find((track) => track.id === trackId)?.clips.find((entry) => entry.id === clip.id);
+      return latest ? applyClipPatches(current, { [clip.id]: patchFor(latest) }, {}, { canEditTrack: isTrackEditable }) : current;
+    }, event.altKey ? 'Trim clip with keyboard' : 'Move clip with keyboard');
+  };
+
   const handleClipRightClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1239,8 +1329,8 @@ function Timeline({
       return;
     }
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const offsetX = e.clientX - rect.left;
+    const rect = tracksScrollRef.current.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left + logicalScrollLeft() - clip.timelineStartMs * pixelsPerMs;
     const clipWidthPx = (clip.cropEndMs - clip.cropStartMs) * pixelsPerMs;
 
     const edgeThreshold = 12; // Match the w-3 (12px) hover zone width
@@ -1276,13 +1366,17 @@ function Timeline({
         cropStartMs: entry.clip.cropStartMs,
         cropEndMs: entry.clip.cropEndMs,
         sourceDurationMs: entry.clip.sourceDurationMs,
+        blobId: entry.clip.blobId,
         gainDb: entry.clip.gainDb,
       };
       initialTrackRowByClipId[entry.clip.id] = entry.trackRowIndex;
     });
     const clickedRowIndex = visibleTrackIndexByTrackId.get(track.id) ?? 0;
 
+    cancelledGestureRef.current = false;
     setDragState({
+      projectId: project.projectId,
+      startTimeMs: (e.clientX - tracksScrollRef.current.getBoundingClientRect().left + logicalScrollLeft()) / pixelsPerMs,
       type: dragType,
       clipId: clip.id,
       trackId: track.id,
@@ -1294,6 +1388,7 @@ function Timeline({
       initialGainDb: clip.gainDb,
       initialGainPosition: clipGainDbToPosition(clip.gainDb),
       activeClipIds,
+      mediaBuffers: activeEntries.map(({ clip: entryClip }) => [entryClip.blobId, audioManager.mediaCache.get(entryClip.blobId)]),
       initialByClipId,
       initialTrackRowByClipId,
       clickedRowIndex,
@@ -1311,20 +1406,12 @@ function Timeline({
     const scrollElement = tracksScrollRef.current;
     if (!timelineElement || !scrollElement) return null;
 
-    const rect = timelineElement.getBoundingClientRect();
+    const rect = scrollElement.getBoundingClientRect();
     const yWithinContent = clientY - rect.top + scrollElement.scrollTop;
     if (yWithinContent < 0) return null;
 
-    let accumulatedHeight = 0;
-    for (const row of timelineRows) {
-      const rowEnd = accumulatedHeight + row.height;
-      if (yWithinContent >= accumulatedHeight && yWithinContent < rowEnd) {
-        return row.kind === 'track' ? row : null;
-      }
-      accumulatedHeight = rowEnd;
-    }
-
-    return null;
+    const row = timelineRows[rowAtY(rowTops, yWithinContent)];
+    return row?.kind === 'track' ? row : null;
   };
 
   const getDragActionLabel = (state) => {
@@ -1339,9 +1426,10 @@ function Timeline({
   const buildDragPreviewAtPointer = (state, clientX, clientY) => {
     if (advancedMixLocked && state?.type !== 'gain') return null;
 
-    const deltaX = clientX - state.startX;
     const deltaY = clientY - state.startY;
-    const deltaMs = deltaX / pixelsPerMs;
+    const element = tracksScrollRef.current;
+    const pointerTimeMs = (clientX - element.getBoundingClientRect().left + logicalScrollLeft()) / pixelsPerMs;
+    const deltaMs = pointerTimeMs - state.startTimeMs;
 
     const track = project.tracks.find((t) => t.id === state.trackId);
     if (!track) return null;
@@ -1606,50 +1694,19 @@ function Timeline({
   };
 
   const commitDragPreview = (state, preview) => {
-    if (!state || !preview || !preview.clipPatchesById) return;
+    if (!state || !preview || !preview.clipPatchesById || cancelledGestureRef.current || state.projectId !== project.projectId) return;
     if (advancedMixLocked && state.type !== 'gain') return;
+    if (state.mediaBuffers?.some(([id, buffer]) => audioManager.mediaCache.get(id) !== buffer)) return;
     const clipPatchesById = preview.clipPatchesById;
     const targetTrackIdByClipId = preview.targetTrackIdByClipId || {};
     const hasChanges = Object.keys(clipPatchesById).length > 0;
     if (!hasChanges) return;
 
-    updateProject((proj) => {
-      const additionsByTrackId = new Map();
-      const nextTracks = proj.tracks.map((candidateTrack) => {
-        const keptClips = [];
-        candidateTrack.clips.forEach((candidateClip) => {
-          const patch = clipPatchesById[candidateClip.id];
-          if (!patch) {
-            keptClips.push(candidateClip);
-            return;
-          }
-          const nextTrackId = targetTrackIdByClipId[candidateClip.id] || candidateTrack.id;
-          const updatedClip = { ...candidateClip, ...patch };
-          if (!additionsByTrackId.has(nextTrackId)) {
-            additionsByTrackId.set(nextTrackId, []);
-          }
-          additionsByTrackId.get(nextTrackId).push(updatedClip);
-        });
-        return {
-          ...candidateTrack,
-          clips: keptClips,
-        };
-      }).map((candidateTrack) => {
-        const additions = additionsByTrackId.get(candidateTrack.id) || [];
-        if (!additions.length) return candidateTrack;
-        const mergedClips = [...candidateTrack.clips, ...additions]
-          .sort((a, b) => a.timelineStartMs - b.timelineStartMs || a.id.localeCompare(b.id));
-        return {
-          ...candidateTrack,
-          clips: mergedClips,
-        };
-      });
-
-      return {
-        ...proj,
-        tracks: nextTracks,
-      };
-    }, getDragActionLabel(state));
+    const options = { baseline: state.initialByClipId, canEditTrack: isTrackEditable, minimumDurationMs: MIN_CLIP_DURATION_MS };
+    // Avoid even calling history/autosave for an unchanged or already invalid preview.
+    if (applyClipPatches(project, clipPatchesById, targetTrackIdByClipId, options) === project) return;
+    updateProject((proj) => proj.projectId !== state.projectId ? proj
+      : applyClipPatches(proj, clipPatchesById, targetTrackIdByClipId, options), getDragActionLabel(state));
 
     if (preview.clickedTargetTrackId) {
       const row = trackRowByTrackId.get(preview.clickedTargetTrackId);
@@ -1685,7 +1742,12 @@ function Timeline({
       dragMoveRafRef.current = window.requestAnimationFrame(processDragPointerMove);
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (event) => {
+      if (cancelledGestureRef.current || dragState.projectId !== project.projectId) return;
+      if (dragState.mediaBuffers?.some(([id, buffer]) => audioManager.mediaCache.get(id) !== buffer)) { cancelGestures(); return; }
+      if (dragMoveRafRef.current !== null) cancelAnimationFrame(dragMoveRafRef.current);
+      dragMovePointRef.current = { clientX: event.clientX, clientY: event.clientY };
+      processDragPointerMove();
       if (dragState.type === 'gain') {
         if (!rightClickDragRef.current) {
           const targetClipIds = dragState.activeClipIds?.length
@@ -1701,16 +1763,9 @@ function Timeline({
             });
           });
           const shouldMute = !targetClips.every((candidateClip) => candidateClip.muted);
-          updateProject((proj) => ({
-            ...proj,
-            tracks: proj.tracks.map((candidateTrack) => ({
-              ...candidateTrack,
-              clips: candidateTrack.clips.map((candidateClip) => (
-                targetClipIdSet.has(candidateClip.id)
-                  ? { ...candidateClip, muted: shouldMute }
-                  : candidateClip
-              )),
-            })),
+          const patches = Object.fromEntries(targetClipIds.map((id) => [id, { muted: shouldMute }]));
+          updateProject((proj) => proj.projectId !== dragState.projectId ? proj : applyClipPatches(proj, patches, {}, {
+            baseline: dragState.initialByClipId, canEditTrack: isTrackEditable,
           }), shouldMute ? 'Mute clips' : 'Unmute clips');
         } else {
           commitDragPreview(dragState, dragPreviewRef.current);
@@ -1746,6 +1801,9 @@ function Timeline({
     trackRowByTrackId,
     timelineRows,
     updateProject,
+    isTrackEditable,
+    advancedMixLocked,
+    project.projectId,
   ]);
 
   useEffect(() => {
@@ -1794,6 +1852,10 @@ function Timeline({
     };
 
     const handleMouseUp = (e) => {
+      if (cancelledGestureRef.current) return;
+      if (timelineSelectionRafRef.current !== null) cancelAnimationFrame(timelineSelectionRafRef.current);
+      timelineSelectionPointRef.current = { clientX: e.clientX, clientY: e.clientY };
+      processSelectionPointerMove();
       const current = timelineSelectionRef.current;
       if (!current) return;
 
@@ -1818,7 +1880,8 @@ function Timeline({
 
       timelineSelectionRef.current = null;
       setTimelineSelectionState(null);
-      window.requestAnimationFrame(() => {
+      selectionClickResetRafRef.current = window.requestAnimationFrame(() => {
+        selectionClickResetRafRef.current = null;
         timelineSelectionSuppressClickRef.current = false;
       });
     };
@@ -2308,12 +2371,13 @@ function Timeline({
     e.preventDefault();
 
     const rect = rulerScrollRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left + scrollLeft;
+    const x = e.clientX - rect.left + logicalScrollLeft();
     const timeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
     const hasLoop = project.loop.startMs !== undefined && project.loop.endMs !== undefined;
     const clickedLoop = hasLoop && timeMs >= project.loop.startMs && timeMs <= project.loop.endMs;
     const mode = clickedLoop ? 'move' : 'create';
 
+    cancelledGestureRef.current = false;
     setRulerDragState({
       startTimeMs: timeMs,
       startX: e.clientX,
@@ -2330,6 +2394,7 @@ function Timeline({
     e.stopPropagation();
     if (e.button !== 0) return; // Only left click
 
+    cancelledGestureRef.current = false;
     setLoopMarkerDragState({
       markerType, // 'start' or 'end'
       initialStartMs: project.loop.startMs,
@@ -2350,7 +2415,7 @@ function Timeline({
 
       if (rulerDragState.isDragging) {
         const rect = rulerScrollRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left + scrollLeft;
+        const x = e.clientX - rect.left + logicalScrollLeft();
         const currentTimeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
 
         if (rulerDragState.mode === 'move' && rulerDragState.initialLoopStartMs !== undefined) {
@@ -2387,10 +2452,15 @@ function Timeline({
     };
 
     const handleMouseUp = (e) => {
-      if (rulerDragState.isDragging) {
+      if (cancelledGestureRef.current) return;
+      const element = rulerScrollRef.current;
+      const releaseTimeMs = Math.max(0, Math.min((e.clientX - element.getBoundingClientRect().left + logicalScrollLeft()) / pixelsPerMs, projectDurationMs || minZoomDurationMs));
+      if (rulerDragState.isDragging || Math.abs(e.clientX - rulerDragState.startX) > 5) {
         if (rulerDragState.mode === 'move') {
-          const finalStartMs = rulerDragState.currentStartMs ?? rulerDragState.initialLoopStartMs;
-          const finalEndMs = rulerDragState.currentEndMs ?? rulerDragState.initialLoopEndMs;
+          const length = rulerDragState.initialLoopEndMs - rulerDragState.initialLoopStartMs;
+          const finalStartMs = Math.max(0, Math.min((projectDurationMs || minZoomDurationMs) - length,
+            rulerDragState.initialLoopStartMs + releaseTimeMs - rulerDragState.startTimeMs));
+          const finalEndMs = finalStartMs + length;
           if (finalStartMs !== rulerDragState.initialLoopStartMs ||
               finalEndMs !== rulerDragState.initialLoopEndMs) {
             updateLoop((loop) => ({
@@ -2402,7 +2472,7 @@ function Timeline({
         } else {
           // Create loop
           const rect = rulerScrollRef.current.getBoundingClientRect();
-          const x = e.clientX - rect.left + scrollLeft;
+          const x = e.clientX - rect.left + logicalScrollLeft();
           const endTimeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
 
           const startMs = Math.min(rulerDragState.startTimeMs, endTimeMs);
@@ -2444,7 +2514,7 @@ function Timeline({
 
     const handleMouseMove = (e) => {
       const rect = rulerScrollRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left + scrollLeft;
+      const x = e.clientX - rect.left + logicalScrollLeft();
       const timeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
 
       let newStartMs = loopMarkerDragState.initialStartMs;
@@ -2466,10 +2536,12 @@ function Timeline({
       }));
     };
 
-    const handleMouseUp = () => {
-      // Get final values from drag state
-      const rawStartMs = loopMarkerDragState.currentStartMs ?? loopMarkerDragState.initialStartMs;
-      const rawEndMs = loopMarkerDragState.currentEndMs ?? loopMarkerDragState.initialEndMs;
+    const handleMouseUp = (event) => {
+      if (cancelledGestureRef.current) return;
+      const element = rulerScrollRef.current;
+      const timeMs = Math.max(0, Math.min((event.clientX - element.getBoundingClientRect().left + logicalScrollLeft()) / pixelsPerMs, projectDurationMs || minZoomDurationMs));
+      const rawStartMs = loopMarkerDragState.markerType === 'start' ? timeMs : loopMarkerDragState.initialStartMs;
+      const rawEndMs = loopMarkerDragState.markerType === 'end' ? timeMs : loopMarkerDragState.initialEndMs;
       const finalStartMs = Math.min(rawStartMs, rawEndMs);
       const finalEndMs = Math.max(rawStartMs, rawEndMs);
 
@@ -2494,76 +2566,54 @@ function Timeline({
     };
   }, [loopMarkerDragState, pixelsPerMs, scrollLeft, projectDurationMs, minZoomDurationMs, updateLoop]);
 
-  // Handle wheel events for zoom and horizontal scroll
+  // One listener per disjoint viewport, never on both a child and its ancestor.
   useEffect(() => {
-    const convertSliderToDuration = (value) => {
-      if (minZoomDurationMs <= maxZoomDurationMs) return maxZoomDurationMs;
-      return maxZoomDurationMs * Math.pow(minZoomDurationMs / maxZoomDurationMs, value);
+    let frame;
+    let wheelDuration;
+    let pointerX;
+    const flush = () => {
+      frame = null;
+      applyZoomDuration(wheelDuration, pointerX);
+      wheelDuration = undefined;
     };
-
-    const handleWheel = (e) => {
-      // Primary modifier + wheel = Zoom in/out
-      if (isPrimaryModifierPressed(e)) {
-        e.preventDefault();
-        const delta = e.deltaY * 0.001; // Inverted: scroll up = zoom in, scroll down = zoom out
-        const newSliderValue = Math.max(0, Math.min(1, zoomSliderValue + delta));
-
-        if (newSliderValue >= 0.99) {
-          applyZoomDuration(null);
-        } else {
-          const newDuration = convertSliderToDuration(newSliderValue);
-          if (newDuration >= minZoomDurationMs * 0.95) {
-            applyZoomDuration(null);
-          } else {
-            applyZoomDuration(newDuration);
-          }
-        }
+    const handleWheel = (event) => {
+      const delta = normalizeWheel(event, containerWidth);
+      if (isPrimaryModifierPressed(event) || event.ctrlKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (dragState || lyricDragRef.current || rulerDragState || loopMarkerDragState) return;
+        pointerX = event.clientX - tracksScrollRef.current.getBoundingClientRect().left;
+        wheelDuration = clampDuration((wheelDuration ?? clampedVisibleMs) * Math.exp(delta.y * 0.002), maxZoomDurationMs, minZoomDurationMs);
+        if (frame == null) frame = requestAnimationFrame(flush);
+      } else if (event.shiftKey || Math.abs(delta.x) > Math.abs(delta.y)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setLogicalScroll(logicalScrollLeft() + (event.shiftKey ? delta.y : delta.x));
       }
-      // Shift + Wheel = Horizontal scroll
-      else if (e.shiftKey) {
-        const scrollElement = tracksScrollRef.current;
-        if (scrollElement && scrollElement.scrollWidth > scrollElement.clientWidth) {
-          e.preventDefault();
-          scrollElement.scrollLeft += e.deltaY * 3;
-        }
-      }
-      // Trackpad horizontal scroll
-      else if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        const scrollElement = tracksScrollRef.current;
-        if (scrollElement && scrollElement.scrollWidth > scrollElement.clientWidth) {
-          e.preventDefault();
-          scrollElement.scrollLeft += e.deltaX;
-        }
-      }
-      // Regular wheel = Vertical scroll between tracks (default behavior)
     };
-
-    const timelineElement = timelineRef.current;
-    const tracksElement = tracksScrollRef.current;
-    const rulerElement = rulerScrollRef.current;
-
-    if (timelineElement) {
-      timelineElement.addEventListener('wheel', handleWheel, { passive: false });
-    }
-    if (tracksElement) {
-      tracksElement.addEventListener('wheel', handleWheel, { passive: false });
-    }
-    if (rulerElement) {
-      rulerElement.addEventListener('wheel', handleWheel, { passive: false });
-    }
-
+    const elements = [tracksScrollRef.current, rulerScrollRef.current].filter(Boolean);
+    elements.forEach((element) => element.addEventListener('wheel', handleWheel, { passive: false }));
     return () => {
-      if (timelineElement) {
-        timelineElement.removeEventListener('wheel', handleWheel);
-      }
-      if (tracksElement) {
-        tracksElement.removeEventListener('wheel', handleWheel);
-      }
-      if (rulerElement) {
-        rulerElement.removeEventListener('wheel', handleWheel);
-      }
+      if (frame != null) cancelAnimationFrame(frame);
+      elements.forEach((element) => element.removeEventListener('wheel', handleWheel));
     };
-  }, [zoomSliderValue, minZoomDurationMs, maxZoomDurationMs]);
+  }, [clampedVisibleMs, pixelsPerMs, containerWidth, minZoomDurationMs, maxZoomDurationMs, currentTimeMs,
+    dragState, rulerDragState, loopMarkerDragState]);
+
+  const fitSelection = () => {
+    const clips = getSelectedClipEntries().map((entry) => entry.clip);
+    if (!clips.length) return;
+    const start = Math.min(...clips.map((clip) => clip.timelineStartMs));
+    const end = Math.max(...clips.map((clip) => clip.timelineStartMs + getClipDurationMs(clip)));
+    if (!applyZoomDuration((end - start) * 1.1)) return;
+    pendingZoomAnchorRef.current = { timeMs: (start + end) / 2, x: containerWidth / 2 };
+  };
+  const fitProject = () => {
+    if (!applyZoomDuration(null)) return;
+    pendingZoomAnchorRef.current = { timeMs: 0, x: 0 };
+    setLogicalScroll(0);
+  };
+  const zoomToSamples = () => applyZoomDuration(containerWidth * 1000 / sampleRate);
 
   const handleZoomIn = () => {
     const newSliderValue = Math.max(0, zoomSliderValue - 0.1);
@@ -2600,8 +2650,40 @@ function Timeline({
     }
   };
 
+  useEffect(() => {
+    const onKey = (event) => {
+      if (!shortcutsEnabled || event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === '+' || event.key === '=') { event.preventDefault(); handleZoomIn(); }
+      else if (event.key === '-') { event.preventDefault(); handleZoomOut(); }
+      else if (event.key === '0') { event.preventDefault(); fitProject(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   const zoomOverlay = (
-    <div className="zoom-minimal-overlay">
+    <div className="zoom-minimal-overlay" onMouseDown={(event) => event.stopPropagation()}>
+      <details className="relative text-xs text-gray-200 bg-gray-800 rounded p-1" title="At deep zoom the native scroll rail covers a local segment. Use Fit project for a global overview.">
+        <summary aria-label="Timeline zoom and waveform options" className="cursor-pointer">View</summary>
+        <div className="absolute right-0 bg-gray-800 p-2 rounded shadow-lg flex flex-col gap-2 min-w-48 z-50">
+          <button type="button" onClick={handleZoomIn}>Zoom in (+)</button>
+          <button type="button" onClick={handleZoomOut}>Zoom out (-)</button>
+          <button type="button" onClick={fitProject}>Fit project (0)</button>
+          <button type="button" onClick={fitSelection} disabled={!selectedClipIds.length}>Fit selected clips</button>
+          <button type="button" onClick={zoomToSamples}>Zoom to samples</button>
+          <label>Amplitude scale
+            <select aria-label="Waveform amplitude scale" value={displayMode} onChange={(event) => setDisplayMode(event.target.value)} className="bg-gray-900">
+              <option value="linear">Fixed linear</option>
+              <option value="normalized">Project normalized (compatibility)</option>
+              <option value="db">Decibels (-60 dB floor)</option>
+            </select>
+          </label>
+          <label><input type="checkbox" checked={showRms} onChange={(event) => setShowRms(event.target.checked)} /> RMS energy</label>
+          <label><input type="checkbox" checked={showClipping} onChange={(event) => setShowClipping(event.target.checked)} /> Source over-range indicators</label>
+          <label><input type="checkbox" checked={showSamples} onChange={(event) => setShowSamples(event.target.checked)} /> Sample points at deep zoom</label>
+        </div>
+      </details>
       <div className="zoom-minimal-shell">
         <div className="zoom-minimal-stick" />
         <input
@@ -2612,7 +2694,9 @@ function Timeline({
           value={zoomSliderUiValue}
           onChange={handleSliderChange}
           className="zoom-minimal-slider"
-          title="Zoom"
+          title="Timeline zoom"
+          aria-label="Timeline zoom"
+          aria-valuetext={`${formatVisibleDuration(clampedVisibleMs)} visible`}
         />
       </div>
     </div>
@@ -2630,7 +2714,7 @@ function Timeline({
     >
       <div
         className="absolute inset-y-0"
-        style={{ left: `${-scrollLeft}px`, width: `${timelineWidthPx}px` }}
+        style={{ left: `${originPx - scrollLeft}px`, width: `${segmentWidthPx}px` }}
       >
         <div className="absolute inset-0 bg-gray-800/40" />
         {(() => {
@@ -2653,8 +2737,9 @@ function Timeline({
             <>
               {displayedPlacedLines.map(({ line, startMs }) => {
                 const endMs = getLyricLineEndMs(displayedPlacedLines, line.id, rawProjectDurationMs);
-                const leftPx = startMs * pixelsPerMs;
-                const widthPx = Math.max(2, (endMs - startMs) * pixelsPerMs);
+                const range = segmentRange(startMs * pixelsPerMs, Math.max(2, (endMs - startMs) * pixelsPerMs));
+                const leftPx = range.left;
+                const widthPx = range.width;
                 const selected = selectedLyricLineIds.includes(line.id);
                 const isEditing = editingLyricLineId === line.id;
                 return (
@@ -2662,7 +2747,7 @@ function Timeline({
                     key={line.id}
                     data-lyric-line="true"
                     className={`absolute top-[5px] box-border h-[34px] overflow-hidden rounded border border-indigo-400 bg-indigo-900/80 text-xs shadow-sm ${selected ? 'ring-1 ring-white/80' : ''} ${canEditLyrics ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
-                    style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                    style={{ left: `${leftPx}px`, width: `${widthPx}px`, visibility: widthPx > 0 ? undefined : 'hidden' }}
                     title={line.text || '(empty lyric line)'}
                     onPointerDown={(event) => beginLyricDrag(event, line)}
                     onClick={(event) => selectLyricLine(event, line.id)}
@@ -2719,7 +2804,8 @@ function Timeline({
                   <div
                     key="lyrics-placement-preview"
                     className="absolute top-[5px] box-border h-[34px] overflow-hidden rounded border border-dashed border-indigo-200 bg-indigo-950 text-xs text-indigo-100"
-                    style={{ left: `${pendingStartMs * pixelsPerMs}px`, width: `${Math.max(2, (endMs - pendingStartMs) * pixelsPerMs)}px` }}
+                    style={{ left: segmentRange(pendingStartMs * pixelsPerMs, (endMs - pendingStartMs) * pixelsPerMs).left,
+                      width: segmentRange(pendingStartMs * pixelsPerMs, (endMs - pendingStartMs) * pixelsPerMs).width }}
                     title={'press "P" to place this line at playhead'}
                   >
                     <div className="flex h-full items-center overflow-hidden px-1.5">
@@ -2739,7 +2825,7 @@ function Timeline({
         })()}
         <div
           className="absolute top-0 z-20 h-full w-0.5 bg-red-400/80 pointer-events-none"
-          style={{ left: `${currentTimeMs * pixelsPerMs}px` }}
+          style={{ left: `${localPosition(currentTimeMs * pixelsPerMs)}px` }}
         />
       </div>
     </div>
@@ -2752,33 +2838,25 @@ function Timeline({
         <div
           ref={rulerScrollRef}
           className="flex-1 overflow-x-scroll overflow-y-visible ruler-scrollbar-hidden w-full min-w-0"
-          onScroll={(e) => {
-            const newScrollLeft = e.target.scrollLeft;
-            if (tracksScrollRef.current && tracksScrollRef.current.scrollLeft !== newScrollLeft) {
-              tracksScrollRef.current.scrollLeft = newScrollLeft;
-            }
-            setScrollLeft(newScrollLeft);
-          }}
+          onScroll={(event) => setLogicalScroll(originRef.current + event.currentTarget.scrollLeft)}
         >
           <div
-            style={{ width: `${timelineWidthPx}px`, height: '24px' }}
+            style={{ width: `${segmentWidthPx}px`, height: '24px' }}
             className="relative cursor-pointer"
             onMouseDown={handleRulerMouseDown}
             onDragStart={handleNativeDragStart}
           >
             <div className="absolute left-0 right-0 top-0 h-[23px] overflow-hidden">
               {/* Time markers */}
-            {Array.from({
-              length: Math.ceil(Math.max(minZoomDurationMs, clampedVisibleMs) / rulerIntervalMs) + 1
-            }).map((_, i) => {
-              const timeMs = i * rulerIntervalMs;
+            {rulerTicks.map((timeMs) => {
               if (timeMs * pixelsPerMs > timelineWidthPx + 50) return null;
 
               return (
                 <div
-                  key={i}
+                  key={timeMs}
+                  data-ruler-tick={timeMs}
                   className="absolute top-0 border-l border-gray-600"
-                  style={{ left: `${timeMs * pixelsPerMs}px`, height: '23px' }}
+                  style={{ left: `${timeMs * pixelsPerMs - originPx}px`, height: '23px' }}
                 >
                   <span className="text-xs text-gray-500 ml-1 whitespace-nowrap pointer-events-none select-none">
                     {formatRulerTime(timeMs, rulerIntervalMs)}
@@ -2795,8 +2873,8 @@ function Timeline({
                 <div
                   className="absolute top-0 bottom-0 pointer-events-none bg-yellow-500 bg-opacity-20"
                     style={{
-                      left: `${rulerDragState.currentStartMs * pixelsPerMs}px`,
-                      width: `${(rulerDragState.currentEndMs - rulerDragState.currentStartMs) * pixelsPerMs}px`,
+                      left: segmentRange(rulerDragState.currentStartMs * pixelsPerMs, (rulerDragState.currentEndMs - rulerDragState.currentStartMs) * pixelsPerMs).left,
+                      width: segmentRange(rulerDragState.currentStartMs * pixelsPerMs, (rulerDragState.currentEndMs - rulerDragState.currentStartMs) * pixelsPerMs).width,
                     }}
                   />
                 );
@@ -2818,8 +2896,8 @@ function Timeline({
                       project.loop.enabled ? 'bg-yellow-500 bg-opacity-20' : 'bg-gray-500 bg-opacity-5'
                     }`}
                     style={{
-                      left: `${displayStartMs * pixelsPerMs}px`,
-                      width: `${(displayEndMs - displayStartMs) * pixelsPerMs}px`,
+                      left: segmentRange(displayStartMs * pixelsPerMs, (displayEndMs - displayStartMs) * pixelsPerMs).left,
+                      width: segmentRange(displayStartMs * pixelsPerMs, (displayEndMs - displayStartMs) * pixelsPerMs).width,
                     }}
                   />
                 );
@@ -2833,7 +2911,7 @@ function Timeline({
             <div
               className="absolute top-0 w-0.5 bg-red-500 pointer-events-none z-40"
               style={{
-                left: `${currentTimeMs * pixelsPerMs}px`,
+                left: `${localPosition(currentTimeMs * pixelsPerMs)}px`,
                 height: '24px',
               }}
             />
@@ -2845,7 +2923,7 @@ function Timeline({
                   <div
                     className="absolute top-0 bottom-px w-1 pointer-events-none bg-yellow-500"
                     style={{
-                      left: `${rulerDragState.currentStartMs * pixelsPerMs}px`,
+                      left: `${localPosition(rulerDragState.currentStartMs * pixelsPerMs)}px`,
                     }}
                   />
                 );
@@ -2862,8 +2940,10 @@ function Timeline({
                       project.loop.enabled ? 'bg-yellow-500' : 'bg-gray-500 opacity-40'
                     }`}
                   style={{
-                    left: `${displayStartMs * pixelsPerMs}px`,
+                    left: `${localPosition(displayStartMs * pixelsPerMs)}px`,
                   }}
+                  data-loop-marker="start"
+                  aria-label="Loop start marker"
                   onMouseDown={(e) => handleLoopMarkerMouseDown(e, 'start')}
                 />
               );
@@ -2879,7 +2959,7 @@ function Timeline({
                   <div
                     className="absolute top-0 bottom-px w-1 pointer-events-none bg-yellow-500"
                     style={{
-                      left: `${rulerDragState.currentEndMs * pixelsPerMs}px`,
+                      left: `${localPosition(rulerDragState.currentEndMs * pixelsPerMs)}px`,
                     }}
                   />
                 );
@@ -2896,8 +2976,10 @@ function Timeline({
                     project.loop.enabled ? 'bg-yellow-500' : 'bg-gray-500 opacity-40'
                   }`}
                   style={{
-                    left: `${displayEndMs * pixelsPerMs}px`,
+                    left: `${localPosition(displayEndMs * pixelsPerMs)}px`,
                   }}
+                  data-loop-marker="end"
+                  aria-label="Loop end marker"
                   onMouseDown={(e) => handleLoopMarkerMouseDown(e, 'end')}
                 />
               );
@@ -2926,26 +3008,21 @@ function Timeline({
             internalScrollRef.current = el;
           }
         }}
+        data-timeline-scroll="true"
+        aria-label="Timeline tracks"
         className={`${sharedVerticalScroll ? 'h-full overflow-x-auto overflow-y-hidden' : 'absolute inset-0 overflow-auto'} scrollbar-hidden w-full min-w-0`}
-        onScroll={(e) => {
-          const newScrollLeft = e.target.scrollLeft;
-          setScrollLeft(newScrollLeft);
-          e.target.style.setProperty('--scroll-left', `${newScrollLeft}px`);
-          if (rulerScrollRef.current) {
-            rulerScrollRef.current.scrollLeft = newScrollLeft;
-          }
-          if (!sharedVerticalScroll && onVerticalScroll) {
-            onVerticalScroll(e.target.scrollTop);
-          }
+        onScroll={(event) => {
+          setLogicalScroll(originRef.current + event.currentTarget.scrollLeft);
+          if (!sharedVerticalScroll) onVerticalScroll?.(event.currentTarget.scrollTop);
         }}
         style={{ '--scroll-left': '0px' }}
       >
-        <div style={{ width: `${timelineWidthPx}px`, height: `${totalTimelineHeight}px`, minHeight: '100%', position: 'relative' }}>
+        <div style={{ width: `${segmentWidthPx}px`, height: `${totalTimelineHeight}px`, minHeight: '100%', position: 'relative', overflow: 'clip' }}>
               {/* Playhead (tracks) */}
               <div
                 className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none z-30"
                 style={{
-                  left: `${currentTimeMs * pixelsPerMs}px`,
+                  left: `${localPosition(currentTimeMs * pixelsPerMs)}px`,
                 }}
               />
               {timelineSelectionState?.moved && (() => {
@@ -2954,16 +3031,17 @@ function Timeline({
                   <div
                     className="absolute pointer-events-none z-40 border border-blue-400 bg-blue-500/20"
                     style={{
-                      left: `${selectionRect.left}px`,
+                      left: segmentRange(selectionRect.left, selectionRect.width).left,
                       top: `${selectionRect.top}px`,
-                      width: `${selectionRect.width}px`,
+                      width: segmentRange(selectionRect.left, selectionRect.width).width,
                       height: `${selectionRect.height}px`,
                     }}
                   />
                 );
               })()}
               {timelineRows.map((row, rowIndex) => {
-                const trackY = getTrackYPosition(timelineRows, rowIndex);
+                const trackY = rowTops[rowIndex];
+                const rowVisible = verticalViewport.height > 0 && intersectsViewport(trackY, row.height, verticalViewport.top, verticalViewport.height);
                 if (row.kind === 'group') {
                   const groupPreview = groupTimelinePreviewByNodeId.get(row.nodeId);
                   const rowPadding = 8;
@@ -2986,8 +3064,10 @@ function Timeline({
                       }}
                     >
                       {groupPreview?.activeSegments?.map((segment, idx) => {
-                        const leftPx = segment.startMs * pixelsPerMs;
-                        const widthPx = Math.max(0, (segment.endMs - segment.startMs) * pixelsPerMs);
+                        const range = segmentRange(segment.startMs * pixelsPerMs, (segment.endMs - segment.startMs) * pixelsPerMs);
+                        const leftPx = range.left;
+                        const widthPx = range.width;
+                        if (!widthPx) return null;
                         return (
                           <div
                             key={`group-segment-${row.nodeId}-${idx}`}
@@ -3003,38 +3083,13 @@ function Timeline({
                         );
                       })}
 
-                      {groupPreview?.clips?.map((clip) => {
-                        const clipLeftPx = clip.startMs * pixelsPerMs;
-                        const clipWidthPx = clip.durationMs * pixelsPerMs;
-                        const audioBuffer = audioManager.mediaCache.get(clip.blobId);
-                        const missingMedia = isClipMediaMissing(clip, missingMediaBlobIds, audioManager.mediaCache);
-                        return (
-                          <div
-                            key={`group-clip-${row.nodeId}-${clip.key}`}
-                            className="absolute rounded overflow-hidden pointer-events-none"
-                            style={{
-                              left: `${clipLeftPx}px`,
-                              top: `${rowPadding}px`,
-                              width: `${clipWidthPx}px`,
-                              height: `${rowInternalHeight}px`,
-                              backgroundColor: missingMedia ? MISSING_CLIP_BACKGROUND_COLOR : 'transparent',
-                            }}
-                          >
-                            {audioBuffer && (
-                              <Waveform
-                                audioBuffer={audioBuffer}
-                                clipId={`group:${row.nodeId}:${clip.key}`}
-                                cropStartMs={clip.cropStartMs}
-                                cropEndMs={clip.cropEndMs}
-                                sourceDurationMs={clip.sourceDurationMs}
-                                height={rowInternalHeight}
-                                color={missingMedia ? GROUP_MISSING_CLIP_WAVEFORM_COLOR : GROUP_CLIP_WAVEFORM_COLOR}
-                                globalPeakAmplitude={globalPeakAmplitude}
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
+                      {rowVisible && <div className="absolute inset-x-0 pointer-events-none" style={{ top: rowPadding }}>
+                        <GroupWaveform clips={groupSurfaceClipsByNodeId.get(row.nodeId)} pixelsPerMs={pixelsPerMs}
+                          viewportLeftPx={scrollLeft - originPx} viewportWidthPx={containerWidth} height={rowInternalHeight}
+                          globalPeakAmplitude={globalPeakAmplitude} displayMode={displayMode}
+                          showRms={showRms} showClipping={showClipping} missingMediaBlobIds={missingMediaBlobIds} />
+                      </div>}
+
                     </div>
                   );
                 }
@@ -3070,6 +3125,9 @@ function Timeline({
                       const clipLeftPx = Number.isFinite(animatedClipLayout?.left)
                         ? animatedClipLayout.left
                         : (clip.timelineStartMs * pixelsPerMs);
+                      const shell = segmentRange(clipLeftPx, clipWidthPx);
+                      const drawScale = clipWidthPx / clipDurationMs;
+                      const drawCropStartMs = clip.cropStartMs + shell.skipped / drawScale;
                       const audioBuffer = audioManager.mediaCache.get(clip.blobId);
                       const missingMedia = isClipMediaMissing(clip, missingMediaBlobIds, audioManager.mediaCache);
                       const clipPadding = 8;
@@ -3087,6 +3145,11 @@ function Timeline({
                         <div
                           key={clip.id}
                           data-clip-id={clip.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Audio clip ${clip.name || clip.id}. Arrow keys move by 1ms, Shift by 10ms; Alt trims start, Alt Shift trims end.`}
+                          aria-pressed={selectedClipIdSet.has(clip.id)}
+                          onKeyDown={(event) => handleClipKeyDown(event, clip, track.id)}
                           title={
                             missingMedia
                               ? 'Missing media — click to reload'
@@ -3098,13 +3161,14 @@ function Timeline({
                               : (missingMedia ? 'hover:ring-2 hover:ring-red-400' : 'hover:ring-2 hover:ring-gray-500')
                           }`}
                           style={{
-                            left: `${clipLeftPx}px`,
+                            display: shell.width > 0 ? undefined : 'none',
+                            left: `${shell.left}px`,
                             top: `${clipPadding}px`,
-                            width: `${clipWidthPx}px`,
+                            width: `${shell.width}px`,
                             height: `${clipInternalHeight}px`,
                             backgroundColor: missingMedia ? MISSING_CLIP_BACKGROUND_COLOR : CLIP_BACKGROUND_COLOR,
-                            '--clip-left': `${clipLeftPx}px`,
-                            '--clip-width': `${clipWidthPx}px`,
+                            '--clip-left': `${shell.left}px`,
+                            '--clip-width': `${shell.width}px`,
                           }}
                           onClick={(e) => handleClipClick(e, clip, track.id)}
                           onMouseDown={(e) => handleClipMouseDown(e, clip, track)}
@@ -3118,12 +3182,22 @@ function Timeline({
                               zIndex: 1,
                             }}
                           />
-                          {audioBuffer && (
+                          {rowVisible && intersectsViewport(clipLeftPx, clipWidthPx, scrollLeft, containerWidth) && (
                             <Waveform
                               audioBuffer={audioBuffer}
+                              blobId={clip.blobId}
+                              pixelsPerMs={drawScale}
+                              clipLeftPx={shell.left}
+                              clipWidthPx={shell.width}
+                              viewportLeftPx={scrollLeft - originPx}
+                              viewportWidthPx={containerWidth}
+                              displayMode={displayMode}
+                              showRms={showRms}
+                              showClipping={showClipping}
+                              showSamples={showSamples}
                               clipId={clip.id}
-                              cropStartMs={clip.cropStartMs}
-                              cropEndMs={clip.cropEndMs}
+                              cropStartMs={drawCropStartMs}
+                              cropEndMs={drawCropStartMs + shell.width / drawScale}
                               sourceDurationMs={clip.sourceDurationMs}
                               height={clipInternalHeight}
                               color={missingMedia ? MISSING_CLIP_WAVEFORM_COLOR : CLIP_WAVEFORM_COLOR}
@@ -3157,7 +3231,9 @@ function Timeline({
                           <>
                             <div
                               className="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize group"
+                              aria-label="Trim clip start"
                               style={{
+                                display: shell.skipped > 0 ? 'none' : undefined,
                                 zIndex: 10,
                               }}
                             >
@@ -3165,7 +3241,9 @@ function Timeline({
                             </div>
                             <div
                               className="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize group"
+                              aria-label="Trim clip end"
                               style={{
+                                display: shell.skipped + shell.width < clipWidthPx ? 'none' : undefined,
                                 zIndex: 10,
                               }}
                             >
@@ -3184,6 +3262,7 @@ function Timeline({
                       const recordingDurationMs = Math.max(0, effectiveEndMs - recordingStartMs);
                       const recordingWidthPx = recordingDurationMs * pixelsPerMs;
                       const recordingLeftPx = recordingStartMs * pixelsPerMs;
+                      const recordingRange = segmentRange(recordingLeftPx, recordingWidthPx);
                       const clipPadding = 8;
                       const clipInternalHeight = trackHeight - (clipPadding * 2);
 
@@ -3191,15 +3270,33 @@ function Timeline({
                         <div
                           key="recording-clip"
                           className="absolute rounded overflow-hidden pointer-events-none animate-pulse"
+                          data-recording-overlay="true"
                           style={{
-                            left: `${recordingLeftPx}px`,
+                            left: `${recordingRange.left}px`,
                             top: `${clipPadding}px`,
-                            width: `${recordingWidthPx}px`,
-                          height: `${clipInternalHeight}px`,
-                          backgroundColor: 'rgba(239, 68, 68, 0.3)',
-                          border: '2px solid rgb(239, 68, 68)',
+                            width: `${recordingRange.width}px`,
+                            height: `${clipInternalHeight}px`,
+                            backgroundColor: 'rgba(239, 68, 68, 0.3)',
+                            boxShadow: 'inset 0 0 0 2px rgb(239, 68, 68)',
                         }}
                       >
+                          {rowVisible && recordingRange.width > 0
+                            && intersectsViewport(recordingLeftPx, recordingWidthPx, scrollLeft, containerWidth) && (
+                            // Rebase DOM placement to the shell without changing source time.
+                            <div style={{ position: 'absolute', left: 0, top: 0 }}>
+                              <RecordingWaveform
+                                startTimeMs={recordingStartMs}
+                                endTimeMs={effectiveEndMs}
+                                clipLeftPx={recordingLeftPx}
+                                clipWidthPx={recordingWidthPx}
+                                clipOffsetPx={recordingRange.skipped}
+                                viewportLeftPx={scrollLeft}
+                                viewportWidthPx={containerWidth}
+                                pixelsPerMs={pixelsPerMs}
+                                height={clipInternalHeight}
+                              />
+                            </div>
+                          )}
                           <div className="absolute top-1 left-2 text-xs text-red-500 font-bold pointer-events-none flex items-center gap-1">
                             <span className="inline-block w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                             REC {recordingSegments.length > 1 && `(${recordingSegments.length})`}

@@ -1,5 +1,6 @@
 import Dexie from 'dexie';
 import { createId } from '../utils/id';
+import { mediaWaveformRevision, rememberMediaRevision } from './mediaBufferCache';
 
 /**
  * Apollo IndexedDB Database
@@ -59,6 +60,12 @@ class ApolloDB extends Dexie {
       localProjectState: 'projectId, updatedAt',
     });
 
+    // Rebuildable local derived data, intentionally separate from project/undo/media payloads.
+    this.version(5).stores({
+      waveformCache: 'key, lastAccess, [lastAccess+key+byteLength]',
+    });
+
+    this.waveformCache = this.table('waveformCache');
     this.projects = this.table('projects');
     this.media = this.table('media');
     this.undo = this.table('undo');
@@ -71,6 +78,54 @@ class ApolloDB extends Dexie {
 
 // Singleton instance
 export const db = new ApolloDB();
+
+export async function getWaveformCache(key, { signal } = {}) {
+  if (!signal) return db.waveformCache.get(key);
+  if (signal.aborted) return undefined;
+  return db.transaction('r', db.waveformCache, async () => {
+    if (signal.aborted) return undefined;
+    const transaction = Dexie.currentTransaction;
+    const abort = () => transaction?.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    try {
+      const row = await db.waveformCache.get(key);
+      return signal.aborted ? undefined : row;
+    }
+    finally { signal.removeEventListener('abort', abort); }
+  });
+}
+
+export async function deleteWaveformCache(key) {
+  return db.waveformCache.delete(key);
+}
+
+export async function touchWaveformCache(key, lastAccess = Date.now()) {
+  return db.waveformCache.update(key, { lastAccess });
+}
+
+/** Atomic byte-accounted disk LRU. Only small indexed metadata is read during retention. */
+export async function putWaveformCache(record, maxBytes = 128 * 1024 * 1024, { signal } = {}) {
+  if (signal?.aborted || !Number.isFinite(record.byteLength) || record.byteLength < 0 || record.byteLength > maxBytes) return false;
+  return db.transaction('rw', db.waveformCache, async () => {
+    if (signal?.aborted) return false;
+    const transaction = Dexie.currentTransaction;
+    const abort = () => transaction?.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+      await db.waveformCache.put(record);
+      if (signal?.aborted) return false;
+      let bytes = 0;
+      const victims = [];
+      // Reading full rows here would deserialize every cached pyramid just to evict one.
+      await db.waveformCache.orderBy('[lastAccess+key+byteLength]').reverse().eachKey(([, key, byteLength]) => {
+        bytes += byteLength;
+        if (bytes > maxBytes) victims.push(key);
+      });
+      if (victims.length) await db.waveformCache.bulkDelete(victims);
+      return true;
+    } finally { signal?.removeEventListener('abort', abort); }
+  });
+}
 
 /**
  * Save a project to IndexedDB
@@ -112,10 +167,12 @@ export async function storeMediaBlob(fileName, audioBuffer, blob, blobId = null)
     durationMs: (audioBuffer.duration * 1000), // Convert to ms
     channels: audioBuffer.numberOfChannels,
     blob, // Store the actual Blob
+    waveformRevision: createId(),
     createdAt: Date.now(),
   };
   
   await db.media.put(mediaData);
+  rememberMediaRevision(audioBuffer, mediaWaveformRevision(mediaData));
   
   return id;
 }

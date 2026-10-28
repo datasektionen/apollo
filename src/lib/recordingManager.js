@@ -1,4 +1,5 @@
 import { audioManager } from './audioManager';
+import { createRecordingWaveform } from './recordingWaveform';
 
 /**
  * Recording Manager
@@ -200,6 +201,60 @@ class RecordingManager {
     this.isRecording = false;
     this.recordingTrackId = null;
     this.setupPromise = null;
+    this.recordingGeneration = 0;
+    this.recordingController = null;
+    this.waveformCapture = null;
+    this.waveformSegment = null;
+    this.waveformSnapshot = null;
+    this.waveformListeners = new Set();
+  }
+
+  subscribeWaveform(listener) {
+    this.waveformListeners.add(listener);
+    return () => this.waveformListeners.delete(listener);
+  }
+
+  getWaveformSnapshot() {
+    return this.waveformSnapshot;
+  }
+
+  publishWaveform() {
+    const segment = this.waveformSegment;
+    this.waveformSnapshot = segment && this.waveformCapture ? {
+      generation: this.recordingGeneration,
+      capture: this.waveformCapture,
+      sampleRate: this.getSampleRate(),
+      trackId: segment.trackId,
+      recordingStartMs: segment.timelineStartMs,
+      sourceStartFrame: segment.startFrame + segment.roundTripFrames,
+      sourceEndFrame: Math.max(segment.startFrame + segment.roundTripFrames,
+        Math.min(this.waveformCapture.getEndFrame(), this.lastFrame,
+          (segment.endFrame ?? Infinity) + segment.roundTripFrames)),
+      numberOfChannels: segment.waveformChannels || 1,
+    } : null;
+    for (const listener of this.waveformListeners) {
+      try { listener(); } catch (error) { console.error('Recording waveform subscriber failed', error); }
+    }
+  }
+
+  clearWaveform() {
+    this.waveformCapture?.cancel();
+    this.waveformCapture = null;
+    this.waveformSegment = null;
+    this.publishWaveform();
+  }
+
+  setWaveformSegment(segment) {
+    this.waveformSegment = segment;
+    const start = segment.startFrame + segment.roundTripFrames;
+    const end = (segment.endFrame ?? Infinity) + segment.roundTripFrames;
+    segment.waveformChannels = 1;
+    for (const chunk of this.chunks) {
+      if (chunk.endFrame > start && chunk.startFrame < end) {
+        segment.waveformChannels = Math.max(segment.waveformChannels, chunk.channels.length);
+      }
+    }
+    this.publishWaveform();
   }
 
   // ---------------------------------------------------------------------------
@@ -424,6 +479,10 @@ class RecordingManager {
   }
 
   resetCaptureBuffers() {
+    this.recordingController?.abort();
+    for (const segment of this.pendingSegments) segment.controller?.abort();
+    this.recordingGeneration += 1;
+    this.clearWaveform();
     this.chunks = [];
     this.lastFrame = -1;
     this.firstFrame = -1;
@@ -468,7 +527,15 @@ class RecordingManager {
       if (!channels.length || !data.length) return;
       const startFrame = Number(data.startFrame) || 0;
       const endFrame = startFrame + Number(data.length);
-      this.chunks.push({ startFrame, endFrame, channels });
+      const chunk = { startFrame, endFrame, channels };
+      this.chunks.push(chunk);
+      // Only enqueue borrowed PCM here. Reduction runs in bounded background tasks.
+      this.waveformCapture?.append(chunk);
+      const preview = this.waveformSegment;
+      if (preview && endFrame > preview.startFrame + preview.roundTripFrames
+        && startFrame < (preview.endFrame ?? Infinity) + preview.roundTripFrames) {
+        preview.waveformChannels = Math.max(preview.waveformChannels || 1, channels.length);
+      }
       if (this.firstFrame < 0) this.firstFrame = startFrame;
       this.lastFrame = Math.max(this.lastFrame, endFrame);
       this.trimChunks();
@@ -507,16 +574,31 @@ class RecordingManager {
       dropCount += 1;
     }
     if (dropCount > 0) this.chunks.splice(0, dropCount);
+    this.waveformCapture?.prune(floor);
   }
 
-  waitForFrame(frame, timeoutMs = 2000) {
+  waitForFrame(frame, timeoutMs = 2000, signal) {
+    const abortError = () => Object.assign(new Error('Recording cancelled'), { name: 'AbortError' });
+    if (signal?.aborted) return Promise.reject(abortError());
     if (this.lastFrame >= frame) return Promise.resolve(this.lastFrame);
     return new Promise((resolve, reject) => {
-      const waiter = { frame, resolve, reject, timeoutId: null };
+      const cleanup = () => {
+        clearTimeout(waiter.timeoutId);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const waiter = { frame, timeoutId: null,
+        resolve: (value) => { cleanup(); resolve(value); },
+        reject: (error) => { cleanup(); reject(error); },
+      };
+      const onAbort = () => {
+        this.frameWaiters = this.frameWaiters.filter((entry) => entry !== waiter);
+        waiter.reject(abortError());
+      };
       waiter.timeoutId = setTimeout(() => {
         this.frameWaiters = this.frameWaiters.filter((entry) => entry !== waiter);
-        reject(new Error('Timed out waiting for microphone frames.'));
+        waiter.reject(new Error('Timed out waiting for microphone frames.'));
       }, timeoutMs);
+      signal?.addEventListener('abort', onAbort, { once: true });
       this.frameWaiters.push(waiter);
     });
   }
@@ -670,7 +752,19 @@ class RecordingManager {
       throw new Error('Microphone capture is not ready.');
     }
     const startFrame = this.frameAtContextTime(startContextTime);
+    this.recordingController = new AbortController();
+    this.recordingGeneration += 1;
+    this.clearWaveform();
+    this.waveformCapture = createRecordingWaveform({
+      sampleRate: this.getSampleRate(), onChange: () => this.publishWaveform(),
+    });
+    const sourceStart = startFrame + this.framesForMs(roundTripMs);
+    for (const chunk of this.chunks) {
+      if (chunk.endFrame > sourceStart) this.waveformCapture.append(chunk);
+    }
     this.openSegment = {
+      signal: this.recordingController.signal,
+      controller: this.recordingController,
       trackId,
       startFrame,
       timelineStartMs: Number(timelineStartMs) || 0,
@@ -679,6 +773,7 @@ class RecordingManager {
     };
     this.isRecording = true;
     this.recordingTrackId = trackId;
+    this.setWaveformSegment(this.openSegment);
     console.log(`Recording started on track ${trackId} at ${this.openSegment.timelineStartMs}ms (frame ${startFrame})`);
     return { startFrame };
   }
@@ -697,12 +792,15 @@ class RecordingManager {
     const closed = { ...segment, endFrame, includeTailRoundTrip: true };
     this.pendingSegments.push(closed);
     this.openSegment = {
+      signal: segment.signal,
+      controller: segment.controller,
       trackId: segment.trackId,
       startFrame: endFrame,
       timelineStartMs: Number(nextTimelineStartMs) || 0,
       roundTripFrames: segment.roundTripFrames,
       roundTripMs: segment.roundTripMs,
     };
+    this.setWaveformSegment(this.openSegment);
     return this.finalizeSegment(closed);
   }
 
@@ -726,6 +824,7 @@ class RecordingManager {
     this.isRecording = false;
     this.recordingTrackId = null;
     this.pendingSegments.push(closed);
+    this.setWaveformSegment(closed);
     await this.flushWorklet();
     const result = await this.finalizeSegment(closed);
     console.log(`Recording stopped: ${Math.round(result.durationMs)}ms`);
@@ -737,14 +836,19 @@ class RecordingManager {
     const sourceEnd = closed.endFrame + (closed.includeTailRoundTrip ? closed.roundTripFrames : 0);
     try {
       const timeoutMs = Math.round(closed.roundTripMs) + 2500;
-      await this.waitForFrame(sourceEnd, timeoutMs);
-    } catch {
+      await this.waitForFrame(sourceEnd, timeoutMs, closed.signal);
+    } catch (error) {
+      if (closed.signal?.aborted) throw error;
       // Capture stopped early (device lost, context suspended): use what we have.
       await this.flushWorklet();
+    }
+    if (closed.signal?.aborted) {
+      throw Object.assign(new Error('Recording cancelled'), { name: 'AbortError' });
     }
     const availableEnd = Math.min(sourceEnd, this.lastFrame);
     const audioBuffer = this.extractFrames(sourceStart, availableEnd);
     this.pendingSegments = this.pendingSegments.filter((segment) => segment !== closed);
+    if (!this.openSegment && !this.pendingSegments.length) this.clearWaveform();
     this.trimChunks();
     return {
       audioBuffer,
@@ -758,7 +862,11 @@ class RecordingManager {
    * Cancel recording without saving
    */
   cancelRecording() {
-    if (!this.isRecording && !this.openSegment) return;
+    this.recordingController?.abort();
+    for (const segment of this.pendingSegments) segment.controller?.abort();
+    this.recordingGeneration += 1;
+    this.clearWaveform();
+    if (!this.isRecording && !this.openSegment && !this.pendingSegments.length) return;
     this.openSegment = null;
     this.pendingSegments = [];
     this.isRecording = false;

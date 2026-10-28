@@ -1,4 +1,57 @@
 /**
+ * Apply an edit as one transaction against the latest project. Conflicting remote
+ * edits abort the whole gesture rather than overwriting them or dropping clips.
+ */
+export function applyClipPatches(project, patches, destinations = {}, {
+  baseline = {}, canEditTrack = () => true, minimumDurationMs = 100,
+} = {}) {
+  const locations = new Map();
+  const tracks = new Map(project.tracks.map((track) => [track.id, track]));
+  for (const track of project.tracks) {
+    for (const clip of track.clips) locations.set(clip.id, { track, clip });
+  }
+  const changes = new Map();
+  for (const [id, patch] of Object.entries(patches)) {
+    const entry = locations.get(id);
+    if (!entry) return project;
+    const targetId = destinations[id] || entry.track.id;
+    if (!tracks.has(targetId) || !canEditTrack(entry.track.id) || !canEditTrack(targetId)) return project;
+    const original = baseline[id];
+    if (original && (original.trackId !== entry.track.id || Object.keys(original).some((key) =>
+      key !== 'trackId' && original[key] !== entry.clip[key]))) return project;
+    const next = { ...entry.clip, ...patch };
+    const durationMs = next.cropEndMs - next.cropStartMs;
+    const durationChanged = durationMs !== entry.clip.cropEndMs - entry.clip.cropStartMs;
+    if (![next.timelineStartMs, next.cropStartMs, next.cropEndMs, next.sourceDurationMs].every(Number.isFinite)
+      || next.timelineStartMs < 0 || next.cropStartMs < 0 || next.cropEndMs > next.sourceDurationMs
+      || durationMs <= 0 || (durationChanged && durationMs < minimumDurationMs)
+      || (patch.gainDb !== undefined && (!Number.isFinite(next.gainDb) || next.gainDb < -24 || next.gainDb > 24))) return project;
+    if (targetId !== entry.track.id || Object.keys(patch).some((key) => patch[key] !== entry.clip[key])) {
+      changes.set(id, { clip: next, trackId: targetId });
+    }
+  }
+  if (!changes.size) return project;
+  // Validate only changed ranges: unrelated legacy overlaps must not block a gain edit.
+  for (const [id, change] of changes) {
+    const original = locations.get(id);
+    if (change.trackId === original.track.id && change.clip.timelineStartMs === original.clip.timelineStartMs
+      && change.clip.cropStartMs === original.clip.cropStartMs && change.clip.cropEndMs === original.clip.cropEndMs) continue;
+    for (const [otherId, entry] of locations) {
+      if (otherId === id) continue;
+      const other = changes.get(otherId) || { clip: entry.clip, trackId: entry.track.id };
+      if (other.trackId === change.trackId && findCollidingClips(change.clip, [other.clip]).length) return project;
+    }
+  }
+  return { ...project, tracks: project.tracks.map((track) => {
+    const removed = track.clips.some((clip) => changes.has(clip.id));
+    const additions = [...changes.values()].filter((change) => change.trackId === track.id).map((change) => change.clip);
+    if (!removed && !additions.length) return track;
+    return { ...track, clips: [...track.clips.filter((clip) => !changes.has(clip.id)), ...additions]
+      .sort((a, b) => a.timelineStartMs - b.timelineStartMs || a.id.localeCompare(b.id)) };
+  }) };
+}
+
+/**
  * Clip Collision Detection and Resolution
  * Ensures strict one-clip-per-track-at-a-time rule
  */

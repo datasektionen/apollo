@@ -15,6 +15,8 @@ import {
   withLoadStep,
 } from './loadProgress';
 
+import { mediaWaveformRevision, rememberMediaRevision } from './mediaBufferCache';
+
 export const STEM_LOAD_CONCURRENCY = 4;
 
 const pendingLocalPersists = [];
@@ -205,6 +207,7 @@ export async function ensureStemInMediaCache({
         }
       );
       throwIfCancelled(isCancelled);
+      rememberMediaRevision(audioBuffer, mediaWaveformRevision(media));
       return { source: 'ram', audioBuffer, media };
     } catch (error) {
       if (error?.name === 'StaleAudioLoad') throw error;
@@ -231,7 +234,7 @@ export async function ensureStemInMediaCache({
     logLoadProgress(`IndexedDB hit (${shortLoadId(blobId)})`, { depth: 1, level: 'ok' });
     const audioBuffer = await withLoadStep(
       `Ensure AudioBuffer in RAM (${shortLoadId(blobId)})`,
-      async () => loadAudioBuffer(blobId, media.blob),
+      async () => loadAudioBuffer(blobId, media.blob, media),
       {
         depth: 1,
         ...(canDownload ? {
@@ -243,6 +246,7 @@ export async function ensureStemInMediaCache({
       }
     );
     throwIfCancelled(isCancelled);
+    rememberMediaRevision(audioBuffer, mediaWaveformRevision(media));
     if (typeof storeMediaBlob === 'function' && !isPlanarPcmMediaEntry(media)) {
       scheduleLocalPcmPersist({
         blobId,
