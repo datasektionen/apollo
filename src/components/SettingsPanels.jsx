@@ -239,6 +239,48 @@ export function PlaybackDevicesSettingsPanel({
   );
 }
 
+export function DawSettingsPanel({ settings, setSettings }) {
+  const update = (patch) => setSettings((prev) => ({ ...prev, ...patch }));
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-xs text-gray-400 mb-1" htmlFor="daw-amplitude-scale">
+          Amplitude scale
+        </label>
+        <select
+          id="daw-amplitude-scale"
+          aria-label="Waveform amplitude scale"
+          className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+          value={settings.displayMode}
+          onChange={(event) => update({ displayMode: event.target.value })}
+        >
+          <option value="linear">Fixed linear</option>
+          <option value="normalized">Project normalized (compatibility)</option>
+          <option value="db">Decibels (-60 dB floor)</option>
+        </select>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+          checked={settings.showRms}
+          onChange={(event) => update({ showRms: event.target.checked })}
+        />
+        <span>RMS energy</span>
+      </label>
+      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+          checked={settings.showClipping}
+          onChange={(event) => update({ showClipping: event.target.checked })}
+        />
+        <span>Source over-range indicators</span>
+      </label>
+    </div>
+  );
+}
+
 export function ProjectSettingsPanel({
   project,
   onSetPublished,

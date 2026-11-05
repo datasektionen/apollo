@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createWaveformScheduler } from '../waveformScheduler';
 import { createWaveformBuilder } from '../waveformData';
-import { createWaveformDrawJob } from '../waveformRenderer';
+import { createWaveformDrawJob, WAVEFORM_CLOCK_CHECK_WORK } from '../waveformRenderer';
 
 function harness() {
   const frames = new Map();
@@ -71,11 +71,12 @@ describe('shared waveform scheduler', () => {
       clipWidthPx: 1, surfaceLeftPx: 0, surfaceWidthPx: 1, height: 24,
     }));
     h.flush();
-    expect(reads).toBe(512);
-    expect(h.scheduler.getStats()).toMatchObject({ frames: 1, slices: 2, completed: 1, pending: 1, maxFrameMs: 4 });
+    // The clock is sampled every WAVEFORM_CLOCK_CHECK_WORK; this clock model charges 1 ms per 1024 reads.
+    expect(reads).toBe(WAVEFORM_CLOCK_CHECK_WORK);
+    expect(h.scheduler.getStats()).toMatchObject({ frames: 1, slices: 2, completed: 1, pending: 1, maxFrameMs: 4.5 });
     h.flush();
     expect(reads).toBe(2048);
-    expect(h.scheduler.getStats()).toMatchObject({ frames: 2, completed: 2, pending: 0, maxFrameMs: 4 });
+    expect(h.scheduler.getStats()).toMatchObject({ frames: 2, completed: 2, pending: 0, maxFrameMs: 4.5 });
   });
 
   it('yields at budget, prioritizes work, and rotates equal-priority continuations', () => {
@@ -94,6 +95,20 @@ describe('shared waveform scheduler', () => {
     cancelA(); cancelB();
     expect(h.frames.size).toBe(0);
     expect(h.scheduler.getStats()).toMatchObject({ pending: 0, frames: 3, slices: 3, maxFrameMs: 4 });
+  });
+
+  it('runs background margin work only while no foreground view is waiting', () => {
+    const h = harness();
+    const order = [];
+    let visibleSlices = 2;
+    const cancelMargin = h.scheduler.schedule('margin', () => { order.push('margin'); h.spend(1); return true; }, { background: true });
+    h.scheduler.schedule('visible', () => { order.push('visible'); h.spend(1); visibleSlices -= 1; return visibleSlices > 0; });
+    expect(h.scheduler.getStats()).toMatchObject({ pending: 2, backgroundPending: 1 });
+    h.flush();
+    expect(order).toEqual(['visible', 'visible', 'margin', 'margin']);
+    expect(h.scheduler.getStats()).toMatchObject({ pending: 1, backgroundPending: 1 });
+    cancelMargin();
+    expect(h.scheduler.getStats()).toMatchObject({ pending: 0, backgroundPending: 0, framePending: false });
   });
 
   it('ages continuations past an endless high-priority self-notification stream', () => {
@@ -130,6 +145,53 @@ describe('shared waveform scheduler', () => {
     expect(h.scheduler.getStats().pending).toBe(1);
     spinning();
     expect(h.frames.size).toBe(0);
+  });
+
+  it('keeps frames to the interactive budget and refines settled views in bounded follow-up tasks', () => {
+    const frames = [];
+    const tasks = [];
+    let clock = 100;
+    let lastInput = 90;
+    let pending = false;
+    let remaining = Infinity;
+    const scheduler = createWaveformScheduler({
+      requestFrame: (callback) => frames.push(callback), cancelFrame: (id) => { frames[id - 1] = null; },
+      now: () => clock, postTask: (callback) => tasks.push(callback),
+      budgetMs: 4, idleBudgetMs: 12, interactionMs: 50, lastInputAt: () => lastInput, inputPending: () => pending,
+    });
+    let slices = 0;
+    scheduler.schedule('draw', () => { slices += 1; clock += 1; remaining -= 1; return remaining > 0; });
+    const run = (callback) => { const start = slices; callback(); return slices - start; };
+    const frame = () => run(frames.findLast(Boolean));
+    const task = () => run(tasks.shift());
+
+    // Recent input: one 4 ms frame slice, nothing extra.
+    expect(frame()).toBe(4);
+    expect(tasks).toHaveLength(0);
+
+    // Settled: each follow-up task gets at most 4 ms, until 12 ms after the frame started.
+    clock = 200;
+    expect(frame()).toBe(4);
+    expect(task()).toBe(4);
+    expect(task()).toBe(4);
+    expect(tasks).toHaveLength(0);
+    expect(scheduler.getStats()).toMatchObject({ idleTasks: 2, maxFrameMs: 4 });
+
+    // Queued input stops follow-up work before it starts.
+    clock = 300;
+    expect(frame()).toBe(4);
+    pending = true;
+    expect(task()).toBe(0);
+    expect(tasks).toHaveLength(0);
+    pending = false;
+
+    // Finishing in a follow-up task cancels the already requested frame.
+    clock = 400;
+    remaining = 6;
+    expect(frame()).toBe(4);
+    expect(scheduler.getStats().framePending).toBe(true);
+    expect(task()).toBe(2);
+    expect(scheduler.getStats()).toMatchObject({ pending: 0, framePending: false });
   });
 
   it('does not revive a cancelled slice or overwrite its replacement', () => {

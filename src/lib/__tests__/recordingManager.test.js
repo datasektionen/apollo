@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildPyramid } from './waveformFixtures';
 
 const SAMPLE_RATE = 48000;
 
@@ -334,6 +335,35 @@ describe('recordingManager capture engine', () => {
     node.emitFrames(3048, 3000);
     await flushMicrotasks();
     expect(recordingManager.getWaveformSnapshot()).toBeNull();
+  });
+
+  it('publishes each finalized segment summary from capture, including gaps, without rescanning the take', async () => {
+    const node = await openCapture();
+    for (let frame = 2048; frame < 4096 * 3; frame += 2048) node.emitFrames(frame, 2048, 2);
+    recordingManager.beginRecording({ trackId: 't', startContextTime: 5000 / SAMPLE_RATE, timelineStartMs: 0, roundTripMs: 1 });
+    node.emitFrames(4096 * 3 + 700, 3000, 2);
+    for (let frame = 16384; frame < 30000; frame += 2048) node.emitFrames(frame, 2048, 2);
+    const closed = await recordingManager.splitSegment({ endContextTime: 20000 / SAMPLE_RATE, nextTimelineStartMs: 0 });
+    const final = await recordingManager.stopRecording({ endContextTime: 26000 / SAMPLE_RATE });
+    const service = recordingManager.waveformService;
+    for (const { audioBuffer } of [closed, final]) {
+      const source = service.getSource(null, audioBuffer);
+      expect(source?.status).toBe('ready');
+      expect(source.pyramid).toEqual(buildPyramid(audioBuffer));
+    }
+    expect(closed.audioBuffer.getChannelData(0)[4096 * 3 - 5048]).toBe(0);
+    expect(service.getStats()).toMatchObject({ jobsCompleted: 2, fallbackJobs: 0, recordingBuilders: 0, recordingBytes: 0 });
+  });
+
+  it('leaves a take whose channel layout changes to normal extraction', async () => {
+    const node = await openCapture();
+    recordingManager.beginRecording({ trackId: 't', startContextTime: 2100 / SAMPLE_RATE, timelineStartMs: 0, roundTripMs: 0 });
+    node.emitFrames(2048, 1000);
+    node.emitFrames(3048, 1000, 2);
+    const result = await recordingManager.stopRecording({ endContextTime: 4000 / SAMPLE_RATE });
+    expect(result.audioBuffer.numberOfChannels).toBe(2);
+    expect(recordingManager.waveformService.getSource(null, result.audioBuffer)).toBeUndefined();
+    expect(recordingManager.waveformService.getStats()).toMatchObject({ recordingBuilders: 0, recordingBytes: 0 });
   });
 
   it('keeps stereo input as two channels', async () => {

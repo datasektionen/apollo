@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { VolumeX } from 'lucide-react';
 import {
   formatTime,
@@ -13,7 +14,7 @@ import GroupWaveform from './GroupWaveform';
 import RecordingWaveform from './RecordingWaveform';
 import { waveformService } from '../lib/waveformService';
 import {
-  anchoredScroll, boundedRange, clampDuration, durationFromSlider, intersectsViewport, normalizeWheel,
+  anchoredScroll, boundedRange, clampDuration, durationFromSlider, followLanding, followScroll, intersectsViewport, normalizeWheel,
   rowAtY, rowOffsets, rulerInterval, scrollSegment, visibleRulerTicks, zoomAnchor,
 } from '../utils/timelineViewport';
 import { getEffectiveTrackMix, getGroupDescendantTrackIdsByGroup, getTrackHeight, normalizeTrackTree } from '../utils/trackTree';
@@ -98,6 +99,10 @@ function Timeline({
   showLyricsLane = false,
   canEditLyrics = false,
   lyricsSyncActive = false,
+  returnToStartToken = 0,
+  displayMode = 'linear',
+  showRms = false,
+  showClipping = false,
   children,
 }) {
   const timelineRef = useRef(null);
@@ -107,11 +112,12 @@ function Timeline({
   const internalScrollRef = scrollContainerRef || fallbackScrollRef;
   const verticalScrollRef = useRef(null);
   const [verticalViewport, setVerticalViewport] = useState({ top: 0, height: 0 });
+  // Keeps a keyboard-focused clip shell mounted while it is scrolled out of view.
+  const [focusedClipId, setFocusedClipId] = useState(null);
   const [mediaRevision, setMediaRevision] = useState(0);
-  const [displayMode, setDisplayMode] = useState('linear');
-  const [showRms, setShowRms] = useState(false);
-  const [showClipping, setShowClipping] = useState(false);
-  const [showSamples, setShowSamples] = useState(true);
+  // Manual navigation pauses follow until the playhead is on screen again.
+  const followSuspendedRef = useRef(false);
+  const lastLogicalScrollRef = useRef(0);
   const cancelledGestureRef = useRef(false);
   const [visibleDurationMs, setVisibleDurationMs] = useState(null);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -661,16 +667,22 @@ function Timeline({
   const timelineWidthPx = Math.max(projectDurationMs, minZoomDurationMs) * pixelsPerMs;
   const segmentWidthPx = scrollSegment(scrollLeft, timelineWidthPx, containerWidth, originPx).width;
   const logicalScrollLeft = () => originRef.current + (tracksScrollRef.current?.scrollLeft || 0);
-  const setLogicalScroll = (left) => {
+  const setLogicalScroll = (left, native) => {
     const segment = scrollSegment(left, timelineWidthPx, containerWidth, originRef.current);
+    lastLogicalScrollRef.current = segment.logical;
     originRef.current = segment.origin;
     setOriginPx(segment.origin);
     setScrollLeft(segment.logical);
     for (const element of [tracksScrollRef.current, rulerScrollRef.current]) {
-      if (!element) continue;
-      element.scrollLeft = segment.left;
-      element.style.setProperty('--scroll-left', `${segment.left}px`);
+      if (element && !(element === native?.element && native.left === segment.left)) element.scrollLeft = segment.left;
     }
+  };
+  /** Native scroll events also echo our own writes; only a different position is user navigation. */
+  const handleNativeScroll = (element) => {
+    const left = element.scrollLeft;
+    const logical = originRef.current + left;
+    if (Math.abs(logical - lastLogicalScrollRef.current) > 1) followSuspendedRef.current = true;
+    setLogicalScroll(logical, { element, left });
   };
   const segmentRange = (left, width) => boundedRange(left, width, originPx, segmentWidthPx);
   // Off-segment markers stay offscreen without introducing enormous CSS offsets.
@@ -937,10 +949,48 @@ function Timeline({
     if (dragState || lyricDragRef.current || rulerDragState || loopMarkerDragState || timelineSelectionRef.current) return false;
     const left = logicalScrollLeft();
     pendingZoomAnchorRef.current = zoomAnchor(left, containerWidth, pixelsPerMs, currentTimeMs, pointerX);
+    followSuspendedRef.current = true;
     setVisibleDurationMs(nextVisibleDurationMs === null ? null
       : clampDuration(nextVisibleDurationMs, maxZoomDurationMs, minZoomDurationMs));
     return true;
   };
+  const applyZoomRef = useRef(applyZoomDuration);
+  applyZoomRef.current = applyZoomDuration;
+  const wheelZoomRef = useRef({ frame: null, duration: undefined, pointerX: 0, pending: false });
+  useEffect(() => () => {
+    if (wheelZoomRef.current.frame != null) cancelAnimationFrame(wheelZoomRef.current.frame);
+  }, []);
+
+  const following = Boolean(isPlaying || isRecording);
+  const wasFollowingRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!following) { wasFollowingRef.current = false; return; }
+    if (!wasFollowingRef.current) {
+      wasFollowingRef.current = true;
+      followSuspendedRef.current = false;
+    }
+    if (pendingZoomAnchorRef.current || dragState || rulerDragState || loopMarkerDragState
+      || lyricDragRef.current || timelineSelectionRef.current) return;
+    const playheadPx = currentTimeMs * pixelsPerMs;
+    if (followSuspendedRef.current) {
+      const x = playheadPx - scrollLeft;
+      if (x >= 0 && x <= containerWidth) followSuspendedRef.current = false;
+      return;
+    }
+    const target = followScroll(playheadPx, scrollLeft, containerWidth, timelineWidthPx);
+    if (target !== null) setLogicalScroll(target);
+  }, [following, currentTimeMs, pixelsPerMs, scrollLeft, containerWidth, timelineWidthPx,
+    dragState, rulerDragState, loopMarkerDragState]);
+
+  // Stop and playback end return to the loop start, or the song start. Waveforms keep that view
+  // painted (returnViewportLeftPx), and the follow page-turn after a loop wrap lands on it too.
+  const returnTimeMs = project.loop?.enabled && Number.isFinite(project.loop.startMs) ? project.loop.startMs : 0;
+  const returnScrollLeft = followLanding(returnTimeMs * pixelsPerMs, containerWidth, timelineWidthPx);
+  useLayoutEffect(() => {
+    if (!returnToStartToken) return;
+    const x = returnTimeMs * pixelsPerMs - scrollLeft;
+    if (x < 0 || x > containerWidth) setLogicalScroll(returnScrollLeft);
+  }, [returnToStartToken]);
 
   const formatVisibleDuration = (durationMs) => {
     const seconds = durationMs / 1000;
@@ -2031,9 +2081,9 @@ function Timeline({
 
               const splitOffsetMs = currentTimeMs - clipStartMs;
               const splitCropMs = candidateClip.cropStartMs + splitOffsetMs;
+              // The left half keeps its id, so its waveform stays mounted and keeps its pixels.
               const leftClip = {
                 ...candidateClip,
-                id: createId(),
                 timelineStartMs: clipStartMs,
                 cropStartMs: candidateClip.cropStartMs,
                 cropEndMs: splitCropMs,
@@ -2568,13 +2618,16 @@ function Timeline({
 
   // One listener per disjoint viewport, never on both a child and its ancestor.
   useEffect(() => {
-    let frame;
-    let wheelDuration;
-    let pointerX;
+    // The accumulated target outlives re-subscription only while a coalesced update is still queued.
+    const wheel = wheelZoomRef.current;
+    if (!wheel.pending) wheel.duration = undefined;
+    const apply = (zoom) => {
+      wheel.pending = false;
+      if (!zoom(wheel.duration, wheel.pointerX)) wheel.duration = undefined;
+    };
     const flush = () => {
-      frame = null;
-      applyZoomDuration(wheelDuration, pointerX);
-      wheelDuration = undefined;
+      wheel.frame = null;
+      if (wheel.pending) apply(applyZoomRef.current);
     };
     const handleWheel = (event) => {
       const delta = normalizeWheel(event, containerWidth);
@@ -2582,38 +2635,33 @@ function Timeline({
         event.preventDefault();
         event.stopPropagation();
         if (dragState || lyricDragRef.current || rulerDragState || loopMarkerDragState) return;
-        pointerX = event.clientX - tracksScrollRef.current.getBoundingClientRect().left;
-        wheelDuration = clampDuration((wheelDuration ?? clampedVisibleMs) * Math.exp(delta.y * 0.002), maxZoomDurationMs, minZoomDurationMs);
-        if (frame == null) frame = requestAnimationFrame(flush);
+        wheel.pointerX = event.clientX - tracksScrollRef.current.getBoundingClientRect().left;
+        wheel.duration = clampDuration((wheel.duration ?? clampedVisibleMs) * Math.exp(delta.y * 0.002), maxZoomDurationMs, minZoomDurationMs);
+        // Browsers deliver about one wheel event per frame: render it now, as for discrete input,
+        // and coalesce any further events in this frame into one update on the next.
+        if (wheel.frame != null) wheel.pending = true;
+        else {
+          flushSync(() => apply(applyZoomDuration));
+          wheel.frame = requestAnimationFrame(flush);
+        }
       } else if (event.shiftKey || Math.abs(delta.x) > Math.abs(delta.y)) {
         event.preventDefault();
         event.stopPropagation();
+        followSuspendedRef.current = true;
         setLogicalScroll(logicalScrollLeft() + (event.shiftKey ? delta.y : delta.x));
       }
     };
     const elements = [tracksScrollRef.current, rulerScrollRef.current].filter(Boolean);
     elements.forEach((element) => element.addEventListener('wheel', handleWheel, { passive: false }));
-    return () => {
-      if (frame != null) cancelAnimationFrame(frame);
-      elements.forEach((element) => element.removeEventListener('wheel', handleWheel));
-    };
+    return () => elements.forEach((element) => element.removeEventListener('wheel', handleWheel));
   }, [clampedVisibleMs, pixelsPerMs, containerWidth, minZoomDurationMs, maxZoomDurationMs, currentTimeMs,
     dragState, rulerDragState, loopMarkerDragState]);
 
-  const fitSelection = () => {
-    const clips = getSelectedClipEntries().map((entry) => entry.clip);
-    if (!clips.length) return;
-    const start = Math.min(...clips.map((clip) => clip.timelineStartMs));
-    const end = Math.max(...clips.map((clip) => clip.timelineStartMs + getClipDurationMs(clip)));
-    if (!applyZoomDuration((end - start) * 1.1)) return;
-    pendingZoomAnchorRef.current = { timeMs: (start + end) / 2, x: containerWidth / 2 };
-  };
   const fitProject = () => {
     if (!applyZoomDuration(null)) return;
     pendingZoomAnchorRef.current = { timeMs: 0, x: 0 };
     setLogicalScroll(0);
   };
-  const zoomToSamples = () => applyZoomDuration(containerWidth * 1000 / sampleRate);
 
   const handleZoomIn = () => {
     const newSliderValue = Math.max(0, zoomSliderValue - 0.1);
@@ -2663,27 +2711,7 @@ function Timeline({
   });
 
   const zoomOverlay = (
-    <div className="zoom-minimal-overlay" onMouseDown={(event) => event.stopPropagation()}>
-      <details className="relative text-xs text-gray-200 bg-gray-800 rounded p-1" title="At deep zoom the native scroll rail covers a local segment. Use Fit project for a global overview.">
-        <summary aria-label="Timeline zoom and waveform options" className="cursor-pointer">View</summary>
-        <div className="absolute right-0 bg-gray-800 p-2 rounded shadow-lg flex flex-col gap-2 min-w-48 z-50">
-          <button type="button" onClick={handleZoomIn}>Zoom in (+)</button>
-          <button type="button" onClick={handleZoomOut}>Zoom out (-)</button>
-          <button type="button" onClick={fitProject}>Fit project (0)</button>
-          <button type="button" onClick={fitSelection} disabled={!selectedClipIds.length}>Fit selected clips</button>
-          <button type="button" onClick={zoomToSamples}>Zoom to samples</button>
-          <label>Amplitude scale
-            <select aria-label="Waveform amplitude scale" value={displayMode} onChange={(event) => setDisplayMode(event.target.value)} className="bg-gray-900">
-              <option value="linear">Fixed linear</option>
-              <option value="normalized">Project normalized (compatibility)</option>
-              <option value="db">Decibels (-60 dB floor)</option>
-            </select>
-          </label>
-          <label><input type="checkbox" checked={showRms} onChange={(event) => setShowRms(event.target.checked)} /> RMS energy</label>
-          <label><input type="checkbox" checked={showClipping} onChange={(event) => setShowClipping(event.target.checked)} /> Source over-range indicators</label>
-          <label><input type="checkbox" checked={showSamples} onChange={(event) => setShowSamples(event.target.checked)} /> Sample points at deep zoom</label>
-        </div>
-      </details>
+    <div className="zoom-minimal-overlay" onMouseDown={(event) => event.stopPropagation()} title="At deep zoom the native scroll rail covers a local segment. Press 0 to fit the project.">
       <div className="zoom-minimal-shell">
         <div className="zoom-minimal-stick" />
         <input
@@ -2838,7 +2866,7 @@ function Timeline({
         <div
           ref={rulerScrollRef}
           className="flex-1 overflow-x-scroll overflow-y-visible ruler-scrollbar-hidden w-full min-w-0"
-          onScroll={(event) => setLogicalScroll(originRef.current + event.currentTarget.scrollLeft)}
+          onScroll={(event) => handleNativeScroll(event.currentTarget)}
         >
           <div
             style={{ width: `${segmentWidthPx}px`, height: '24px' }}
@@ -3012,10 +3040,9 @@ function Timeline({
         aria-label="Timeline tracks"
         className={`${sharedVerticalScroll ? 'h-full overflow-x-auto overflow-y-hidden' : 'absolute inset-0 overflow-auto'} scrollbar-hidden w-full min-w-0`}
         onScroll={(event) => {
-          setLogicalScroll(originRef.current + event.currentTarget.scrollLeft);
+          handleNativeScroll(event.currentTarget);
           if (!sharedVerticalScroll) onVerticalScroll?.(event.currentTarget.scrollTop);
         }}
-        style={{ '--scroll-left': '0px' }}
       >
         <div style={{ width: `${segmentWidthPx}px`, height: `${totalTimelineHeight}px`, minHeight: '100%', position: 'relative', overflow: 'clip' }}>
               {/* Playhead (tracks) */}
@@ -3042,6 +3069,12 @@ function Timeline({
               {timelineRows.map((row, rowIndex) => {
                 const trackY = rowTops[rowIndex];
                 const rowVisible = verticalViewport.height > 0 && intersectsViewport(trackY, row.height, verticalViewport.top, verticalViewport.height);
+                // Shells are mounted one viewport beyond each edge; an unmeasured viewport mounts every row.
+                const rowNear = !(verticalViewport.height > 0)
+                  || intersectsViewport(trackY, row.height, verticalViewport.top, verticalViewport.height, verticalViewport.height);
+                const shellNear = (left, width) => rowNear && intersectsViewport(left, width, scrollLeft, containerWidth, containerWidth);
+                // Clips around the return-to-start view stay mounted so their waveforms are painted before the jump.
+                const returnNear = (left, width) => intersectsViewport(left, width, returnScrollLeft, containerWidth, containerWidth);
                 if (row.kind === 'group') {
                   const groupPreview = groupTimelinePreviewByNodeId.get(row.nodeId);
                   const rowPadding = 8;
@@ -3064,6 +3097,7 @@ function Timeline({
                       }}
                     >
                       {groupPreview?.activeSegments?.map((segment, idx) => {
+                        if (!shellNear(segment.startMs * pixelsPerMs, (segment.endMs - segment.startMs) * pixelsPerMs)) return null;
                         const range = segmentRange(segment.startMs * pixelsPerMs, (segment.endMs - segment.startMs) * pixelsPerMs);
                         const leftPx = range.left;
                         const widthPx = range.width;
@@ -3086,6 +3120,7 @@ function Timeline({
                       {rowVisible && <div className="absolute inset-x-0 pointer-events-none" style={{ top: rowPadding }}>
                         <GroupWaveform clips={groupSurfaceClipsByNodeId.get(row.nodeId)} pixelsPerMs={pixelsPerMs}
                           viewportLeftPx={scrollLeft - originPx} viewportWidthPx={containerWidth} height={rowInternalHeight}
+                          returnViewportLeftPx={returnScrollLeft - originPx}
                           globalPeakAmplitude={globalPeakAmplitude} displayMode={displayMode}
                           showRms={showRms} showClipping={showClipping} missingMediaBlobIds={missingMediaBlobIds} />
                       </div>}
@@ -3125,6 +3160,8 @@ function Timeline({
                       const clipLeftPx = Number.isFinite(animatedClipLayout?.left)
                         ? animatedClipLayout.left
                         : (clip.timelineStartMs * pixelsPerMs);
+                      if (!shellNear(clipLeftPx, clipWidthPx) && !(rowNear && returnNear(clipLeftPx, clipWidthPx))
+                        && clip.id !== focusedClipId && clip.id !== dragState?.clipId) return null;
                       const shell = segmentRange(clipLeftPx, clipWidthPx);
                       const drawScale = clipWidthPx / clipDurationMs;
                       const drawCropStartMs = clip.cropStartMs + shell.skipped / drawScale;
@@ -3150,12 +3187,14 @@ function Timeline({
                           aria-label={`Audio clip ${clip.name || clip.id}. Arrow keys move by 1ms, Shift by 10ms; Alt trims start, Alt Shift trims end.`}
                           aria-pressed={selectedClipIdSet.has(clip.id)}
                           onKeyDown={(event) => handleClipKeyDown(event, clip, track.id)}
+                          onFocus={() => setFocusedClipId(clip.id)}
+                          onBlur={() => setFocusedClipId((id) => (id === clip.id ? null : id))}
                           title={
                             missingMedia
                               ? 'Missing media — click to reload'
                               : (!advancedMixLocked && !isTrackEditable(track.id) ? trackAccessTitle(track.id) : undefined)
                           }
-                          className={`absolute rounded overflow-hidden ${
+                          className={`absolute rounded overflow-clip ${
                             selectedClipIds.includes(clip.id)
                               ? (missingMedia ? 'ring-2 ring-red-500' : 'ring-2 ring-blue-500')
                               : (missingMedia ? 'hover:ring-2 hover:ring-red-400' : 'hover:ring-2 hover:ring-gray-500')
@@ -3167,8 +3206,6 @@ function Timeline({
                             width: `${shell.width}px`,
                             height: `${clipInternalHeight}px`,
                             backgroundColor: missingMedia ? MISSING_CLIP_BACKGROUND_COLOR : CLIP_BACKGROUND_COLOR,
-                            '--clip-left': `${shell.left}px`,
-                            '--clip-width': `${shell.width}px`,
                           }}
                           onClick={(e) => handleClipClick(e, clip, track.id)}
                           onMouseDown={(e) => handleClipMouseDown(e, clip, track)}
@@ -3182,7 +3219,9 @@ function Timeline({
                               zIndex: 1,
                             }}
                           />
-                          {rowVisible && intersectsViewport(clipLeftPx, clipWidthPx, scrollLeft, containerWidth) && (
+                          {/* Mounted one viewport ahead, so a clip's retained canvas is painted before it scrolls in. */}
+                          {rowVisible && (intersectsViewport(clipLeftPx, clipWidthPx, scrollLeft, containerWidth, containerWidth)
+                            || returnNear(clipLeftPx, clipWidthPx)) && (
                             <Waveform
                               audioBuffer={audioBuffer}
                               blobId={clip.blobId}
@@ -3191,10 +3230,10 @@ function Timeline({
                               clipWidthPx={shell.width}
                               viewportLeftPx={scrollLeft - originPx}
                               viewportWidthPx={containerWidth}
+                              returnViewportLeftPx={returnScrollLeft - originPx}
                               displayMode={displayMode}
                               showRms={showRms}
                               showClipping={showClipping}
-                              showSamples={showSamples}
                               clipId={clip.id}
                               cropStartMs={drawCropStartMs}
                               cropEndMs={drawCropStartMs + shell.width / drawScale}
@@ -3214,13 +3253,12 @@ function Timeline({
                           )}
 
                           {labelFits && (clip.muted || Math.abs(clip.gainDb) >= 0.1) && (
-                            <div className="absolute top-1 left-0 right-0 text-xs font-medium pointer-events-none">
+                            // Sticks to the tracks scroller's left edge; the clip's overflow: clip is not a scroll container.
+                            <div className="absolute top-1 left-0 right-0 text-xs font-medium pointer-events-none"
+                              style={{ paddingLeft: labelPadding, paddingRight: labelPadding }}>
                               <span
-                                className="absolute text-yellow-400 whitespace-nowrap overflow-hidden text-ellipsis inline-flex items-center"
-                                style={{
-                                  left: `clamp(${labelPadding}px, calc(var(--scroll-left) - var(--clip-left) + ${labelPadding}px), calc(var(--clip-width) - ${labelPadding}px))`,
-                                  maxWidth: `calc(var(--clip-width) - ${labelPadding * 2}px)`,
-                                }}
+                                className="sticky text-yellow-400 whitespace-nowrap overflow-hidden text-ellipsis inline-flex items-center max-w-full"
+                                style={{ left: labelPadding }}
                               >
                                 {clip.muted ? <VolumeX size={12} /> : Math.abs(clip.gainDb) >= 0.1 ? gainLabelText : null}
                               </span>

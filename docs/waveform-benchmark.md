@@ -9,12 +9,16 @@ From the project root, with dependencies already installed:
 ```sh
 node --version
 node -e 'console.log(typeof WebSocket)'
-node scripts/waveform-benchmark.mjs --fixture quick --out artifacts/waveform/quick
-node scripts/waveform-benchmark.mjs --fixture reference --out artifacts/waveform/reference
-node scripts/waveform-benchmark.mjs --fixture medium --out artifacts/waveform/medium
-node scripts/waveform-benchmark.mjs --fixture stress --out artifacts/waveform/stress
+node scripts/waveform-benchmark.mjs --fixture quick --out .cache/waveform/quick
+node scripts/waveform-benchmark.mjs --fixture reference --out .cache/waveform/reference
+node scripts/waveform-benchmark.mjs --fixture medium --out .cache/waveform/medium
+node scripts/waveform-benchmark.mjs --fixture stress --timeout-ms 500000 --out .cache/waveform/stress
+node scripts/waveform-benchmark.mjs --fixture medium --production --out .cache/waveform/medium-prod
+node scripts/waveform-benchmark.mjs --fixture medium --production --profile --out .cache/waveform/medium-profile
 node scripts/waveform-benchmark.mjs --fixture medium --trace --out .cache/waveform/medium-trace
 ```
+
+`--production` builds the harness page with Vite's production mode (production React) into the temporary profile and serves it from a loopback-only static server on an ephemeral port, instead of the development server. Use it for timing comparisons: development React adds render overhead. With `--profile` the production bundle is left unminified so CPU-profile function names stay readable; minification does not change hot-loop speed.
 
 Requirements:
 
@@ -26,7 +30,7 @@ Each invocation is a separate cold run with a fresh temporary Chrome profile and
 
 Chrome runs headless, with a temporary profile, remote debugging bound to loopback and `--remote-debugging-port=0`. The runner discovers the assigned port/browser endpoint through **`DevToolsActivePort`**, connects using Node's built-in WebSocket, and uses flattened CDP sessions. It does not expose a remote debugger on the LAN or disable Chrome's sandbox. No external audio/media is fetched. Machine hostname and hardware/browser information are recorded locally; redact them before sharing results if needed.
 
-The default **total deadline is 120 seconds**, including a reserved 10 seconds for cleanup. `--timeout-ms` can lower it (15,000–120,000). Cold source completion has a separate **60-second maximum**, page initialization 20 seconds, browser discovery 15 seconds, and visible settling 8 seconds per operation. The total deadline overrides all stage budgets. Timeout is a failure, never an empty successful sample.
+The default **total deadline is 120 seconds**, including a reserved 10 seconds for cleanup. `--timeout-ms` sets it between 15,000 and 600,000; the stress fixture needs more than the default. Cold source completion has a separate **60-second maximum**, page initialization 20 seconds, browser discovery 15 seconds, and visible settling 8 seconds per operation. The total deadline overrides all stage budgets. Timeout is a failure, never an empty successful sample.
 
 The runner closes the page's resources, Chrome/CDP, Vite, and the temporary profile in `finally`, including on SIGINT/SIGTERM. It escalates Chrome termination to SIGKILL if necessary and has a final hard deadline. SIGKILL of the runner itself or an OS crash cannot execute JavaScript cleanup.
 
@@ -37,6 +41,7 @@ The runner closes the page's resources, Chrome/CDP, Vite, and the temporary prof
 - `results.json`: machine/browser identity, fixture metadata/version/seed, real measurements and sample counts, assertions, resource counters, errors, cleanup results, and limitations.
 - `settled.png`: CDP screenshot at 1440 × 1500 CSS px, DPR 2, after the final Timeline settles. Its pixel dimensions are normally twice the CSS dimensions. On a completed run with failed checks a screenshot is still useful; inspect the JSON rather than assuming an existing image means success.
 - `chrome-trace.json` (with `--trace`): Chrome timeline/V8/user-timing events around warm interactions, readable in Chrome's Performance panel. Capture starts when the runner observes the warm stage (up to 150 ms after its start) and stops when it observes the following stage. The runner caps trace output at 64 MiB and rejects reported data loss. Tracing adds overhead; use a separate untraced run for timing comparisons. Function-call events enable investigation but do not supply a complete sampling profile or automatically classify waveform-attributable long tasks.
+- `cpu-warm.cpuprofile` and `cpu-refinement.cpuprofile` (with `--profile`): V8 sampling CPU profiles (100 µs interval) of the warm-gesture and isolated-refinement stages, readable in Chrome DevTools. Profiling adds overhead; take timings from an unprofiled run.
 
 These filenames are overwritten on a new run in the same directory. Old screenshots/traces are removed at startup. Early startup failures can produce JSON without a screenshot. The absolute hard-stop fallback may terminate before JSON can be written.
 
@@ -59,7 +64,7 @@ Fixture definition: `scripts/waveformFixtures.js`, version `apollo-waveform-v1`,
 | `medium` | **24 tracks, 200 clips**, repeated/unique source membership, nested groups; viewport accommodates at least 12 rows | **Four unique three-minute, 48 kHz stereo sources**, 12 unique decoded minutes, 276,480,000 playback PCM bytes (~264 MiB), plus worker summaries/staging/browser memory |
 | `stress` | **64 tracks, exactly 2,000 clips**, six nested groups, narrow clips, one two-hour source clip | Four real ~3-second 48 kHz stereo sources. **`fullPCM: false`**; the two-hour source is metadata only, with **zero** PCM bytes allocated |
 
-The stress two-hour clip stays missing media. It is mapped through the real Timeline at sample zoom and its shell/resource bounds are checked. **No short AudioBuffer is associated with the two-hour identity.** This tests long-time geometry and missing-media behavior, not decoding/extracting/rasterizing two hours of audio. The short sources have truthful matching source duration and crop metadata. Stress results must not be presented as a full-PCM two-hour performance claim. True long-source extraction, paging, playback, and recording are separate gates.
+The stress two-hour clip stays missing media. It is mapped through the real Timeline at sample zoom and its shell/resource bounds are checked. **No short AudioBuffer is associated with the two-hour identity.** This tests long-time geometry and missing-media behavior, not decoding/extracting/rasterizing two hours of audio. The short sources have truthful matching source duration and crop metadata. Stress results must not be presented as a full-PCM two-hour performance claim. Long-source summary paging and recording summary reuse are covered by unit tests, not by this harness; full-PCM long-source extraction, playback and recording remain separate browser gates. Clip shells are virtualized, so the check scrolls the two-hour clip's row into view before inspecting its shell, then restores the scroll position.
 
 Reference PCM includes silence, positive/negative DC, positive-only/negative-only sections, sine/square waves, inverted stereo, boundary impulses, partial final buckets, values outside ±1, NaN, and infinity. The settled browser checks cover visible ink, stereo lanes, group activity, source crops, and sample zoom. A dedicated real Timeline reference view crops to `[130,190)` ms of +0.3/−0.3 stereo DC, excluding early impulses. Pixel reads verify left-channel ink above its zero line and right-channel ink below its zero line, without opposite-sign/cropped impulse bleed. This is a targeted raster assertion, **not** a replacement for exact range-query/property tests across every signal/boundary.
 
@@ -84,6 +89,7 @@ Compare the medium fixture against the plan's provisional targets on a **named b
 - warm total frame interval p95 ≤16.7 ms for a 60 Hz target;
 - scheduler/query/draw p95 approximately ≤4 ms per frame (this harness conservatively includes geometry/observer callback work);
 - input-to-first-response p95 ≤33 ms;
+- settled refinement p95 ≤100 ms with summaries resident (this harness uses a conservative scheduler-idle proxy);
 - cold three-minute stereo summary p95 ≤2 seconds after buffer availability (this harness includes queue wait, not isolated extraction CPU time).
 
 Raw frame intervals and sample counts are retained. `framesOver16_7Ms` counts intervals above that numeric threshold, **not measured dropped display frames**. `estimatedMissedIdleCadenceFrames` is explicitly an estimate relative to the measured idle median. A headless browser's idle rAF interval **does not establish a physical monitor refresh rate**. The report leaves physical refresh rate unknown; do not advertise 120 Hz support from this run, even if some intervals are under 8.3 ms.
@@ -92,7 +98,53 @@ The Long Tasks observer records all ≥50 ms main-thread tasks and tasks overlap
 
 Still required for a release decision: physical Chrome/Safari/Firefox profiling on baseline/lower-powered devices; precise presented refinement latency; DPR transitions and theme/height seams; RMS/dB/scale fidelity; editing/undo/autosave and trusted hardware input; persistent-summary warm reload; playback/capture/live-recording; replacement/eviction/failure stress; full long-source memory/paging; and retained heap/GPU analysis. The focused checks here supplement, rather than replace, existing unit/component tests and those manual gates.
 
-## Recovery and measured results — 2026-10-28
+## Retained scroll surfaces — 2026-11-01
+
+Waveform canvases now span the viewport plus one viewport of margin on each side and are retained across scroll ([zoom-fix.md](zoom-fix.md#implementation-notes-2026-11-01)). The harness changed accordingly:
+
+- **Bounded width** allows `3 × viewport` CSS px per canvas, still capped at 16,384 device px.
+- **Settling** for measurements, such as isolated zoom refinement, waits only for visible work: the scheduler's pending jobs must all be background (`pending === backgroundPending`) and no view may report loading. Offscreen margin and return-to-start painting is excluded, so the refinement metric keeps measuring what the user sees. Before the idle baseline, the warm stage, each lifecycle mount and the final screenshot, the harness waits for full quiescence, background work included.
+- Scroll inputs that stay inside the margin submit no waveform paint, so they cannot produce an observed response; zoom inputs still do.
+
+Medium, production bundle, same machine: 20/20 checks and 20 lifecycle cycles. Idle frame p95 was 17.6 ms; warm frame p50/p95 16.7/17.5 ms (one frame over 20 ms, previously 10); job p95 4.0 ms; first-submission p95 20.3 ms; settled refinement p50/p95 266.7/284.6 ms; three-minute stereo ready p95 1,400.5 ms; no interaction long tasks. Raster bytes peaked at about 176 MB against the new 192 MB cap. Refinement is unchanged because zoom still repaints every view. Frame p95 still misses 16.7 ms, but by less than the headless idle cadence itself. These timings predate the sample-line reach change, which affects only sample zoom. Two reruns after it passed 20/20 checks, but the machine was on battery at 14%. There Chrome's Energy Saver caps animation frames at 30 Hz (idle cadence 33 ms) and extraction also slowed, so their timings are not comparable and are not reported. Local output: `.cache/waveform/retained-medium/results.json` (the latest, throttled run).
+
+## Performance pass — 2026-11-01
+
+Same machine and browser as below: Apple M2, 8 logical CPUs, macOS Darwin 25.6.0, Node 25.5.0, headless Chrome 156, 1440 × 1500 CSS px, DPR 2. One independent run per row, production bundle unless noted.
+
+| Fixture | Checks | Idle frame p95 | Warm frame p50 / p95 (frames > 20 ms) | Job p95 | First submission p95 | Settled refinement p50 / p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Quick | 19/19, 20 cycles | 17.8 ms | 16.6 / 20.4 ms (11) | 4.0 ms | 32.3 ms | 248.6 / 250.8 ms |
+| Reference | 20/20, 20 cycles | 17.2 ms | 16.7 / 21.0 ms (12) | 4.0 ms | 33.4 ms | 150.0 / 150.1 ms |
+| Medium | 20/20, 20 cycles | 16.8 ms | 16.7 / 20.3 ms (10) | 4.0 ms | 21.8 ms | 253.6 / 277.6 ms |
+| Medium, development server | 20/20, 20 cycles | 17.8 ms | 16.7 / 20.0 ms (9) | 4.0 ms | 21.6 ms | 251.2 / 283.2 ms |
+| Stress | 20/20, 20 cycles, completes | 18.4 ms | 17.0 / 32.8 ms (40) | 2.6 ms | 102.3 ms (11 of 18 observed) | 429.4 / 564.6 ms |
+
+Medium three-minute stereo source-ready p95 was 1,434.7 ms (production) and 1,353.8 ms (development). Quick, reference and medium had no long tasks in the interaction window; stress had four (68–94 ms).
+
+Medium status against the unchanged targets, compared with the 2026-10-28 development-server run below:
+
+- **Met:** scheduler job p95 4.0 ms (at the 4 ms limit); first-submission p95 21.6–21.8 ms (was 37.1 ms); cold summary ≤2 s; zero interaction long tasks.
+- **Missed:** warm frame p95 20.0–20.3 ms (was 25.5 ms). In this headless Chrome even the idle cadence has a p95 of 16.8–17.8 ms, so the 16.7 ms gate cannot pass in this environment. The remaining long warm frames are zoom inputs: about 7 ms of React Timeline render, the 4 ms waveform slice, and style/layout/paint. This gate needs a physical-display measurement.
+- **Missed:** settled refinement p95 277.6–283.2 ms (was 916.6 ms).
+
+Changes in this pass, each motivated by a profile or trace:
+
+- **Exact column reads.** Queries summarize the aligned interior first. Unless RMS is shown, an edge bucket whose stored min/max cannot widen the column's extrema is counted without reading PCM; pixels are identical (tests compare against a full PCM scan). The raw loop checks for non-finite samples only when the energy comes out non-finite. Draw slices now end on the 1 ms clock, with stalled-clock ceilings of 65,536 raw samples and 4,096 steps, which cut warm-stage scheduler slices about fivefold.
+- **Scheduler.** The animation-frame slice stays at 4 ms. After 200 ms without input, refinement continues in follow-up tasks of at most 4 ms until 12 ms into the frame, stopping when `isInputPending()` reports input. A 50 ms window measured faster refinement (p95 216 ms) but placed up to 12 ms of waveform work into frames between the harness's gesture inputs (job p95 11.1 ms, response p95 33.3 ms). The 200 ms window also spans mouse-wheel notches and slow slider steps of one real gesture.
+- **Timeline style and DOM.** Clip gain/mute labels use `position: sticky` (clips use `overflow: clip`) instead of inherited `--scroll-left`, `--clip-left` and `--clip-width` custom properties. Changing those restyled the whole tracks subtree on every scroll and zoom; style recalculation in long frames fell from 7–12 ms to about 1 ms. Clip shells and group activity segments mount only within one viewport of the visible area, which, with the style change, cut zoom-input event dispatch from 13–19 ms to 7–8 ms.
+- **Wheel zoom.** The first ctrl/⌘-wheel event in a frame renders synchronously, like discrete slider input, and later events in that frame coalesce into the next. Wheel-zoom response fell from three frames to one.
+- **Harness.** Added `--production` and `--profile`, a longer allowed timeout, cheaper canvas-call instrumentation, and the stress long-clip scroll-into-view. The instrumentation change removed a rest-argument allocation on every measured canvas call.
+
+**Why refinement still misses.** One medium zoom issues roughly 250,000 exact column queries: DPR 2 × about 1,260 CSS px × stereo, across about 14 track rows plus two group rows that overlay all 24 and 12 descendant tracks. The group rows are about 70% of that work. In production this is about 60 ms of main-thread CPU, and at 4 ms per frame during the interaction window and 12 ms afterwards, p95 lands at 250–280 ms. Drawing group rows with one-CSS-pixel columns, which is still exact per column, measured p95 167 ms with the 50 ms window. It was not adopted, because it coarsens the group overview and still misses 100 ms. Meeting the target likely needs drawing off the main thread (OffscreenCanvas in a worker with shared PCM) or a raster cache, both follow-up options in the plan.
+
+**Stress** now finishes every check and all 20 lifecycle cycles within about 22 s of execution, where it previously timed out. Its zoom frames are dominated by React event dispatch (24–72 ms) and style/layout (10–34 ms) for 2,000 clips in 70 rows. Timeline work that still scales with total clip count, such as per-row clip iteration and group preview clip lists, is the next target there.
+
+Local outputs: `.cache/waveform/final/{quick,reference,medium,stress,medium-dev}/results.json`. **Rollout remains incomplete:** keep the legacy query/build switch and the WaveSurfer dependency.
+
+Validation: `npm test -- --run` (**708 tests / 73 files**), `npm run build`, `VITE_WAVEFORM_RENDERER=legacy npm run build`, and `git diff --check`.
+
+## Recovery and measured results — 2026-10-28 (historical)
 
 The previous thread stopped at an `EPERM` loopback failure. Loopback and headless Chrome work in this session. The supplied handoff and uncommitted working tree were used as the recovery baseline; Junie's session catalog contains no earlier Apollo session.
 

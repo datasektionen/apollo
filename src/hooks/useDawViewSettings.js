@@ -1,0 +1,43 @@
+import { useEffect, useRef, useState } from 'react';
+
+export const DAW_VIEW_STORAGE_KEY = 'apollo.dawView';
+
+export const DEFAULT_DAW_VIEW_SETTINGS = {
+  displayMode: 'linear',
+  showRms: false,
+  showClipping: false,
+};
+
+export function normalizeDawViewSettings(value) {
+  const mode = value?.displayMode;
+  return {
+    displayMode: mode === 'normalized' || mode === 'db' ? mode : 'linear',
+    showRms: value?.showRms === true,
+    showClipping: value?.showClipping === true,
+  };
+}
+
+function readDawViewSettings() {
+  try {
+    const saved = localStorage.getItem(DAW_VIEW_STORAGE_KEY);
+    return saved ? normalizeDawViewSettings(JSON.parse(saved)) : DEFAULT_DAW_VIEW_SETTINGS;
+  } catch {
+    return DEFAULT_DAW_VIEW_SETTINGS;
+  }
+}
+
+/** Waveform display choices for this machine. They are not part of the project. */
+export function useDawViewSettings() {
+  const [settings, setSettings] = useState(readDawViewSettings);
+  const skipWrite = useRef(true);
+
+  useEffect(() => {
+    if (skipWrite.current) {
+      skipWrite.current = false;
+      return;
+    }
+    localStorage.setItem(DAW_VIEW_STORAGE_KEY, JSON.stringify(normalizeDawViewSettings(settings)));
+  }, [settings]);
+
+  return [settings, setSettings];
+}

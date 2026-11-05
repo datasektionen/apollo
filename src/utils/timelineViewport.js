@@ -39,6 +39,25 @@ export function anchoredScroll(anchor, pixelsPerMs, width, timelineWidth) {
   return Math.max(0, Math.min(Math.max(0, timelineWidth - width), anchor.timeMs * pixelsPerMs - anchor.x));
 }
 
+export const FOLLOW_EDGE_PX = 24;
+export const FOLLOW_LEAD = 0.1;
+
+/**
+ * Page-turn playback follow. Returns the logical scroll that puts the playhead FOLLOW_LEAD into
+ * the viewport once it reaches the right edge or leaves the left, otherwise null.
+ */
+export function followScroll(playheadPx, scrollLeft, width, timelineWidth) {
+  const x = playheadPx - scrollLeft;
+  if (x >= 0 && x <= width - FOLLOW_EDGE_PX) return null;
+  const target = followLanding(playheadPx, width, timelineWidth);
+  return Math.abs(target - scrollLeft) < 0.5 ? null : target;
+}
+
+/** The logical scroll that puts the playhead FOLLOW_LEAD into the viewport. */
+export function followLanding(playheadPx, width, timelineWidth) {
+  return Math.max(0, Math.min(Math.max(0, timelineWidth - width), playheadPx - width * FOLLOW_LEAD));
+}
+
 export function normalizeWheel(event, pageSize) {
   const factor = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? pageSize : 1;
   return { x: event.deltaX * factor, y: event.deltaY * factor };

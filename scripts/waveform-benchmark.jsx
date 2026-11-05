@@ -42,13 +42,14 @@ function setZoom(value) {
   element.dispatchEvent(new Event('input', { bubbles: true }));
   element.dispatchEvent(new Event('change', { bubbles: true }));
 }
-async function settled() {
+/** Visible waveforms are painted. With background, offscreen margins and return views are too. */
+async function settled({ background = false } = {}) {
   await frame(); await frame();
   await waitFor(() => {
     const scheduler = waveformScheduler.getStats();
-    return !scheduler.pending && !scheduler.framePending
-      && !host.querySelector('[data-waveform-status="loading"]');
-  }, 'visible waveforms and scheduler settle');
+    const idle = background ? !scheduler.pending && !scheduler.framePending : scheduler.pending === scheduler.backgroundPending;
+    return idle && !host.querySelector('[data-waveform-status="loading"]');
+  }, background ? 'all waveform surfaces settle' : 'visible waveforms settle');
   await frame();
 }
 
@@ -81,7 +82,8 @@ function visualSnapshot(label) {
       group: canvas.parentElement.getAttribute('aria-label')?.startsWith('Group activity'),
       width: canvas.width, height: canvas.height, cssWidth: rect.width, cssHeight: rect.height,
       effectiveDpr: canvas.width / rect.width, nonzero, waveformPixels, topLanePixels, bottomLanePixels, quarterPixels,
-      boundedWidth: rect.width <= viewport.width + 66 && canvas.width <= 16384,
+      // Retained canvases cover the viewport plus one viewport of margin on each side.
+      boundedWidth: rect.width <= 3 * viewport.width + 1 && canvas.width <= 16384,
     };
   });
   return {
@@ -188,7 +190,7 @@ api.run = async ({ fixture: name = 'quick', coldTimeoutMs = 60000 } = {}) => {
       }
       return true;
     }, 'all real source jobs complete', Math.min(60000, coldTimeoutMs));
-    await settled();
+    await settled({ background: true });
     if (scroll().clientHeight < 1) throw Error('Benchmark Timeline viewport has no height; raster and timing measurements would be invalid');
     result.coldReadyMs = performance.now() - coldStart;
     result.coldReadyDistributionMs = summary(result.coldSources.map((source) => source.readyAfterCacheSetMs));
@@ -224,8 +226,10 @@ api.run = async ({ fixture: name = 'quick', coldTimeoutMs = 60000 } = {}) => {
     const originals = new Map();
     for (const method of ['fillRect', 'stroke', 'fill']) {
       const original = prototypes[method]; originals.set(method, original);
-      prototypes[method] = function (...args) {
-        const output = original.apply(this, args);
+      // `arguments` avoids allocating a rest array on every measured canvas call.
+      prototypes[method] = function () {
+        // eslint-disable-next-line prefer-rest-params
+        const output = original.apply(this, arguments);
         // Exclude the renderer's neutral zero line and clears/placeholders.
         if (awaitingInput && !awaitingInput.submissionMs && host.contains(this.canvas) && (method === 'stroke' || method === 'fill' || this.fillStyle !== 'rgba(148, 163, 184, 0.35)')) {
           awaitingInput.submissionMs = performance.now();
@@ -244,7 +248,7 @@ api.run = async ({ fixture: name = 'quick', coldTimeoutMs = 60000 } = {}) => {
     const warmBefore = stats(); const intervals = [];
     result.interactionWindow = { start: performance.now(), end: null };
     phase = 'warm'; stage('warm scroll / slider / modifier-wheel');
-    setZoom(0.2); await settled();
+    setZoom(0.2); await settled({ background: true });
     previous = await frame(); measuredJobMs = 0;
     for (let i = 0; i < 180; i += 1) {
       const now = await frame(); intervals.push(now - previous); previous = now;
@@ -317,11 +321,19 @@ api.run = async ({ fixture: name = 'quick', coldTimeoutMs = 60000 } = {}) => {
               && item.quarterPixels[1] === 0 && item.quarterPixels[2] === 0), sampleView.measurements);
         }
     if (name === 'stress') {
-      const longClip = host.querySelector('[data-clip-id="clip-0"]');
+      // Offscreen clip shells are virtualized: scroll the long clip's row into view first.
+      const target = scroll(); const restoreTop = target.scrollTop;
+      let longClip = host.querySelector('[data-clip-id="clip-0"]');
+      for (let top = 0; !longClip && top < target.scrollHeight; top += target.clientHeight) {
+        target.scrollTop = top; await settled();
+        longClip = host.querySelector('[data-clip-id="clip-0"]');
+      }
+      const longRect = longClip?.getBoundingClientRect();
       check('two-hour metadata clip retained at sample zoom without fake PCM', longClip && !audioManager.mediaCache.has(result.fixture.longSource.id), {
-        shellWidth: longClip?.getBoundingClientRect().width, sourceDurationMs: 7200000, fullPCM: false,
+        shellWidth: longRect?.width, sourceDurationMs: 7200000, fullPCM: false,
         caveat: 'Geometry/missing-media check only, not two-hour extraction or long-source raster fidelity.',
       });
+      target.scrollTop = restoreTop; await settled();
     }
     host.style.width = '1080px'; await settled();
     const resized = visualSnapshot('container-only resize to 1080 CSS px'); result.visual.push(resized);
@@ -333,7 +345,7 @@ api.run = async ({ fixture: name = 'quick', coldTimeoutMs = 60000 } = {}) => {
     flushSync(() => root.unmount()); root = null; await frame(); await frame();
     const cleanBaseline = stats(); result.cleanupBaseline = cleanBaseline;
     for (let cycle = 1; cycle <= 20; cycle += 1) {
-      mount(); await settled();
+      mount(); await settled({ background: true });
       const mounted = stats();
       flushSync(() => root.unmount()); root = null; await frame(); await frame();
       result.lifecycle.push({ cycle, mounted, unmounted: stats() });
@@ -343,7 +355,7 @@ api.run = async ({ fixture: name = 'quick', coldTimeoutMs = 60000 } = {}) => {
     check('all 20 unmounts release raster surfaces / scheduled jobs / pins / view listeners', result.lifecycle.every(({ unmounted }) =>
       unmounted.raster.bytes === 0 && unmounted.raster.surfaces === 0 && unmounted.scheduler.pending === 0
       && !unmounted.scheduler.framePending && unmounted.service.pins === 0 && unmounted.service.listeners === cleanBaseline.service.listeners), result.lifecycle.at(-1));
-    mount(); await settled();
+    mount(); await settled({ background: true });
     result.visual.push(visualSnapshot('final settled screenshot view'));
     result.finalStats = stats();
     check('all canvas geometry bounded and no document overflow', result.visual.every((view) => view.geometryBounded && !view.documentOverflow));

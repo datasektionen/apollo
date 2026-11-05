@@ -5,7 +5,7 @@ import { createWaveformService } from '../waveformService';
 import {
   createWaveformDrawJob, createWaveformRangeQuery, createWaveformRasterBudget, createWaveformSourceObserver,
   getWaveformWindow, prepareWaveformCanvas, waveformAmplitude, waveformRasterBudget,
-  WAVEFORM_RAW_SAMPLES_PER_SLICE, WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE, WAVEFORM_RASTER_BYTES,
+  WAVEFORM_RAW_SAMPLES_PER_SLICE, WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE, WAVEFORM_RASTER_BYTES, WAVEFORM_CLOCK_CHECK_WORK,
 } from '../waveformRenderer';
 
 function context() {
@@ -136,13 +136,139 @@ describe('waveform renderer', () => {
     } while (more);
   });
 
+  it('matches a raw reference for random ranges, non-finite samples and the partial final bucket', () => {
+    const pcm = Float32Array.from({ length: 5003 }, (_, i) => (i % 997 === 0 ? NaN : i % 1009 === 0 ? -Infinity : Math.sin(i * 0.37) * 1.5));
+    const buffer = { sampleRate: 1000, length: pcm.length, numberOfChannels: 1, getChannelData: () => pcm };
+    const builder = createWaveformBuilder({ ...buffer, baseBlockSize: 128 });
+    builder.append(0, 0, pcm);
+    const pyramid = builder.finish();
+    let seed = 99;
+    const random = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return seed / 2 ** 32; };
+    const ranges = [[0, 5003], [4992, 5003], [4991.5, 5003], [128, 256], [127.9, 256.1]];
+    for (let i = 0; i < 60; i += 1) {
+      const start = random() * 5003;
+      ranges.push([start, start + random() * (5003 - start)]);
+    }
+    for (const [start, end] of ranges) {
+      const query = createWaveformRangeQuery(pyramid, 0, start, end, buffer);
+      let step;
+      do step = query(); while (!step.done);
+      const values = [...pcm.slice(Math.floor(start), Math.ceil(end))].map((value) => (Number.isFinite(value) ? value : 0));
+      expect(step.result.min).toBe(Math.min(...values));
+      expect(step.result.max).toBe(Math.max(...values));
+      expect(step.result.count).toBe(values.length);
+      expect(step.result.sumSquares).toBeCloseTo(values.reduce((sum, value) => sum + value * value, 0), 6);
+    }
+  });
+
+  it('skips edge PCM that cannot widen extrema when energy is not needed', () => {
+    const pcm = Float32Array.from({ length: 50003 }, (_, i) => (i % 4999 === 0 ? NaN
+      : Math.sin(i * 0.013) * (0.4 + 0.3 * Math.sin(i * 0.0007)) + 0.05 * Math.sin(i * 1.7)));
+    const buffer = { sampleRate: 1000, length: pcm.length, numberOfChannels: 1, getChannelData: () => pcm };
+    const builder = createWaveformBuilder({ ...buffer, baseBlockSize: 128 });
+    builder.append(0, 0, pcm);
+    const pyramid = builder.finish();
+    let seed = 7;
+    const random = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return seed / 2 ** 32; };
+    let pruned = 0;
+    let exact = 0;
+    for (let i = 0; i < 300; i += 1) {
+      const start = random() * 50003;
+      const end = start + random() * 3000;
+      const run = (options) => {
+        const query = createWaveformRangeQuery(pyramid, 0, start, end, buffer, undefined, options);
+        let raw = 0;
+        let step;
+        do { step = query(); raw += step.rawSamples; } while (!step.done);
+        return { ...step.result, raw };
+      };
+      const reference = run();
+      const fast = run({ sumSquares: false });
+      expect(fast.min).toBe(reference.min);
+      expect(fast.max).toBe(reference.max);
+      expect(fast.count).toBe(reference.count);
+      pruned += fast.raw;
+      exact += reference.raw;
+    }
+    expect(pruned).toBeLessThan(exact / 2);
+  });
+
+  it('draws the same columns from pruned summaries as from a full PCM scan', () => {
+    const pcm = Float32Array.from({ length: 40000 }, (_, i) => Math.sin(i * 0.02) * (0.3 + 0.6 * Math.abs(Math.sin(i * 0.0009))));
+    const buffer = { sampleRate: 48000, length: pcm.length, numberOfChannels: 1, getChannelData: () => pcm };
+    const builder = createWaveformBuilder({ ...buffer, baseBlockSize: 128 });
+    builder.append(0, 0, pcm);
+    const pyramid = builder.finish();
+    let reads = 0;
+    const counted = { ...buffer, getChannelData: () => new Proxy(pcm, { get: (target, key) => {
+      if (typeof key === 'string' && /^\d+$/.test(key)) reads += 1;
+      return target[key];
+    } }) };
+    const draw = (withPyramid) => {
+      reads = 0;
+      const ctx = context();
+      finish(createWaveformDrawJob(ctx, {
+        audioBuffer: counted, pyramid: withPyramid ? pyramid : undefined, cropStartMs: 3.1, cropEndMs: 800,
+        pixelsPerMs: 0.05, clipLeftPx: 0, clipWidthPx: 40, surfaceLeftPx: 0, surfaceWidthPx: 40, height: 40, dpr: 2,
+      }));
+      return { rects: ctx.fillRect.mock.calls, reads };
+    };
+    const scanned = draw(false);
+    const summarized = draw(true);
+    expect(summarized.rects).toEqual(scanned.rects);
+    expect(summarized.reads).toBeLessThan(scanned.reads / 4);
+  });
+
+  it('paints a column range exactly as the same columns of a full pass', () => {
+    const pcm = Float32Array.from({ length: 40000 }, (_, i) => Math.sin(i * 0.03) * (0.2 + Math.abs(Math.sin(i * 0.001))));
+    const buffer = { sampleRate: 48000, length: pcm.length, numberOfChannels: 1, getChannelData: () => pcm };
+    const builder = createWaveformBuilder({ ...buffer, baseBlockSize: 128 });
+    builder.append(0, 0, pcm);
+    const pyramid = builder.finish();
+    const rects = (ranges) => {
+      const ctx = context();
+      const calls = [];
+      ctx.fillRect.mockImplementation((...args) => { if (ctx.fillStyle !== 'rgba(148, 163, 184, 0.35)') calls.push(args); });
+      for (const [fromColumn, toColumn] of ranges) {
+        finish(createWaveformDrawJob(ctx, {
+          audioBuffer: buffer, pyramid, cropStartMs: 3.1, cropEndMs: 800, pixelsPerMs: 0.05,
+          clipLeftPx: 1.3, clipWidthPx: 38, surfaceLeftPx: 0, surfaceWidthPx: 40, height: 40, dpr: 2,
+          showRms: true, showClipping: true, fromColumn, toColumn,
+        }));
+      }
+      return calls;
+    };
+    const full = rects([[0, Infinity]]);
+    expect(full.length).toBeGreaterThan(100);
+    expect(rects([[0, 23], [23, 57], [57, 80]])).toEqual(full);
+  });
+
+  it('draws sample lines for a column range from just outside it, breaking paths where a full pass does', () => {
+    const pcm = Float32Array.from({ length: 4000 }, (_, i) => Math.sin(i * 0.3));
+    const audioBuffer = { sampleRate: 1000, length: pcm.length, numberOfChannels: 1, getChannelData: () => pcm };
+    const pathStarts = (fromColumn, toColumn) => {
+      const ctx = context();
+      finish(createWaveformDrawJob(ctx, {
+        audioBuffer, cropEndMs: 4000, pixelsPerMs: 2, clipWidthPx: 8000,
+        surfaceLeftPx: 1000, surfaceWidthPx: 400, height: 40, dpr: 2, fromColumn, toColumn,
+      }));
+      return ctx.moveTo.mock.calls.map(([x]) => x);
+    };
+    const full = pathStarts(0, Infinity);
+    const [first, ...rest] = pathStarts(301, 500);
+    expect(first).toBeLessThanOrEqual(301 / 2 - 2);
+    expect(rest.length).toBeGreaterThan(0);
+    expect(rest.every((x) => full.includes(x))).toBe(true);
+  });
+
   it('batches exact PCM queries with a hard draw ceiling even when the clock does not advance', () => {
     let reads = 0;
-    const pcm = new Proxy({}, { get: () => { reads += 1; return reads === 10000 ? -0.75 : 0.5; } });
+    const length = 2 * WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE + 5000;
+    const pcm = new Proxy({}, { get: () => { reads += 1; return reads === 100000 ? -0.75 : 0.5; } });
     const ctx = context();
     const draw = createWaveformDrawJob(ctx, {
-      audioBuffer: { sampleRate: 1000, length: 20000, numberOfChannels: 1, getChannelData: () => pcm },
-      cropEndMs: 20000, pixelsPerMs: 1 / 20000,
+      audioBuffer: { sampleRate: 1000, length, numberOfChannels: 1, getChannelData: () => pcm },
+      cropEndMs: length, pixelsPerMs: 1 / length,
       clipWidthPx: 1, surfaceLeftPx: 0, surfaceWidthPx: 1, height: 40,
     });
     expect(draw({ now: () => 0 })).toBe(true);
@@ -150,7 +276,7 @@ describe('waveform renderer', () => {
     expect(draw({ now: () => 0 })).toBe(true);
     expect(reads).toBe(2 * WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE);
     expect(draw({ now: () => 0 })).toBe(false);
-    expect(reads).toBe(20000);
+    expect(reads).toBe(length);
     expect(ctx.fillRect).toHaveBeenLastCalledWith(0, 11, 1, 22.5);
   });
 
@@ -165,19 +291,20 @@ describe('waveform renderer', () => {
     } });
     const ctx = context();
     const draw = createWaveformDrawJob(ctx, {
-      audioBuffer: { sampleRate: 1000, length: 1024, numberOfChannels: 1, getChannelData: () => pcm },
-      cropEndMs: 1024, pixelsPerMs: 1 / 1024,
+      audioBuffer: { sampleRate: 1000, length: 8192, numberOfChannels: 1, getChannelData: () => pcm },
+      cropEndMs: 8192, pixelsPerMs: 1 / 8192,
       clipWidthPx: 1, surfaceLeftPx: 0, surfaceWidthPx: 1, height: 40,
     });
+    // The clock is sampled after WAVEFORM_CLOCK_CHECK_WORK, never more than that past the deadline.
     expect(draw({ now: () => clock })).toBe(true);
-    expect(reads).toBe(WAVEFORM_RAW_SAMPLES_PER_SLICE);
+    expect(reads).toBe(WAVEFORM_CLOCK_CHECK_WORK);
     // A scheduler deadline can shorten the local 1 ms budget as well.
     clock = 0;
     sampleMs = 1 / 1024;
     expect(draw({ now: () => clock, deadline: 0.25 })).toBe(true);
-    expect(reads).toBe(2 * WAVEFORM_RAW_SAMPLES_PER_SLICE);
+    expect(reads).toBe(2 * WAVEFORM_CLOCK_CHECK_WORK);
     finish(draw);
-    expect(reads).toBe(1024);
+    expect(reads).toBe(8192);
     expect(ctx.fillRect).toHaveBeenLastCalledWith(0, 11, 1, 22.5);
     expect(ctx.restore).toHaveBeenCalledTimes(ctx.save.mock.calls.length);
   });
@@ -261,6 +388,7 @@ describe('waveform renderer', () => {
     const ctx = context();
     finish(createWaveformDrawJob(ctx, { audioBuffer, cropEndMs: 1e12, pixelsPerMs: 4,
       clipWidthPx: 4e12, surfaceLeftPx: 4e9, surfaceWidthPx: 100, height: 40 }));
-    expect(reads).toBeLessThanOrEqual(27);
+    // 25 visible samples, plus the 2 px reach and one neighbour on each side.
+    expect(reads).toBeLessThanOrEqual(29);
   });
 });

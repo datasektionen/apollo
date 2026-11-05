@@ -1,25 +1,32 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { createServer as createHttpServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir, platform, release, cpus, hostname } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
+import { build, createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const usage = `Usage: node scripts/waveform-benchmark.mjs [--fixture quick|reference|medium|stress] [--out artifacts/waveform] [--timeout-ms 120000] [--trace]\nRequires Node with built-in WebSocket and installed macOS Google Chrome. No npm/package changes needed.\nWrites results.json and settled.png, plus chrome-trace.json with --trace, in a project-contained output directory. Existing files with those names are overwritten.`;
-const options = { fixture: 'quick', out: 'artifacts/waveform', timeoutMs: 120000, trace: false };
+const usage = `Usage: node scripts/waveform-benchmark.mjs [--fixture quick|reference|medium|stress] [--out artifacts/waveform] [--timeout-ms 120000] [--trace] [--profile] [--production]\nRequires Node with built-in WebSocket and installed macOS Google Chrome. No npm/package changes needed.\nWrites results.json and settled.png, plus chrome-trace.json with --trace and cpu-{warm,refinement}.cpuprofile with --profile, in a project-contained output directory. Existing files with those names are overwritten.\n--production measures a production bundle (production React; unminified with --profile) built into the temporary profile, instead of the Vite development server.`;
+const options = { fixture: 'quick', out: 'artifacts/waveform', timeoutMs: 120000, trace: false, profile: false, production: false };
+const profiledStages = {
+  'warm scroll / slider / modifier-wheel': 'warm',
+  'isolated zoom inputs to scheduler-idle refinement': 'refinement',
+};
 for (let i = 2; i < process.argv.length; i += 1) {
   const arg = process.argv[i];
   if (arg === '--help') { console.log(usage); process.exit(0); }
   if (arg === '--trace') { options.trace = true; continue; }
+  if (arg === '--profile') { options.profile = true; continue; }
+  if (arg === '--production') { options.production = true; continue; }
   const value = process.argv[++i];
   if (!value) throw Error(`Missing value for ${arg}\n${usage}`);
   if (arg === '--fixture' && ['quick', 'reference', 'medium', 'stress'].includes(value)) options.fixture = value;
   else if (arg === '--out') options.out = value;
-  else if (arg === '--timeout-ms' && Number.isInteger(Number(value)) && Number(value) >= 15000 && Number(value) <= 120000) options.timeoutMs = Number(value);
+  else if (arg === '--timeout-ms' && Number.isInteger(Number(value)) && Number(value) >= 15000 && Number(value) <= 600000) options.timeoutMs = Number(value);
   else throw Error(`Invalid argument: ${arg} ${value}\n${usage}`);
 }
 if (typeof WebSocket !== 'function') throw Error('Node built-in WebSocket is unavailable; use Node 22.4+ (Node 24+ recommended).');
@@ -45,7 +52,28 @@ await mkdir(output, { recursive: true });
 // Do not leave a previous successful screenshot beside a new failed run.
 await rm(path.join(output, 'settled.png'), { force: true });
 await rm(path.join(output, 'chrome-trace.json'), { force: true });
+for (const label of Object.values(profiledStages)) await rm(path.join(output, `cpu-${label}.cpuprofile`), { force: true });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const contentTypes = {
+  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
+  '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.wasm': 'application/wasm', '.woff2': 'font/woff2',
+};
+/** Loopback-only static server for the production bundle; same shape as the Vite server for cleanup. */
+function staticServer(root) {
+  const httpServer = createHttpServer(async (request, response) => {
+    try {
+      const file = path.resolve(root, `.${decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname)}`);
+      if (!file.startsWith(`${root}${path.sep}`)) throw Error('Outside the bundle');
+      const body = await readFile(file);
+      response.writeHead(200, { 'content-type': contentTypes[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
+      response.end(body);
+    } catch {
+      response.writeHead(404);
+      response.end();
+    }
+  });
+  return { httpServer, close: () => new Promise((resolve) => { httpServer.close(() => resolve()); }) };
+}
 function bounded(promise, ms, label) {
   let timer;
   return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(Error(`${label} timed out after ${ms}ms`)), ms); })])
@@ -90,7 +118,7 @@ class CDP {
 }
 
 let server; let child; let profile; let cdp; let socket; let sessionId;
-let spawnFailure; let browserExited = false; let tracing = false;
+let spawnFailure; let browserExited = false; let tracing = false; let cpuProfiling;
 const browserErrors = []; const cleanupErrors = [];
 let chromeStderr = '';
 const report = {
@@ -115,6 +143,24 @@ const evaluate = async (expression) => {
   if (response.exceptionDetails) throw Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text);
   return response.result.value;
 };
+async function syncProfile(progress) {
+  const label = profiledStages[progress];
+  if (cpuProfiling && cpuProfiling !== label) {
+    const stage = cpuProfiling;
+    cpuProfiling = undefined;
+    const { profile: cpu } = await cdp.send('Profiler.stop', {}, sessionId, 30000);
+    const file = path.join(output, `cpu-${stage}.cpuprofile`);
+    await writeFile(file, JSON.stringify(cpu));
+    (report.profiles ||= []).push({ stage, path: path.relative(project, file),
+      scope: 'V8 sampling profile (100 us) of the main page thread; starts up to 150ms after the stage. Profiling adds overhead; compare timings with an unprofiled run.' });
+  }
+  if (label && !cpuProfiling && !report.profiles?.some((entry) => entry.stage === label)) {
+    await cdp.send('Profiler.enable', {}, sessionId);
+    await cdp.send('Profiler.setSamplingInterval', { interval: 100 }, sessionId);
+    await cdp.send('Profiler.start', {}, sessionId);
+    cpuProfiling = label;
+  }
+}
 async function collectTrace() {
   if (!tracing) return;
   tracing = false;
@@ -144,12 +190,29 @@ async function collectTrace() {
 try {
   await Promise.race([abort, bounded((async () => {
     profile = await mkdtemp(path.join(process.env.TMPDIR || tmpdir(), 'apollo-waveform-'));
-    server = await createServer({
-      configFile: false, root: project, plugins: [react()], cacheDir: path.join(profile, 'vite-cache'),
-      clearScreen: false, logLevel: 'warn',
-      optimizeDeps: { entries: ['scripts/waveform-benchmark.html'] },
-      server: { host: '127.0.0.1', port: 0, strictPort: false, open: false, hmr: false },
-    });
+    if (options.production) {
+      const dist = path.join(profile, 'dist');
+      await build({
+        configFile: false, root: project, plugins: [react()], cacheDir: path.join(profile, 'vite-cache'),
+        clearScreen: false, logLevel: 'warn',
+        build: {
+          target: 'esnext', outDir: dist, emptyOutDir: true, reportCompressedSize: false, chunkSizeWarningLimit: 1e6,
+          // Readable function names in CPU profiles; minification changes parse size, not hot-loop speed.
+          minify: !options.profile,
+          rollupOptions: { input: path.join(project, 'scripts/waveform-benchmark.html') },
+        },
+      });
+      server = staticServer(dist);
+    } else {
+      server = await createServer({
+        configFile: false, root: project, plugins: [react()], cacheDir: path.join(profile, 'vite-cache'),
+        clearScreen: false, logLevel: 'warn',
+        optimizeDeps: { entries: ['scripts/waveform-benchmark.html'] },
+        server: { host: '127.0.0.1', port: 0, strictPort: false, open: false, hmr: false },
+      });
+    }
+    report.build = !options.production ? 'Vite development server (development React)'
+      : `production bundle (${options.profile ? 'unminified for profiling' : 'minified'}, production React)`;
     // Vite 5's server.listen() treats port 0 as falsy and falls back to 5173.
     // Its HTTP server's listen wrapper still initializes plugins/optimization;
     // call that wrapper directly so the OS really chooses an ephemeral port.
@@ -215,6 +278,7 @@ try {
         await cdp.send('Tracing.start', { categories: 'devtools.timeline,v8.execute,blink.user_timing', transferMode: 'ReturnAsStream' });
         tracing = true;
       } else if (tracing && progress !== 'warm scroll / slider / modifier-wheel') await collectTrace();
+      if (options.profile) await syncProfile(progress);
       if (state.state === 'done' || state.state === 'failed') break;
       if (browserExited) throw Error('Chrome exited during benchmark');
       await sleep(150);

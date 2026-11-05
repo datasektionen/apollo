@@ -1,9 +1,24 @@
-/** Cooperative jobs return true to continue. Priority is bounded; waiting jobs always age past it. */
+import { yieldWaveformTask } from './waveformData';
+
+/**
+ * Cooperative jobs return true to continue. Priority is bounded; waiting jobs always age past it.
+ * Each animation frame runs up to budgetMs. When no input arrived within interactionMs, settled
+ * views keep refining in follow-up tasks of at most budgetMs each, until idleBudgetMs after the
+ * frame started, stopping as soon as inputPending() reports queued input. The frame callback
+ * itself never grows, so input handled later in that frame is not delayed by refinement.
+ * interactionMs spans the gaps between wheel notches or slow slider steps of one gesture.
+ * Background jobs (offscreen margins) run only while no foreground job is queued.
+ */
 export function createWaveformScheduler({
   requestFrame = (callback) => requestAnimationFrame(callback),
   cancelFrame = (id) => cancelAnimationFrame(id),
   now = () => performance.now(),
   budgetMs = 4,
+  idleBudgetMs = budgetMs,
+  interactionMs = 200,
+  lastInputAt = () => -Infinity,
+  inputPending = () => false,
+  postTask = (callback) => { void yieldWaveformTask().then(callback); },
   maxSlicesPerFrame = 128,
 } = {}) {
   const jobs = new Map();
@@ -12,28 +27,34 @@ export function createWaveformScheduler({
   let running;
   let turn = 0;
   let sequence = 0;
-  const stats = { frames: 0, slices: 0, completed: 0, cancelled: 0, errors: 0, totalMs: 0, maxFrameMs: 0, maxWaitSlices: 0 };
+  let frameStart = -Infinity;
+  let idlePosted = false;
+  const stats = {
+    frames: 0, idleTasks: 0, slices: 0, completed: 0, cancelled: 0, errors: 0, totalMs: 0, maxFrameMs: 0, maxWaitSlices: 0,
+  };
   function request() {
     if (!flushing && frame === null && jobs.size) frame = requestFrame(flush);
   }
-  function flush() {
-    frame = null;
-    flushing = true;
-    const start = now();
-    const budget = { now, deadline: start + budgetMs };
+  const settled = (at) => at - lastInputAt() >= interactionMs && !inputPending();
+  function runSlices(start, deadline, yieldToInput) {
+    const budget = { now, deadline };
     let slices = 0;
-    stats.frames += 1;
+    flushing = true;
     try {
       do {
         let entry;
         for (const candidate of jobs.values()) {
+          if (entry && candidate.background !== entry.background) {
+            if (!candidate.background) entry = candidate;
+            continue;
+          }
           const score = candidate.waitSince - candidate.priority * 2;
           const best = entry && entry.waitSince - entry.priority * 2;
           if (!entry || score < best || (score === best && candidate.order < entry.order)) entry = candidate;
         }
         if (!entry) break;
         jobs.delete(entry.key);
-        stats.maxWaitSlices = Math.max(stats.maxWaitSlices, turn - entry.waitSince);
+        if (!entry.background) stats.maxWaitSlices = Math.max(stats.maxWaitSlices, turn - entry.waitSince);
         running = entry;
         let more = false;
         try { more = entry.draw(budget) === true; }
@@ -47,24 +68,51 @@ export function createWaveformScheduler({
           entry.order = ++sequence;
           jobs.set(entry.key, entry);
         } else if (!entry.cancelled) stats.completed += 1;
-      } while (jobs.size && slices < maxSlicesPerFrame && now() - start < budgetMs);
+      } while (jobs.size && slices < maxSlicesPerFrame && now() < deadline && !(yieldToInput && inputPending()));
     } finally {
       running = undefined;
       const elapsed = now() - start;
       stats.totalMs += elapsed;
       stats.maxFrameMs = Math.max(stats.maxFrameMs, elapsed);
       flushing = false;
+    }
+  }
+  function postIdle() {
+    if (idlePosted || !jobs.size || idleBudgetMs <= budgetMs) return;
+    const at = now();
+    if (at >= frameStart + idleBudgetMs || !settled(at)) return;
+    idlePosted = true;
+    postTask(idle);
+  }
+  function idle() {
+    idlePosted = false;
+    const start = now();
+    if (!jobs.size || start >= frameStart + idleBudgetMs || !settled(start)) return;
+    stats.idleTasks += 1;
+    try { runSlices(start, Math.min(start + budgetMs, frameStart + idleBudgetMs), true); } finally {
+      if (!jobs.size && frame !== null) { cancelFrame(frame); frame = null; }
       request();
+      postIdle();
+    }
+  }
+  function flush() {
+    frame = null;
+    const start = now();
+    frameStart = start;
+    stats.frames += 1;
+    try { runSlices(start, start + budgetMs, false); } finally {
+      request();
+      postIdle();
     }
   }
   return {
-    schedule(key, draw, { priority = 0 } = {}) {
+    schedule(key, draw, { priority = 0, background = false } = {}) {
       const queued = jobs.get(key);
       const previous = queued || (running?.key === key ? running : undefined);
       if (previous) { previous.cancelled = true; stats.cancelled += 1; }
       // Repeated notifications replace work without moving it to the back of the queue.
       const entry = {
-        key, draw, priority: Math.max(-4, Math.min(4, Number.isFinite(priority) ? priority : 0)),
+        key, draw, priority: Math.max(-4, Math.min(4, Number.isFinite(priority) ? priority : 0)), background: Boolean(background),
         cancelled: false, waitSince: queued?.waitSince ?? (previous === running && running ? turn + 1 : turn),
         order: queued?.order ?? ++sequence,
       };
@@ -77,8 +125,23 @@ export function createWaveformScheduler({
         if (!jobs.size && frame !== null) { cancelFrame(frame); frame = null; }
       };
     },
-    getStats: () => ({ ...stats, pending: jobs.size, framePending: frame !== null }),
+    getStats: () => {
+      let backgroundPending = 0;
+      for (const entry of jobs.values()) if (entry.background) backgroundPending += 1;
+      return { ...stats, pending: jobs.size, backgroundPending, framePending: frame !== null };
+    },
   };
 }
 
-export const waveformScheduler = createWaveformScheduler();
+let lastInput = -Infinity;
+if (typeof window !== 'undefined') {
+  const mark = () => { lastInput = performance.now(); };
+  for (const type of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'input', 'scroll', 'touchmove']) {
+    window.addEventListener(type, mark, { capture: true, passive: true });
+  }
+}
+export const waveformScheduler = createWaveformScheduler({
+  idleBudgetMs: 12,
+  lastInputAt: () => lastInput,
+  inputPending: () => globalThis.navigator?.scheduling?.isInputPending?.() === true,
+});

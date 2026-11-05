@@ -54,9 +54,12 @@ async function flush() {
   frames.clear();
   await act(async () => pending.forEach((callback) => callback(100)));
 }
-function clickText(text) {
-  const button = [...host.querySelectorAll('button')].find((node) => node.textContent === text);
-  return event(button, 'click');
+const fitProject = () => event(window, 'keydown', { key: '0' });
+/** Keyboard zoom steps until the view is at least one sample per CSS pixel. */
+async function zoomToSamples() {
+  for (let i = 0; i < 10 && !(state.waveforms.get('clip')?.pixelsPerMs >= 48); i += 1) {
+    await event(window, 'keydown', { key: '+' });
+  }
 }
 async function publish(kind = 'media') {
   await act(async () => [...(kind === 'media' ? state.mediaListeners : state.sourceListeners)].forEach((listener) => listener({ type: 'ready', blobIds: ['clip'] })));
@@ -100,7 +103,7 @@ describe('Timeline integration', () => {
   it('passes source identity, viewport and fixed-scale defaults to the renderer', () => {
     const view = state.waveforms.get('clip');
     expect(view).toMatchObject({ blobId: 'clip', clipLeftPx: 0, clipWidthPx: 100, viewportLeftPx: 0,
-      viewportWidthPx: 800, pixelsPerMs: 0.1, displayMode: 'linear', showSamples: true });
+      viewportWidthPx: 800, pixelsPerMs: 0.1, displayMode: 'linear', showRms: false, showClipping: false });
     expect(range().getAttribute('aria-label')).toBe('Timeline zoom');
     expect(range().getAttribute('aria-valuetext')).toContain('visible');
   });
@@ -116,14 +119,9 @@ describe('Timeline integration', () => {
     expect(host.querySelector('[data-waveform]').dataset.loaded).toBe('false');
     expect(pcm).not.toHaveBeenCalled();
   });
-  it('supports normalized/dB, RMS, source-over-range and sample options', async () => {
-    const select = host.querySelector('select');
-    select.value = 'normalized'; await event(select, 'change');
-    expect(state.waveforms.get('clip').displayMode).toBe('normalized');
-    select.value = 'db'; await event(select, 'change');
-    const checks = host.querySelectorAll('input[type=checkbox]');
-    await event(checks[0], 'click'); await event(checks[1], 'click'); await event(checks[2], 'click');
-    expect(state.waveforms.get('clip')).toMatchObject({ displayMode: 'db', showRms: true, showClipping: true, showSamples: false });
+  it('draws with the amplitude scale, RMS and over-range options it is given', async () => {
+    await render({ displayMode: 'normalized', showRms: true, showClipping: true });
+    expect(state.waveforms.get('clip')).toMatchObject({ displayMode: 'normalized', showRms: true, showClipping: true });
   });
   it('has one wheel owner, normalizes line input and accumulates a burst around the pointer', async () => {
     const scroll = tracksElement();
@@ -138,17 +136,36 @@ describe('Timeline integration', () => {
     const normal = await event(scroll, 'wheel', { deltaY: 20 });
     expect(normal.defaultPrevented).toBe(false);
   });
-  it('preserves visible playhead screen position for keyboard zoom and exposes fit/sample actions', async () => {
+  it('preserves visible playhead screen position for keyboard zoom and fit', async () => {
     await event(window, 'keydown', { key: '+' });
     const scale = state.waveforms.get('clip').pixelsPerMs;
     expect(tracksElement().scrollLeft).toBeCloseTo(3000 * scale - 300);
-    await clickText('Fit project (0)');
+    await fitProject();
     expect(tracksElement().scrollLeft).toBe(0);
-    await clickText('Zoom to samples');
+    await zoomToSamples();
     expect(host.querySelectorAll('[data-ruler-tick]').length).toBeLessThan(25);
     expect(Number(range().value)).toBeGreaterThan(0.8);
     expect(Number.parseFloat(tracksElement().firstElementChild.style.width)).toBeLessThanOrEqual(1000000);
-    expect(Number.parseFloat(clipElement().style.width)).toBeLessThanOrEqual(1000000);
+    // The clip ends 2 s before the playhead, far outside a sample-zoom view. It stays mounted only
+    // while it sits at the return-to-start view; a loop starting at the playhead moves that view away.
+    expect(clipElement()).not.toBeNull();
+    current = { ...current, loop: { enabled: true, startMs: 3000, endMs: 3500 } };
+    await render();
+    expect(clipElement()).toBeNull();
+  });
+  it('returns the view to the loop start on stop when it is offscreen, keeping a visible start in place', async () => {
+    current = { ...project([makeTrack('track', [makeClip('clip', 0, 100_000)])]), loop: { enabled: true, startMs: 20_000, endMs: 30_000 } };
+    await render({ currentTimeMs: 0 });
+    for (let i = 0; i < 3; i += 1) await event(window, 'keydown', { key: '+' });
+    const ppm = state.waveforms.get('clip').pixelsPerMs;
+    const landing = 20_000 * ppm - 80;
+    expect(state.waveforms.get('clip').returnViewportLeftPx).toBeCloseTo(landing);
+    await render({ currentTimeMs: 20_000, returnToStartToken: 1 });
+    expect(tracksElement().scrollLeft).toBeCloseTo(landing);
+    await event(tracksElement(), 'wheel', { deltaX: -100 });
+    const scrolled = tracksElement().scrollLeft;
+    await render({ returnToStartToken: 2 });
+    expect(tracksElement().scrollLeft).toBe(scrolled);
   });
   it('keeps an offscreen playhead out of manual zoom anchoring', async () => {
     await render({ currentTimeMs: 100000 });
@@ -159,28 +176,22 @@ describe('Timeline integration', () => {
     expect(scroll).toBeLessThan(2000);
     expect(duration).toBeGreaterThan(0);
   });
-  it('fits selected clips and preserves their center', async () => {
-    await event(clipElement(), 'click', { clientX: 50 });
-    await clickText('Fit selected clips');
-    const view = state.waveforms.get('clip');
-    expect(view.pixelsPerMs).toBeCloseTo(800 / 1100);
-    expect(view.viewportLeftPx).toBe(0);
-  });
   it('maps source crops and release coordinates correctly after a deep-zoom rebase', async () => {
     current = project([makeTrack('track', [makeClip('clip', 0, 36_000_000)])]);
     await render({ currentTimeMs: 18_000_000 });
-    await clickText('Fit project (0)');
+    await fitProject();
     const previousPlayheadX = 18_000_000 * state.waveforms.get('clip').pixelsPerMs;
-    await clickText('Zoom to samples');
+    await zoomToSamples();
     const view = state.waveforms.get('clip');
-    expect(view.pixelsPerMs).toBe(48);
+    const ppm = view.pixelsPerMs;
+    expect(ppm).toBeGreaterThanOrEqual(48);
     expect(view.clipWidthPx).toBe(1e6);
     expect(view.cropStartMs).toBeGreaterThan(17_000_000);
     const pointerTime = view.cropStartMs + (view.viewportLeftPx + 400 - view.clipLeftPx) / view.pixelsPerMs;
-    expect(pointerTime).toBeCloseTo(18_000_000 + (400 - previousPlayheadX) / 48, 5);
+    expect(pointerTime).toBeCloseTo(18_000_000 + (400 - previousPlayheadX) / ppm, 5);
     const before = view.cropStartMs + view.viewportLeftPx / view.pixelsPerMs;
     await event(clipElement(), 'mousedown', { button: 0, clientX: 400, clientY: 30 });
-    await event(tracksElement(), 'wheel', { shiftKey: true, deltaY: 48 });
+    await event(tracksElement(), 'wheel', { shiftKey: true, deltaY: ppm });
     await event(window, 'mouseup', { clientX: 400, clientY: 30 });
     expect(current.tracks[0].clips[0].timelineStartMs).toBeCloseTo(1);
     expect(before).toBeGreaterThan(1e6);
@@ -202,15 +213,16 @@ describe('Timeline integration', () => {
   it('keeps recording placement bounded inside a rebased clipped REC shell', async () => {
     current = project([makeTrack('track', [makeClip('clip', 0, 36_000_000)])]);
     await render({ currentTimeMs: 18_000_000 });
-    await clickText('Fit project (0)');
-    await clickText('Zoom to samples');
+    await fitProject();
+    await zoomToSamples();
     await render({ isRecording: true, selectedTrackId: 'track',
       recordingSegments: [{ startTimeMs: 1000 }] });
     const view = state.recordings.at(-1);
     const recording = host.querySelector('[data-recording-waveform]');
     const shell = recording.closest('[data-recording-overlay]');
+    const ppm = view.pixelsPerMs;
     expect(view).toMatchObject({ startTimeMs: 1000, endTimeMs: 18_000_000,
-      clipLeftPx: 48000, clipWidthPx: (18_000_000 - 1000) * 48, pixelsPerMs: 48, viewportWidthPx: 800 });
+      clipLeftPx: 1000 * ppm, clipWidthPx: (18_000_000 - 1000) * ppm, pixelsPerMs: ppm, viewportWidthPx: 800 });
     expect(view.viewportLeftPx).toBeGreaterThan(800_000_000);
     const origin = view.viewportLeftPx - tracksElement().scrollLeft;
     const skipped = origin - view.clipLeftPx;
@@ -245,12 +257,20 @@ describe('Timeline integration', () => {
     const rows = current.tracks.map((track, i) => ({ kind: 'track', trackId: track.id, track, height: i === 0 ? 300 : 80 }));
     await render({ sharedVerticalScroll: true, rows, children: ({ header, tracks, zoomOverlay }) => <>{header}{zoomOverlay}<div data-shared-scroller style={{ overflowY: 'auto', height: 240 }}>{tracks}</div></> });
     const shared = host.querySelector('[data-shared-scroller]');
+    const mounted = () => [...host.querySelectorAll('[data-clip-id]')].map((element) => element.dataset.clipId);
     expect(host.querySelector('[data-waveform="clip0"]')).not.toBeNull();
     expect(host.querySelector('[data-waveform="clip8"]')).toBeNull();
+    // Shells stay mounted one viewport (240 px) beyond the visible rows.
+    expect(mounted()).toEqual(['clip0', 'clip1', 'clip2', 'clip3']);
+    await act(async () => host.querySelector('[data-clip-id="clip1"]').focus());
     shared.scrollTop = 800; await event(shared, 'scroll'); await flush();
     expect(host.querySelector('[data-waveform="clip0"]')).toBeNull();
     expect(host.querySelector('[data-waveform="clip8"]')).not.toBeNull();
-    expect(host.querySelectorAll('[data-clip-id]').length).toBe(12);
+    // The focused clip keeps its shell (and keyboard focus) while scrolled away.
+    expect(mounted()).toEqual(['clip1', 'clip4', 'clip5', 'clip6', 'clip7', 'clip8', 'clip9', 'clip10', 'clip11']);
+    expect(document.activeElement).toBe(host.querySelector('[data-clip-id="clip1"]'));
+    await act(async () => document.activeElement.blur());
+    expect(mounted()).not.toContain('clip1');
   });
   it('updates group activity from local drag previews without invalidating on playhead-only changes', async () => {
     current.trackTree = [{ id: 'g', kind: 'group', name: 'Group', parentId: null, order: 0 },
@@ -276,6 +296,66 @@ describe('Timeline integration', () => {
     expect(host.querySelectorAll('[data-group-waveform]').length).toBe(1);
     expect(host.querySelectorAll('[data-waveform]').length).toBe(0);
     expect(state.groups.at(-1).clips.map((clip) => clip.blobId)).toEqual(['a']);
+  });
+});
+
+describe('Timeline playback follow', () => {
+  const scroll = () => tracksElement().scrollLeft;
+  async function zoomedLongProject() {
+    current = project([makeTrack('track', [makeClip('clip', 0, 100_000)])]);
+    await render({ currentTimeMs: 0 });
+    for (let i = 0; i < 3; i += 1) await event(window, 'keydown', { key: '+' });
+    expect(scroll()).toBe(0);
+    return state.waveforms.get('clip').pixelsPerMs;
+  }
+
+  it('turns the page at the right edge while playing or recording, and never moves an idle view', async () => {
+    const ppm = await zoomedLongProject();
+    await render({ currentTimeMs: 790 / ppm });
+    expect(scroll()).toBe(0);
+    await render({ isPlaying: true, currentTimeMs: 400 / ppm });
+    expect(scroll()).toBe(0);
+    await render({ currentTimeMs: 790 / ppm });
+    expect(scroll()).toBeCloseTo(710);
+    await render({ currentTimeMs: 0 });
+    expect(scroll()).toBe(0);
+    await render({ isPlaying: false, isRecording: true, currentTimeMs: 1590 / ppm });
+    expect(scroll()).toBeCloseTo(1510);
+  });
+
+  it('pauses after manual scrolling or zooming until the playhead is visible again, ignoring scroll echoes', async () => {
+    const ppm = await zoomedLongProject();
+    await render({ isPlaying: true, currentTimeMs: 100 / ppm });
+    await event(tracksElement(), 'wheel', { deltaX: 3000 });
+    expect(scroll()).toBe(3000);
+    await render({ currentTimeMs: 900 / ppm });
+    expect(scroll()).toBe(3000);
+    await render({ currentTimeMs: 3400 / ppm });
+    await render({ currentTimeMs: 3790 / ppm });
+    expect(scroll()).toBeCloseTo(3710);
+    await event(tracksElement(), 'scroll');
+    await render({ currentTimeMs: 4500 / ppm });
+    expect(scroll()).toBeCloseTo(4420);
+    tracksElement().scrollLeft = 8000;
+    await event(tracksElement(), 'scroll');
+    await render({ currentTimeMs: 5000 / ppm });
+    expect(scroll()).toBe(8000);
+    await event(tracksElement(), 'wheel', { ctrlKey: true, clientX: 700, deltaY: 100 });
+    await flush();
+    const zoomedScroll = scroll();
+    await render({ currentTimeMs: 5100 / ppm });
+    expect(scroll()).toBe(zoomedScroll);
+  });
+
+  it('restarts following at each playback start', async () => {
+    const ppm = await zoomedLongProject();
+    await event(tracksElement(), 'wheel', { deltaX: 3000 });
+    await render({ isPlaying: true, currentTimeMs: 100 / ppm });
+    expect(scroll()).toBeCloseTo(20);
+    await render({ isPlaying: false });
+    const againMs = (scroll() + 900) / ppm;
+    await render({ isPlaying: true, currentTimeMs: againMs });
+    expect(scroll()).toBeCloseTo(againMs * ppm - 80);
   });
 });
 
@@ -360,8 +440,8 @@ describe('Timeline gesture completion', () => {
   it('keeps both loop drag preview markers local after rebasing', async () => {
     current = project([makeTrack('track', [makeClip('clip', 0, 36_000_000)])]);
     await render({ currentTimeMs: 18_000_000 });
-    await clickText('Fit project (0)');
-    await clickText('Zoom to samples');
+    await fitProject();
+    await zoomToSamples();
     const ruler = host.querySelector('.ruler-scrollbar-hidden > div');
     await event(ruler, 'mousedown', { button: 0, clientX: 100 });
     await event(window, 'mousemove', { clientX: 120 });
@@ -375,6 +455,22 @@ describe('Timeline gesture completion', () => {
     expect(Number.parseFloat(markers[1].style.left)).toBeLessThan(Number.parseFloat(ruler.style.width));
     await event(window, 'keydown', { key: 'Escape' });
   });
+  it('keeps the left clip id when splitting at the playhead', async () => {
+    current = project([makeTrack('track', [makeClip('clip', 0, 10000)])]);
+    await render({ currentTimeMs: 3000 });
+    await event(clipElement(), 'click', { clientX: 40 });
+    await event(window, 'keydown', { code: 'KeyC' });
+    const clips = current.tracks[0].clips;
+    expect(clips).toHaveLength(2);
+    const left = clips.find((clip) => clip.id === 'clip');
+    const right = clips.find((clip) => clip.id !== 'clip');
+    expect(left.cropEndMs).toBeCloseTo(3000);
+    expect(left.timelineStartMs).toBe(0);
+    expect(right.timelineStartMs).toBeCloseTo(3000);
+    expect(right.cropStartMs).toBeCloseTo(3000);
+    expect(right.cropEndMs).toBe(10000);
+  });
+
   it('allows gain, mute and move edits of an existing short split fragment', async () => {
     current = project([makeTrack('track', [makeClip('clip', 0, 50)])]);
     await render({ advancedMixLocked: true });

@@ -33,7 +33,8 @@ import CreditsEditorDialog from './CreditsEditorDialog';
 import LyricsEditorDialog from './LyricsEditorDialog';
 import { dbToVolume, volumeToDb } from '../utils/audio';
 import { applyChoirAutoPanToProject } from '../utils/choirAutoPan';
-import { PlaybackDevicesSettingsPanel, ProjectSettingsPanel } from './SettingsPanels';
+import { DawSettingsPanel, PlaybackDevicesSettingsPanel, ProjectSettingsPanel } from './SettingsPanels';
+import { useDawViewSettings } from '../hooks/useDawViewSettings';
 import { measureRecordingRoundTrip } from '../lib/recordingLatencyCalibration';
 import { RECORDING_OFFSET_MODES } from '../utils/playbackOutput';
 import { describeRecordingDevices, resolveRecordingOffset } from '../utils/recordingDevices';
@@ -318,10 +319,13 @@ function Editor({
   } = useStore();
 
   const [showFileImport, setShowFileImport] = useState(false);
+  // Bumped when stop or playback end sends the playhead back to the start; the timeline follows.
+  const [returnToStartToken, setReturnToStartToken] = useState(0);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showLyricsDialog, setShowLyricsDialog] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState('playback');
+  const [dawView, setDawView] = useDawViewSettings();
   const [masterVolume, setMasterVolume] = useState(() => toFiniteNumber(project?.masterVolume, 100));
   const [masterEditTooltip, setMasterEditTooltip] = useState(null);
   const [masterDragTooltip, setMasterDragTooltip] = useState(null);
@@ -1469,6 +1473,7 @@ function Editor({
             stop();
             audioManager.stop();
             setCurrentTime(0);
+            setReturnToStartToken((token) => token + 1);
             previousTimeRef.current = 0;
             return;
           }
@@ -2213,6 +2218,7 @@ function Editor({
     const loop = projectRef.current?.loop || {};
     const startTime = loop.enabled ? loop.startMs : 0;
     setCurrentTime(startTime);
+    setReturnToStartToken((token) => token + 1);
   };
 
   /**
@@ -4669,6 +4675,10 @@ function Editor({
           showLyricsLane={lyricsTrackShown}
           canEditLyrics={canEditSyncedLyrics}
           lyricsSyncActive={lyricsSyncActive}
+          returnToStartToken={returnToStartToken}
+          displayMode={dawView.displayMode}
+          showRms={dawView.showRms}
+          showClipping={dawView.showClipping}
         >
           {({ header, tracks, zoomOverlay, lyricsLane }) => (
             <div className={`relative grid grid-cols-[384px_1fr] ${lyricsTrackShown ? 'grid-rows-[24px_44px_minmax(0,1fr)]' : 'grid-rows-[24px_minmax(0,1fr)]'} h-full min-h-0 min-w-0`}>
@@ -4919,6 +4929,17 @@ function Editor({
                 >
                   Playback and Devices
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setSettingsTab('daw')}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    settingsTab === 'daw'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  DAW
+                </button>
                 {caps.canEditProjectSettings && !isLocalRecordingSession ? (
                   <button
                     type="button"
@@ -4934,7 +4955,20 @@ function Editor({
                 ) : null}
               </div>
 
-              {settingsTab === 'playback' || !caps.canEditProjectSettings || isLocalRecordingSession ? (
+              {settingsTab === 'daw' ? (
+                <DawSettingsPanel settings={dawView} setSettings={setDawView} />
+              ) : settingsTab === 'project' && caps.canEditProjectSettings && !isLocalRecordingSession ? (
+                <ProjectSettingsPanel
+                  project={project}
+                  onSetPublished={handleSetProjectPublished}
+                  onSetAutoPanStrategy={handleSetAutoPanStrategy}
+                  onToggleAutoPanInverted={(enabled) => applyProjectAutoPanSettings(
+                    { inverted: enabled },
+                    'Update inverted auto-pan'
+                  )}
+                  onSetAutoPanManualChoirParts={handleSetAutoPanManualChoirParts}
+                />
+              ) : (
                 <PlaybackDevicesSettingsPanel
                   audioSettings={audioSettings}
                   setAudioSettings={setAudioSettings}
@@ -4947,17 +4981,6 @@ function Editor({
                   measuringRecordingDelay={measuringRecordingDelay}
                   recordingDelayError={recordingDelayError}
                   onMeasureRecordingDelay={startRecordingDelayMeasurement}
-                />
-              ) : (
-                <ProjectSettingsPanel
-                  project={project}
-                  onSetPublished={handleSetProjectPublished}
-                  onSetAutoPanStrategy={handleSetAutoPanStrategy}
-                  onToggleAutoPanInverted={(enabled) => applyProjectAutoPanSettings(
-                    { inverted: enabled },
-                    'Update inverted auto-pan'
-                  )}
-                  onSetAutoPanManualChoirParts={handleSetAutoPanManualChoirParts}
                 />
               )}
             </div>

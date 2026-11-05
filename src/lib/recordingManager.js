@@ -1,5 +1,7 @@
 import { audioManager } from './audioManager';
 import { createRecordingWaveform } from './recordingWaveform';
+import { createRecordingSummaryFeed } from './recordingSummaryFeed';
+import { waveformService } from './waveformService';
 
 /**
  * Recording Manager
@@ -207,6 +209,17 @@ class RecordingManager {
     this.waveformSegment = null;
     this.waveformSnapshot = null;
     this.waveformListeners = new Set();
+    this.waveformService = waveformService;
+  }
+
+  createSummaryFeed(sourceStartFrame) {
+    const feed = createRecordingSummaryFeed({
+      service: this.waveformService, sampleRate: this.getSampleRate(), sourceStartFrame, maxChannels: MAX_CAPTURE_CHANNELS,
+    });
+    for (const chunk of this.chunks) {
+      if (chunk.endFrame > sourceStartFrame) feed.append(chunk);
+    }
+    return feed;
   }
 
   subscribeWaveform(listener) {
@@ -531,6 +544,8 @@ class RecordingManager {
       this.chunks.push(chunk);
       // Only enqueue borrowed PCM here. Reduction runs in bounded background tasks.
       this.waveformCapture?.append(chunk);
+      this.openSegment?.summaryFeed?.append(chunk);
+      for (const segment of this.pendingSegments) segment.summaryFeed?.append(chunk);
       const preview = this.waveformSegment;
       if (preview && endFrame > preview.startFrame + preview.roundTripFrames
         && startFrame < (preview.endFrame ?? Infinity) + preview.roundTripFrames) {
@@ -770,6 +785,7 @@ class RecordingManager {
       timelineStartMs: Number(timelineStartMs) || 0,
       roundTripFrames: this.framesForMs(roundTripMs),
       roundTripMs: Math.max(0, Number(roundTripMs) || 0),
+      summaryFeed: this.createSummaryFeed(sourceStart),
     };
     this.isRecording = true;
     this.recordingTrackId = trackId;
@@ -790,6 +806,7 @@ class RecordingManager {
     }
     const endFrame = Math.max(segment.startFrame, this.frameAtContextTime(endContextTime));
     const closed = { ...segment, endFrame, includeTailRoundTrip: true };
+    closed.summaryFeed?.close(endFrame + segment.roundTripFrames);
     this.pendingSegments.push(closed);
     this.openSegment = {
       signal: segment.signal,
@@ -799,6 +816,7 @@ class RecordingManager {
       timelineStartMs: Number(nextTimelineStartMs) || 0,
       roundTripFrames: segment.roundTripFrames,
       roundTripMs: segment.roundTripMs,
+      summaryFeed: this.createSummaryFeed(endFrame + segment.roundTripFrames),
     };
     this.setWaveformSegment(this.openSegment);
     return this.finalizeSegment(closed);
@@ -820,6 +838,7 @@ class RecordingManager {
       : this.audioContext?.currentTime || 0;
     const endFrame = Math.max(segment.startFrame, this.frameAtContextTime(stopContextTime));
     const closed = { ...segment, endFrame, includeTailRoundTrip: true };
+    closed.summaryFeed?.close(endFrame + segment.roundTripFrames);
     this.openSegment = null;
     this.isRecording = false;
     this.recordingTrackId = null;
@@ -847,6 +866,12 @@ class RecordingManager {
     }
     const availableEnd = Math.min(sourceEnd, this.lastFrame);
     const audioBuffer = this.extractFrames(sourceStart, availableEnd);
+    // Publishes this buffer's summary before it reaches the media cache, so it is never rescanned.
+    if (audioBuffer) await closed.summaryFeed?.finish(audioBuffer);
+    else closed.summaryFeed?.cancel();
+    if (closed.signal?.aborted) {
+      throw Object.assign(new Error('Recording cancelled'), { name: 'AbortError' });
+    }
     this.pendingSegments = this.pendingSegments.filter((segment) => segment !== closed);
     if (!this.openSegment && !this.pendingSegments.length) this.clearWaveform();
     this.trimChunks();
@@ -863,7 +888,11 @@ class RecordingManager {
    */
   cancelRecording() {
     this.recordingController?.abort();
-    for (const segment of this.pendingSegments) segment.controller?.abort();
+    this.openSegment?.summaryFeed?.cancel();
+    for (const segment of this.pendingSegments) {
+      segment.controller?.abort();
+      segment.summaryFeed?.cancel();
+    }
     this.recordingGeneration += 1;
     this.clearWaveform();
     if (!this.isRecording && !this.openSegment && !this.pendingSegments.length) return;

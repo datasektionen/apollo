@@ -88,7 +88,7 @@ beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ addEventListener: (_type, listener) => mediaListeners.add(listener), removeEventListener: (_type, listener) => mediaListeners.delete(listener) }));
   vi.stubGlobal('devicePixelRatio', 2);
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() => rect);
-  context = Object.fromEntries(['save', 'restore', 'beginPath', 'rect', 'clip', 'fillRect', 'moveTo', 'lineTo', 'stroke', 'setTransform', 'clearRect'].map((name) => [name, vi.fn()]));
+  context = Object.fromEntries(['save', 'restore', 'beginPath', 'rect', 'clip', 'fillRect', 'moveTo', 'lineTo', 'stroke', 'setTransform', 'clearRect', 'drawImage'].map((name) => [name, vi.fn()]));
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
   service.sources.clear(); service.listeners.clear(); mediaCache.clear(); mediaCache.listeners.clear();
   service.ensureSource.mockReset(); service.releaseSource.mockClear();
@@ -153,7 +153,7 @@ describe('Waveform', () => {
     expect(draw.mock.calls[1][0]).toBe(nextBudget);
   });
 
-  it('allocates only the visible window at DPR, calls ready, and scales without extraction', async () => {
+  it('allocates the viewport plus one viewport of margin at DPR, calls ready, and scales without extraction', async () => {
     const audioBuffer = buffer();
     const onReady = vi.fn();
     const props = { audioBuffer, blobId: 'blob', clipId: 'clip', cropEndMs: 4096, ...geometry, onReady };
@@ -161,9 +161,10 @@ describe('Waveform', () => {
     await flush();
     const canvas = view.container.querySelector('canvas');
     expect(legacy.create).not.toHaveBeenCalled();
-    expect(canvas.style.left).toBe('68px');
-    expect(canvas.style.width).toBe('264px');
-    expect(canvas.width).toBe(528);
+    // The left margin is clamped at the clip start.
+    expect(canvas.style.left).toBe('0px');
+    expect(canvas.style.width).toBe('600px');
+    expect(canvas.width).toBe(1200);
     expect(canvas.height).toBe(160);
     expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
     expect(onReady).toHaveBeenCalledOnce();
@@ -176,6 +177,81 @@ describe('Waveform', () => {
     expect(onReady).toHaveBeenCalledOnce();
     expect(context.fillRect).toHaveBeenCalled();
     expect(service.releaseSource).not.toHaveBeenCalled();
+  });
+
+  it('keeps the painted canvas when a clip is shortened from its end', async () => {
+    const audioBuffer = buffer();
+    const props = { audioBuffer, blobId: 'blob', clipId: 'clip', cropStartMs: 0, cropEndMs: 10000,
+      pixelsPerMs: 0.1, clipLeftPx: 0, clipWidthPx: 1000, viewportLeftPx: 0, viewportWidthPx: 200 };
+    const view = await mount(<Waveform {...props} />);
+    await flush();
+    const canvas = view.container.querySelector('canvas');
+    const jobs = vi.spyOn(waveformRenderer, 'createWaveformDrawJob');
+    await view.render(<Waveform {...props} cropEndMs={4000} clipWidthPx={400} />);
+    expect(view.container.querySelector('canvas')).toBe(canvas);
+    expect(canvas.width).toBeGreaterThan(0);
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+    await flush();
+    expect(jobs).not.toHaveBeenCalled();
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+  });
+
+  it('copies the original clip pixels onto the right half of a cut', async () => {
+    const audioBuffer = buffer();
+    const shared = { audioBuffer, blobId: 'blob', pixelsPerMs: 0.1, viewportLeftPx: 0, viewportWidthPx: 400 };
+    const view = await mount(<Waveform {...shared} clipId="left" cropStartMs={0} cropEndMs={10000}
+      clipLeftPx={0} clipWidthPx={1000} />);
+    await flush();
+    const jobs = vi.spyOn(waveformRenderer, 'createWaveformDrawJob');
+    // 2000.4ms is not a whole device column at this zoom. The copy still has to land before paint.
+    await view.render(<>
+      <Waveform {...shared} clipId="left" cropStartMs={0} cropEndMs={2000.4} clipLeftPx={0} clipWidthPx={200.04} />
+      <Waveform {...shared} clipId="right" cropStartMs={2000.4} cropEndMs={10000} clipLeftPx={200.04} clipWidthPx={799.96} />
+    </>);
+    const halves = view.container.querySelectorAll('[data-waveform-status]');
+    expect(halves).toHaveLength(2);
+    expect(halves[0].getAttribute('data-waveform-status')).toBe('ready');
+    expect(halves[0].textContent).not.toContain('Loading');
+    expect(halves[1].getAttribute('data-waveform-status')).toBe('ready');
+    expect(halves[1].textContent).not.toContain('Loading');
+    await flush();
+    expect(jobs).not.toHaveBeenCalled();
+  });
+
+  it('keeps pixels while scrolling inside the margin and shifts them to paint only the exposed strip', async () => {
+    const audioBuffer = buffer();
+    const props = { audioBuffer, blobId: 'blob', clipId: 'clip', cropEndMs: 1e7, ...geometry };
+    const view = await mount(<Waveform {...props} />);
+    await flush();
+    const canvas = view.container.querySelector('canvas');
+    const status = () => view.container.firstChild.getAttribute('data-waveform-status');
+    const jobs = vi.spyOn(waveformRenderer, 'createWaveformDrawJob');
+    context.clearRect.mockClear();
+    await view.render(<Waveform {...props} viewportLeftPx={250} />);
+    await flush();
+    expect(canvas.width).toBe(1200);
+    expect(canvas.style.left).toBe('0px');
+    expect(status()).toBe('ready');
+    expect(jobs).not.toHaveBeenCalled();
+    expect(context.clearRect).not.toHaveBeenCalled();
+
+    // Within half a viewport of the right edge: shift by whole device pixels, before any frame runs.
+    await view.render(<Waveform {...props} viewportLeftPx={400} />);
+    expect(canvas.style.left).toBe('200px');
+    const chunks = [[0, 256], [256, 256], [512, 256], [768, 32]];
+    expect(context.drawImage.mock.calls).toEqual(chunks.flatMap(([offset, width]) => [
+      [canvas, 400 + offset, 0, width, 160, 0, 0, width, 160],
+      [expect.any(HTMLCanvasElement), 0, 0, width, 160, offset, 0, width, 160],
+    ]));
+    expect(status()).toBe('ready');
+    await flush();
+    expect(canvas.width).toBe(1200);
+    const painted = jobs.mock.calls.map(([, options]) => [options.fromColumn, options.toColumn]);
+    // The exposed 400 columns plus one kept seam column, nothing else.
+    expect(Math.min(...painted.map(([from]) => from))).toBe(799);
+    expect(Math.max(...painted.map(([, to]) => to))).toBe(1200);
+    expect(painted.reduce((sum, [from, to]) => sum + to - from, 0)).toBe(401);
+    expect(status()).toBe('ready');
   });
 
   it('shows accessible loading/error placeholders and updates from real subscriptions', async () => {
@@ -203,7 +279,7 @@ describe('Waveform', () => {
     await flush();
     expect(first.getChannelData).not.toHaveBeenCalled();
     expect(onReady).toHaveBeenCalledOnce();
-    expect(view.container.querySelector('canvas').style.left).toBe('168px');
+    expect(view.container.querySelector('canvas').style.left).toBe('0px');
     await view.render(null);
     expect(service.listeners.size).toBe(0);
     expect(service.releaseSource).not.toHaveBeenCalled();
@@ -251,8 +327,8 @@ describe('Waveform', () => {
     expect(canvas.width).toBeGreaterThan(0);
     expect(onReady).not.toHaveBeenCalled();
     await view.render(<Waveform {...props} cropStartMs={100} />);
-    expect(canvas.width).toBe(0);
-    expect(canvas.height).toBe(0);
+    expect(onReady).not.toHaveBeenCalled();
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('loading');
     await flush();
     expect(onReady).toHaveBeenCalledOnce();
     expect(service.pinSource).toHaveBeenCalledOnce();
@@ -291,10 +367,11 @@ describe('Waveform', () => {
     });
     const view = await mount(render(0));
     await flush();
-    expect(waveformRasterBudget.getStats().bytes).toBeLessThanOrEqual(64 * 1024 * 1024);
+    expect(waveformRasterBudget.getStats().bytes).toBeLessThanOrEqual(waveformRenderer.WAVEFORM_RASTER_BYTES);
     expect(view.container.querySelectorAll('[data-waveform-status="limited"]').length).toBeGreaterThan(0);
     const canvases = [...view.container.querySelectorAll('canvas')];
-    expect(canvases.some((canvas) => canvas.width > 0 && canvas.width < 4064)).toBe(true);
+    // Three 2000 px viewports at DPR 2 would be 12000 columns; the budget lowers the ratio instead.
+    expect(canvases.some((canvas) => canvas.width > 0 && canvas.width < 12000)).toBe(true);
     await view.render(render(16));
     await flush();
     expect(view.container.querySelectorAll('[data-waveform-status="limited"]')).toHaveLength(0);
@@ -431,6 +508,70 @@ describe('GroupWaveform', () => {
     expect(view.container.querySelectorAll('canvas')).toHaveLength(1);
   });
 
+  it('keeps its painted surface when the parent rebuilds an identical clip list', async () => {
+    mediaCache.set('blob', buffer());
+    const clips = [0, 1].map((i) => ({ key: i, blobId: 'blob', startMs: i * 500, durationMs: 1000, cropStartMs: 0, cropEndMs: 1000 }));
+    const props = { pixelsPerMs: 0.1, viewportWidthPx: 200, returnViewportLeftPx: 0 };
+    const view = await mount(<GroupWaveform clips={clips} {...props} />);
+    await flush();
+    const canvas = view.container.querySelector('canvas');
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+    const jobs = vi.spyOn(waveformRenderer, 'createWaveformDrawJob');
+    context.clearRect.mockClear();
+    // A loop toggle rebuilds the list and moves the return view.
+    await view.render(<GroupWaveform clips={clips.map((clip) => ({ ...clip }))} {...props} returnViewportLeftPx={30} />);
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+    expect(view.container.textContent).not.toContain('Loading group activity');
+    await flush();
+    expect(view.container.querySelector('canvas')).toBe(canvas);
+    expect(canvas.width).toBeGreaterThan(0);
+    expect(jobs).not.toHaveBeenCalled();
+    await view.render(<GroupWaveform clips={[{ ...clips[0], startMs: 50 }, clips[1]]} {...props} returnViewportLeftPx={30} />);
+    await flush();
+    expect(jobs).toHaveBeenCalled();
+  });
+
+  it('patches a split in place instead of reloading the group lane', async () => {
+    mediaCache.set('blob', buffer());
+    const other = { key: 'b', blobId: 'blob', startMs: 5000, durationMs: 1000, cropStartMs: 0, cropEndMs: 1000 };
+    const whole = { key: 'a', blobId: 'blob', startMs: 0, durationMs: 4000, cropStartMs: 0, cropEndMs: 4000 };
+    const props = { pixelsPerMs: 0.1, viewportLeftPx: 0, viewportWidthPx: 800 };
+    const view = await mount(<GroupWaveform clips={[whole, other]} {...props} />);
+    await flush();
+    const canvas = view.container.querySelector('canvas');
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+    const jobs = vi.spyOn(waveformRenderer, 'createWaveformDrawJob');
+    const left = { ...whole, durationMs: 2000.0004, cropEndMs: 2000.0004 };
+    const right = { key: 'a-right', blobId: 'blob', startMs: 2000.0004, durationMs: 1999.9996, cropStartMs: 2000.0004, cropEndMs: 4000 };
+    await view.render(<GroupWaveform clips={[left, right, other]} {...props} />);
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+    expect(view.container.textContent).not.toContain('Loading group activity');
+    await flush();
+    expect(view.container.querySelector('canvas')).toBe(canvas);
+    expect(canvas.width).toBeGreaterThan(0);
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+    expect(jobs).not.toHaveBeenCalled();
+    jobs.mockClear();
+    await view.render(<GroupWaveform clips={[whole, other]} {...props} />);
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+    expect(view.container.textContent).not.toContain('Loading group activity');
+    await flush();
+    expect(view.container.querySelector('canvas')).toBe(canvas);
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+    expect(jobs).not.toHaveBeenCalled();
+    jobs.mockClear();
+    await view.render(<GroupWaveform clips={[left, right, other]} {...props} />);
+    jobs.mockClear();
+    // Rounding noise on an untouched clip, and a fit-zoom ulp, must not repaint any lane.
+    const drifted = { ...other, startMs: other.startMs + 1e-6, durationMs: other.durationMs - 1e-6 };
+    await view.render(<GroupWaveform clips={[left, right, drifted]} {...props} pixelsPerMs={0.1 + 1e-9} />);
+    await flush();
+    expect(view.container.querySelector('canvas')).toBe(canvas);
+    expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
+    expect(view.container.textContent).not.toContain('Loading group activity');
+    expect(jobs).not.toHaveBeenCalled();
+  });
+
   it('handles media-cache arrivals/replacements without parent rerenders or revision overrides', async () => {
     const clips = [{ key: 'a', blobId: 'blob', startMs: 0, durationMs: 1000, cropStartMs: 0, cropEndMs: 1000 }];
     const view = await mount(<GroupWaveform clips={clips} pixelsPerMs={0.1} viewportWidthPx={200} />);
@@ -455,11 +596,12 @@ describe('GroupWaveform', () => {
     expect(service.ensureSource.mock.calls.every((call) => !Object.hasOwn(call[2], 'revision'))).toBe(true);
   });
 
-  it('coalesces ready notifications without restarting active group continuations', async () => {
+  it('repaints a group once for a burst of identical ready notifications', async () => {
     let clock = 0;
     vi.spyOn(performance, 'now').mockImplementation(() => { clock += 0.125; return clock; });
     context.clearRect.mockImplementation(() => { clock += 4; });
     context.restore.mockImplementation(() => { clock += 4; });
+    const jobs = vi.spyOn(waveformRenderer, 'createWaveformDrawJob');
     const first = buffer();
     const second = buffer(false);
     mediaCache.set('a', first); mediaCache.set('b', second);
@@ -468,6 +610,8 @@ describe('GroupWaveform', () => {
     const nextFrame = async () => {
       const [id, callback] = frames.entries().next().value;
       frames.delete(id);
+      // Recent input keeps the shared scheduler on its interactive (not settled-view) budget.
+      window.dispatchEvent(new Event('pointermove'));
       await act(async () => callback());
     };
     await nextFrame(); // Initialize the first pass; only one scheduler slice fits each frame.
@@ -477,10 +621,10 @@ describe('GroupWaveform', () => {
       await publish(second, { ...ready }, 'b');
       await nextFrame();
     }
-    expect(context.clearRect).toHaveBeenCalledOnce();
     await flush();
     expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
-    expect(context.clearRect).toHaveBeenCalledTimes(2);
+    // The lane is 820 device columns: two strips, each drawing the new summary exactly once.
+    expect(jobs.mock.calls.filter(([, options]) => options.audioBuffer === second)).toHaveLength(2);
   });
 
   it('handles a cold summary event without stale draw publication or polling', async () => {

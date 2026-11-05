@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  anchoredScroll, boundedRange, clampDuration, durationFromSlider, intersectsViewport, normalizeWheel,
+  anchoredScroll, boundedRange, clampDuration, durationFromSlider, followScroll, intersectsViewport, normalizeWheel,
   rowAtY, rowOffsets, rulerInterval, scrollSegment, visibleRulerTicks, zoomAnchor,
 } from '../timelineViewport';
 
@@ -20,6 +20,15 @@ describe('timeline viewport geometry', () => {
     expect(clampDuration(0.1, 1, 10)).toBe(1);
     expect(clampDuration(100, 1, 10)).toBe(10);
     expect(clampDuration(NaN, 1, 10)).toBe(10);
+  });
+  it('turns the follow page only at the right edge or left of the view, clamped to the timeline', () => {
+    expect(followScroll(1500, 1000, 800, 10000)).toBeNull();
+    expect(followScroll(1776, 1000, 800, 10000)).toBeNull();
+    expect(followScroll(1777, 1000, 800, 10000)).toBe(1697);
+    expect(followScroll(900, 1000, 800, 10000)).toBe(820);
+    expect(followScroll(40, 1000, 800, 10000)).toBe(0);
+    expect(followScroll(9990, 9000, 800, 9800)).toBeNull();
+    expect(followScroll(9990, 8000, 800, 9800)).toBe(9000);
   });
   it('normalizes pixel, line and page wheel events', () => {
     expect(normalizeWheel({ deltaX: 1, deltaY: -2, deltaMode: 0 }, 900)).toEqual({ x: 1, y: -2 });

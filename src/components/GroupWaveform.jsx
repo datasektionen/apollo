@@ -1,24 +1,91 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { audioManager } from '../lib/audioManager';
 import { waveformScheduler } from '../lib/waveformScheduler';
-import { createWaveformDrawJob, getWaveformWindow, prepareWaveformCanvas, waveformRasterBudget, WAVEFORM_OVERSCAN_PX } from '../lib/waveformRenderer';
+import { waveformService } from '../lib/waveformService';
+import { createWaveformDrawJob, getWaveformWindow, waveformRasterBudget, WAVEFORM_OVERSCAN_PX } from '../lib/waveformRenderer';
+import { createWaveformSurface, getRetainedWindow } from '../lib/waveformSurface';
 import { getWaveformRenderer } from '../lib/waveformFeature';
 import LegacyWaveform from './LegacyWaveform';
-import { useWaveformSources, useWaveformViewport } from './Waveform';
+import { useSurfacePlacement, useWaveformSources, useWaveformViewport } from './Waveform';
 
 const EMPTY_CLIPS = [];
 const ACTIVITY_COLOR = 'rgba(123, 173, 255, 0.55)';
 const MISSING_COLOR = 'rgba(248, 113, 113, 0.55)';
 const flaggedMissing = (ids, id) => Boolean(ids?.has?.(id) || (Array.isArray(ids) && ids.includes(id)));
+const CLIP_FIELDS = ['key', 'blobId', 'startMs', 'durationMs', 'cropStartMs', 'cropEndMs', 'sourceDurationMs'];
+// Segment clipping divides by the zoom, so equal clips are not always bit-identical.
+const closeMs = (a, b) => Math.abs((a || 0) - (b || 0)) < 0.05 || (a == null && b == null);
+const sameClip = (a, b) => CLIP_FIELDS.every((field) => (
+  field === 'key' || field === 'blobId' ? a[field] === b[field] : closeMs(a[field], b[field])
+));
+const sameClips = (a, b) => a.length === b.length && a.every((clip, index) => sameClip(clip, b[index]));
+
+/** CSS px that a clip-list edit must repaint. A pure split or its undo keeps the lane. */
+function changedClipRanges(previous, next, pixelsPerMs) {
+  if (!(pixelsPerMs > 0)) return [];
+  const previousByKey = new Map(previous.map((clip) => [clip.key, clip]));
+  const nextByKey = new Map(next.map((clip) => [clip.key, clip]));
+  const ranges = [];
+  const absorbed = new Set();
+  const add = (clip) => ranges.push([clip.startMs * pixelsPerMs, (clip.startMs + clip.durationMs) * pixelsPerMs]);
+  const abuts = (left, right, end) => left.blobId === right.blobId
+    && closeMs(right.startMs, left.startMs + left.durationMs)
+    && closeMs(right.cropStartMs, left.cropEndMs)
+    && closeMs(right.startMs + right.durationMs, end);
+  for (const clip of previous) {
+    if (absorbed.has(clip.key)) continue;
+    const other = nextByKey.get(clip.key);
+    if (other && sameClip(clip, other)) continue;
+    // Cut: this clip got shorter and a new half starts where it now ends.
+    const splitRight = other && other.blobId === clip.blobId && closeMs(other.startMs, clip.startMs)
+      && closeMs(other.cropStartMs, clip.cropStartMs) && other.durationMs < clip.durationMs - 0.05
+      ? next.find((candidate) => !previousByKey.has(candidate.key) && abuts(other, candidate, clip.startMs + clip.durationMs))
+      : null;
+    if (splitRight) {
+      absorbed.add(splitRight.key);
+      continue;
+    }
+    // Undo: this clip grew back over a removed half of the same audio.
+    const joinedRight = other && other.blobId === clip.blobId && closeMs(other.startMs, clip.startMs)
+      && closeMs(other.cropStartMs, clip.cropStartMs) && other.durationMs > clip.durationMs + 0.05
+      ? previous.find((candidate) => candidate.key !== clip.key && !nextByKey.has(candidate.key)
+        && abuts(clip, candidate, other.startMs + other.durationMs))
+      : null;
+    if (joinedRight) {
+      absorbed.add(joinedRight.key);
+      continue;
+    }
+    // The removed half of an undo, seen before the clip that grows over it.
+    if (!other && next.some((candidate) => {
+      const host = previousByKey.get(candidate.key);
+      return host && host.key !== clip.key && abuts(host, clip, candidate.startMs + candidate.durationMs)
+        && closeMs(host.startMs, candidate.startMs) && closeMs(host.cropStartMs, candidate.cropStartMs)
+        && candidate.durationMs > host.durationMs + 0.05;
+    })) {
+      absorbed.add(clip.key);
+      continue;
+    }
+    add(clip);
+    if (other) add(other);
+  }
+  for (const clip of next) if (!previousByKey.has(clip.key) && !absorbed.has(clip.key)) add(clip);
+  return ranges;
+}
 
 /** Parent supplies mute-filtered/edit-preview clips. Layered source activity is NOT mixed output. */
 function ModernGroupWaveform({
-  clips = EMPTY_CLIPS, pixelsPerMs, viewportLeftPx = 0, viewportWidthPx = 0, height = 80,
+  clips: clipsProp = EMPTY_CLIPS, pixelsPerMs, viewportLeftPx = 0, viewportWidthPx = 0, returnViewportLeftPx, height = 80,
   globalPeakAmplitude = 1, displayMode = 'linear', showRms = false, showClipping = false,
   missingMediaBlobIds,
 }) {
+  // Parents rebuild clip lists on unrelated project changes (loop toggles, track tree normalization);
+  // equal content keeps the retained surface instead of repainting the lane.
+  const clipsRef = useRef(clipsProp);
+  if (clipsProp !== clipsRef.current && !sameClips(clipsProp, clipsRef.current)) clipsRef.current = clipsProp;
+  const clips = clipsRef.current;
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
+  const surfaceRef = useRef(null);
   const key = useRef({});
   const buffersRef = useRef([]);
   const buffers = clips.map((clip) => audioManager.mediaCache.get(clip.blobId));
@@ -31,95 +98,190 @@ function ModernGroupWaveform({
     clipLeftPx: 0, clipWidthPx: Math.max(0, viewportLeftPx + viewportWidthPx + WAVEFORM_OVERSCAN_PX),
     viewportLeftPx, viewportWidthPx,
   });
-  const visible = view.widthPx > 0 ? clips.filter((clip) => clip.startMs * pixelsPerMs < view.leftPx + view.widthPx
-    && (clip.startMs + clip.durationMs) * pixelsPerMs > view.leftPx) : EMPTY_CLIPS;
+  const measuredExtentPx = clips.reduce((end, clip) => Math.max(end, (clip.startMs + clip.durationMs) * pixelsPerMs), 0);
+  // A split keeps the same lane length. Sub-pixel jitter must not throw the canvas away.
+  const extentRef = useRef(0);
+  if (!(extentRef.current > 0) || measuredExtentPx > extentRef.current + 0.5) extentRef.current = measuredExtentPx;
+  const extentPx = extentRef.current;
+  // Fit-to-project zoom can change by a rounding ulp when a clip is split. That is not a new picture.
+  const zoomRef = useRef(pixelsPerMs);
+  if (!(zoomRef.current > 0) || Math.abs(pixelsPerMs - zoomRef.current) > 1e-4 * Math.max(pixelsPerMs, zoomRef.current)) {
+    zoomRef.current = pixelsPerMs;
+  }
+  const zoom = zoomRef.current;
+  const viewportRef = useRef(viewportWidthPx);
+  if (Math.abs(viewportWidthPx - viewportRef.current) > 0.5) viewportRef.current = viewportWidthPx;
+  const viewportPx = viewportRef.current;
+  const drawRef = useRef(null);
+  drawRef.current = {
+    pixelsPerMs, height, globalPeakAmplitude, displayMode, showRms, showClipping, missingMediaBlobIds, extentPx,
+  };
+  const localReturn = Number.isFinite(returnViewportLeftPx) ? returnViewportLeftPx : null;
+  // Sources are pinned for every clip on the retained canvas, margins included.
+  const windowClips = () => {
+    const window = surfaceRef.current?.windowPx() ?? (({ leftPx, widthPx }) => ({ leftPx, rightPx: leftPx + widthPx }))(
+      getRetainedWindow({ extentPx, viewportLeftPx: placementRef.current.left, viewportWidthPx }));
+    return clips.filter((clip) => clip.startMs * pixelsPerMs < window.rightPx
+      && (clip.startMs + clip.durationMs) * pixelsPerMs > window.leftPx);
+  };
   const { observerRef, requestRef } = useWaveformSources(
-    () => visible.map((clip) => ({ blobId: clip.blobId, audioBuffer: audioManager.mediaCache.get(clip.blobId) })),
+    () => windowClips().map((clip) => ({ blobId: clip.blobId, audioBuffer: audioManager.mediaCache.get(clip.blobId) })),
     0, audioManager.mediaCache,
   );
+  const repin = useCallback(() => observerRef.current?.invalidate(), [observerRef]);
+  const placementRef = useSurfacePlacement(surfaceRef, requestRef, viewportLeftPx, localReturn, repin);
+  const appliedClipsRef = useRef(clips);
+  const appliedBuffersRef = useRef(new Map());
+  // Clip edits patch the retained lane. They do not rebuild it or show the loading label.
+  useLayoutEffect(() => {
+    const nextBuffers = new Map(clips.map((clip) => [clip.blobId, audioManager.mediaCache.get(clip.blobId)]));
+    const previous = appliedClipsRef.current;
+    const previousBuffers = appliedBuffersRef.current;
+    const surface = surfaceRef.current;
+    if (!surface || (previous === clips && [...nextBuffers].every(([id, buffer]) => previousBuffers.get(id) === buffer))) {
+      appliedClipsRef.current = clips;
+      appliedBuffersRef.current = nextBuffers;
+      return;
+    }
+    const ranges = changedClipRanges(previous, clips, pixelsPerMs);
+    for (const clip of clips) {
+      if (previousBuffers.get(clip.blobId) !== nextBuffers.get(clip.blobId)) {
+        ranges.push([clip.startMs * pixelsPerMs, (clip.startMs + clip.durationMs) * pixelsPerMs]);
+      }
+    }
+    appliedClipsRef.current = clips;
+    appliedBuffersRef.current = nextBuffers;
+    for (const range of ranges) surface.invalidate(...range);
+    if (ranges.length) {
+      observerRef.current?.invalidate();
+      requestRef.current?.();
+    }
+  }, [clips, mediaBuffers, pixelsPerMs]);
   useEffect(() => {
     let cancel;
     let disposed = false;
-    let context;
-    let dpr;
-    let index = 0;
-    let draw;
-    let pending = false;
-    let failed = false;
-    let missing = false;
-    let complete = false;
-    let refreshNeeded = false;
+    let surface = null;
+    let snapshots = new Map();
+    let background = false;
     let rasterBlocked = false;
+    let seenReady = false;
     const canvas = canvasRef.current;
+    const clipList = () => clipsRef.current;
     const observer = observerRef.current;
-    const reset = () => {
-      context = undefined;
-      index = 0;
-      draw = undefined;
-      pending = failed = missing = complete = refreshNeeded = false;
-      waveformRasterBudget.release(canvas);
-      setStatus('loading');
+    const clipRange = (clip) => {
+      const scale = drawRef.current.pixelsPerMs;
+      return [clip.startMs * scale, (clip.startMs + clip.durationMs) * scale];
+    };
+    const sameSnapshot = (a, b) => a?.audioBuffer === b?.audioBuffer && a?.source?.status === b?.source?.status
+      && a?.source?.pyramid === b?.source?.pyramid;
+    // Overlays every clip that crosses the strip; the surface cleared the strip beforehand.
+    const paint = (context, strip) => {
+      const { surfaceLeftPx, fromColumn, toColumn, dpr } = strip;
+      const stripLeft = surfaceLeftPx + fromColumn / dpr;
+      const stripRight = surfaceLeftPx + toColumn / dpr;
+      const list = clipList().filter((clip) => {
+        const [start, end] = clipRange(clip);
+        return start < stripRight && end > stripLeft;
+      });
+      let index = 0;
+      let draw;
+      return (budget) => {
+        if (draw) {
+          if (draw(budget)) return true;
+          draw = undefined;
+          index += 1;
+          return index < list.length;
+        }
+        for (; index < list.length; index += 1) {
+          const clip = list[index];
+          const drawState = drawRef.current;
+          const { audioBuffer, source } = snapshots.get(clip.blobId) || {};
+          const isMissing = flaggedMissing(drawState.missingMediaBlobIds, clip.blobId) || !audioBuffer;
+          const [start, end] = clipRange(clip);
+          const left = Math.max(start, stripLeft) - surfaceLeftPx;
+          const width = Math.max(0, Math.min(end, stripRight) - surfaceLeftPx - left);
+          if (!audioBuffer) {
+            context.fillStyle = MISSING_COLOR;
+            context.fillRect(left, drawState.height / 2 - 2, width, 4);
+            continue;
+          }
+          const detail = audioBuffer.sampleRate / (1000 * drawState.pixelsPerMs * dpr) <= 1;
+          if (!source?.pyramid && !detail) {
+            context.fillStyle = isMissing ? MISSING_COLOR : 'rgba(148, 163, 184, 0.35)';
+            context.fillRect(left, drawState.height / 2, width, 1);
+            continue;
+          }
+          draw = createWaveformDrawJob(context, {
+            audioBuffer, pyramid: source?.pyramid, cropStartMs: clip.cropStartMs,
+            cropEndMs: clip.cropEndMs ?? clip.sourceDurationMs,
+            pixelsPerMs: drawState.pixelsPerMs, clipLeftPx: start, clipWidthPx: end - start, ...strip,
+            height: drawState.height,
+            color: isMissing ? MISSING_COLOR : ACTIVITY_COLOR, displayMode: drawState.displayMode,
+            globalPeakAmplitude: drawState.globalPeakAmplitude, showRms: drawState.showRms,
+            showClipping: drawState.showClipping,
+            requestDetail: (from, to) => waveformService.requestDetail(clip.blobId, audioBuffer, from, to),
+          });
+          return true;
+        }
+        return false;
+      };
+    };
+    const statusOf = () => {
+      let pending = false;
+      let failed = false;
+      let missing = false;
+      for (const clip of clipList().filter((clip) => {
+        const [start, end] = clipRange(clip);
+        const window = surface.windowPx();
+        return start < window.rightPx && end > window.leftPx;
+      })) {
+        const drawState = drawRef.current;
+        const { audioBuffer, source } = snapshots.get(clip.blobId) || {};
+        missing ||= flaggedMissing(drawState.missingMediaBlobIds, clip.blobId) || !audioBuffer;
+        if (!audioBuffer || source?.pyramid || audioBuffer.sampleRate / (1000 * drawState.pixelsPerMs * surface.dpr) <= 1) continue;
+        failed ||= source?.status === 'error';
+        pending ||= source?.status !== 'error';
+      }
+      return failed ? 'error' : pending ? 'loading' : missing ? 'missing' : 'ready';
     };
     const run = (budget) => {
       if (disposed) return false;
       const update = observer.read();
-      if (update.stale) reset();
-      else if (update.changed && (context || complete)) refreshNeeded = true;
-      // New summaries don't restart the current pass. Even a flood of ready notifications
-      // lets every clip finish before one coalesced refresh. Replacements clear stale pixels.
-      if (complete) {
-        if (refreshNeeded) reset();
-        else return observer.dirty;
+      const drawState = drawRef.current;
+      if (!(drawState.extentPx > 0)) { setStatus('ready'); return observer.dirty; }
+      if (!surface) {
+        surface = createWaveformSurface({
+          canvas, extentPx: drawState.extentPx, viewportWidthPx: viewportPx, height: drawState.height, dpr: view.dpr, paint,
+        });
+        rasterBlocked = !surface;
+        if (!surface) { setStatus('limited'); return false; }
+        surfaceRef.current = surface;
+        surface.setViewport(placementRef.current.left);
+        surface.setReturnViewport(placementRef.current.returnLeft);
+      } else if (update.stale) {
+        // Replacements clear stale pixels at once; new summaries repaint only their clips.
+        surface.clear();
+        seenReady = false;
+      } else if (update.changed) {
+        for (const clip of clipList()) {
+          if (sameSnapshot(snapshots.get(clip.blobId), update.snapshots.get(clip.blobId))) continue;
+          surface.invalidate(...clipRange(clip));
+        }
       }
-      if (!view.widthPx) return observer.dirty;
-      if (!context) {
-        context = prepareWaveformCanvas(canvas, view.widthPx, height, view.dpr);
-        rasterBlocked = !context;
-        if (!context) { setStatus('limited'); return false; }
-        dpr = waveformRasterBudget.getAllocation(canvas).dpr;
-      }
-      if (draw) {
-        if (draw(budget)) return true;
-        draw = undefined;
-        index += 1;
-        return true;
-      }
-      if (index >= visible.length) {
-        complete = true;
-        setStatus(failed ? 'error' : pending ? 'loading' : missing ? 'missing' : 'ready');
-        return refreshNeeded || observer.dirty;
-      }
-      const clip = visible[index];
-      const { audioBuffer, source } = update.snapshots.get(clip.blobId) || {};
-      const isMissing = flaggedMissing(missingMediaBlobIds, clip.blobId) || !audioBuffer;
-      missing ||= isMissing;
-      const left = Math.max(0, clip.startMs * pixelsPerMs - view.leftPx);
-      const right = Math.min(view.widthPx, (clip.startMs + clip.durationMs) * pixelsPerMs - view.leftPx);
-      if (!audioBuffer) {
-        context.fillStyle = MISSING_COLOR;
-        context.fillRect(left, height / 2 - 2, Math.max(0, right - left), 4);
-        index += 1;
-        return true;
-      }
-      const detail = audioBuffer.sampleRate / (1000 * pixelsPerMs * dpr) <= 1;
-      if (!source?.pyramid && !detail) {
-        failed ||= source?.status === 'error';
-        pending ||= source?.status !== 'error';
-        context.fillStyle = isMissing ? MISSING_COLOR : 'rgba(148, 163, 184, 0.35)';
-        context.fillRect(left, height / 2, Math.max(0, right - left), 1);
-        index += 1;
-        return true;
-      }
-      draw = createWaveformDrawJob(context, {
-        audioBuffer, pyramid: source?.pyramid, cropStartMs: clip.cropStartMs,
-        cropEndMs: clip.cropEndMs ?? clip.sourceDurationMs,
-        pixelsPerMs, clipLeftPx: clip.startMs * pixelsPerMs, clipWidthPx: clip.durationMs * pixelsPerMs,
-        surfaceLeftPx: view.leftPx, surfaceWidthPx: view.widthPx, height, dpr,
-        color: isMissing ? MISSING_COLOR : ACTIVITY_COLOR, displayMode, globalPeakAmplitude, showRms, showClipping,
-      });
+      snapshots = update.snapshots;
+      const more = surface.run(budget);
+      const visibleWork = surface.hasVisibleWork();
+      if (!visibleWork) seenReady = true;
+      setStatus(!seenReady && visibleWork ? 'loading' : statusOf());
+      if (!more) return observer.dirty;
+      if (background !== !surface.hasVisibleWork()) { queue(); return false; }
       return true;
     };
-    const queue = () => { if (!disposed) cancel = waveformScheduler.schedule(key.current, run); };
+    function queue() {
+      if (disposed) return;
+      background = Boolean(surface) && !surface.hasVisibleWork();
+      cancel = waveformScheduler.schedule(key.current, run, { background });
+    }
     requestRef.current = queue;
     const unsubscribeRaster = waveformRasterBudget.subscribe(() => { if (rasterBlocked) queue(); });
     observer.invalidate();
@@ -130,17 +292,17 @@ function ModernGroupWaveform({
       requestRef.current = null;
       cancel?.();
       unsubscribeRaster();
-      waveformRasterBudget.release(canvas);
+      surface?.dispose();
+      surfaceRef.current = null;
     };
-  }, [clips, mediaBuffers, pixelsPerMs, height, globalPeakAmplitude, displayMode, showRms, showClipping,
-    missingMediaBlobIds, view.leftPx, view.widthPx, view.dpr]);
+  }, [zoom, viewportPx, height, globalPeakAmplitude, displayMode, showRms, showClipping, view.dpr]);
 
   const label = `Group activity overview (not mixed output)${status === 'missing' ? ', missing media' : status === 'error' ? ', waveform unavailable' : status === 'limited' ? ', raster memory limit' : status === 'loading' ? ', loading waveforms' : ''}${showClipping ? ', source over-range indicators' : ''}`;
   return (
     <div ref={containerRef} role="img" aria-label={label} aria-busy={status === 'loading'} data-waveform-status={status}
       style={{ position: 'relative', width: '100%', height, pointerEvents: 'none' }}>
       <canvas ref={canvasRef} width={0} height={0} aria-hidden="true" draggable={false}
-        style={{ position: 'absolute', left: view.leftPx, width: view.widthPx, height, WebkitUserDrag: 'none' }} />
+        style={{ position: 'absolute', height, WebkitUserDrag: 'none' }} />
       {(status === 'loading' || status === 'error' || status === 'limited') && view.widthPx > 0 && <span aria-hidden="true"
         style={{ position: 'absolute', left: view.leftPx, width: view.widthPx, overflow: 'hidden', fontSize: 10, opacity: 0.65 }}>
         {status === 'error' ? 'Group waveform unavailable' : status === 'limited' ? 'Group waveform hidden: raster memory limit' : 'Loading group activity'}

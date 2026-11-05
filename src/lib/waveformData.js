@@ -3,6 +3,10 @@ export const WAVEFORM_SCHEMA_VERSION = 1;
 export const WAVEFORM_BASE_BLOCK_SIZE = 128;
 export const WAVEFORM_CHUNK_SAMPLES = 16384;
 export const DEFAULT_WAVEFORM_BYTES = 64 * 1024 * 1024;
+/** Per-source overview share; longer sources coarsen their overview and page base-128 detail. */
+export const WAVEFORM_SOURCE_BYTES = 8 * 1024 * 1024;
+/** Detail page span (~22 s at 48 kHz, ~256 KiB of summaries per channel). */
+export const WAVEFORM_PAGE_SAMPLES = 2 ** 20;
 
 let taskChannel;
 const taskCallbacks = [];
@@ -62,10 +66,23 @@ export function chooseWaveformBlockSize(length, numberOfChannels, maxBytes = DEF
   return blockSize;
 }
 
+function allocateLevels(length, baseBlockSize) {
+  const levels = [];
+  for (let blockSize = baseBlockSize; ; blockSize *= 2) {
+    const size = Math.ceil(length / blockSize);
+    if (!size) break;
+    levels.push({ blockSize, min: new Float32Array(size), max: new Float32Array(size), sumSquares: new Float64Array(size) });
+    if (size === 1) break;
+  }
+  return levels;
+}
+
 /**
  * Incremental, shared worker/fallback math. append() must receive each channel in source order.
  * Parents are reduced as buckets finish, so there is no synchronous full-pyramid finalization.
  * Counts are derived from blockSize and source length, including the partial final bucket.
+ * Recording capacity may grow() or coarsen() between appends; stale edge parents are rewritten
+ * when their right child completes, or by finishAt()'s tail path.
  */
 export function createWaveformBuilder({ sampleRate, length, numberOfChannels, baseBlockSize = WAVEFORM_BASE_BLOCK_SIZE }) {
   if (!Number.isFinite(sampleRate) || sampleRate <= 0 || !Number.isSafeInteger(length) || length < 0
@@ -73,21 +90,22 @@ export function createWaveformBuilder({ sampleRate, length, numberOfChannels, ba
     || !Number.isSafeInteger(baseBlockSize) || baseBlockSize < 1 || Math.log2(baseBlockSize) % 1 !== 0) {
     throw new TypeError('Invalid waveform source metadata');
   }
-  const channels = Array.from({ length: numberOfChannels }, () => {
-    const levels = [];
-    for (let blockSize = baseBlockSize; ; blockSize *= 2) {
-      const size = Math.ceil(length / blockSize);
-      if (!size) break;
-      levels.push({ blockSize, min: new Float32Array(size), max: new Float32Array(size), sumSquares: new Float64Array(size) });
-      if (size === 1) break;
-    }
-    return { levels };
-  });
+  const channels = Array.from({ length: numberOfChannels }, () => ({ levels: allocateLevels(length, baseBlockSize) }));
   const pyramid = {
     schemaVersion: WAVEFORM_SCHEMA_VERSION, sampleRate, length, numberOfChannels, baseBlockSize,
     sourcePeak: 0, channelPeaks: Array(numberOfChannels).fill(0), channels,
   };
   const states = channels.map(() => ({ position: 0, min: Infinity, max: -Infinity, sumSquares: 0 }));
+  /** A partial bucket closed at the old capacity edge becomes the carried tail again. */
+  function reopenTail(channelIndex) {
+    const state = states[channelIndex];
+    if (state.position !== length || !(length % baseBlockSize)) return;
+    const base = channels[channelIndex].levels[0];
+    const tail = Math.floor(length / baseBlockSize);
+    state.min = base.min[tail];
+    state.max = base.max[tail];
+    state.sumSquares = base.sumSquares[tail];
+  }
   function completeBucket(channelIndex, bucket) {
     const state = states[channelIndex];
     const levels = channels[channelIndex].levels;
@@ -134,28 +152,66 @@ export function createWaveformBuilder({ sampleRate, length, numberOfChannels, ba
       if (states.some((state) => state.position !== length)) throw new Error('Incomplete waveform source');
       return pyramid;
     },
-    /** Finalize a capacity-bounded recording early, refining only its carried tail (never PCM). */
-    async finishAt(actualLength, { signal, yieldControl = yieldWaveformTask } = {}) {
+    get position() { return states[0].position; },
+    get capacity() { return length; },
+    get baseBlockSize() { return baseBlockSize; },
+    /** Reallocate for a longer recording. Copies summaries only, never PCM. */
+    grow(nextLength) {
+      if (!Number.isSafeInteger(nextLength) || nextLength <= length) throw new RangeError('Waveform capacity can only grow');
+      for (let c = 0; c < numberOfChannels; c += 1) {
+        reopenTail(c);
+        const previous = channels[c].levels;
+        const next = allocateLevels(nextLength, baseBlockSize);
+        previous.forEach((level, l) => {
+          next[l].min.set(level.min);
+          next[l].max.set(level.max);
+          next[l].sumSquares.set(level.sumSquares);
+        });
+        channels[c].levels = next;
+      }
+      length = nextLength;
+      pyramid.length = nextLength;
+    },
+    /** Halve resolution by dropping the finest level: parents are already exact aggregates. */
+    coarsen() {
+      if (channels[0].levels.length < 2) return false;
+      for (let c = 0; c < numberOfChannels; c += 1) {
+        reopenTail(c);
+        const state = states[c];
+        const levels = channels[c].levels;
+        const bucket = Math.floor(state.position / baseBlockSize);
+        if (bucket % 2) {
+          state.min = Math.min(state.min, levels[0].min[bucket - 1]);
+          state.max = Math.max(state.max, levels[0].max[bucket - 1]);
+          state.sumSquares += levels[0].sumSquares[bucket - 1];
+        }
+        levels.shift();
+      }
+      baseBlockSize *= 2;
+      pyramid.baseBlockSize = baseBlockSize;
+      return true;
+    },
+    /**
+     * Finalize a recording early, refining only its carried tail. Appending beyond actualLength
+     * requires the final audioBuffer, from which at most one partial base bucket is reread.
+     */
+    async finishAt(actualLength, { signal, yieldControl = yieldWaveformTask, audioBuffer } = {}) {
       const check = () => {
         if (signal?.aborted) throw Object.assign(new Error('Waveform recording cancelled'), { name: 'AbortError' });
       };
       check();
+      const overrun = states.some((state) => state.position > actualLength);
       if (!Number.isSafeInteger(actualLength) || actualLength < 0 || actualLength > length
-        || states.some((state) => state.position !== actualLength)) throw new RangeError('Incomplete recording channels');
-      if (actualLength === length) return pyramid;
+        || states.some((state) => state.position < actualLength)) throw new RangeError('Incomplete recording channels');
+      if (overrun && (!audioBuffer || audioBuffer.length !== actualLength || audioBuffer.sampleRate !== sampleRate
+        || audioBuffer.numberOfChannels !== numberOfChannels)) throw new RangeError('Recording overrun requires its final PCM');
+      if (actualLength === length && !overrun) return pyramid;
       const result = createWaveformBuilder({ sampleRate, length: actualLength, numberOfChannels, baseBlockSize }).pyramid;
       result.sourcePeak = pyramid.sourcePeak;
       result.channelPeaks = [...pyramid.channelPeaks];
       for (let c = 0; c < numberOfChannels; c += 1) {
         const targetLevels = result.channels[c].levels;
         if (!actualLength) continue;
-        const source = channels[c].levels[0];
-        if (actualLength % baseBlockSize) {
-          const tail = Math.floor(actualLength / baseBlockSize);
-          source.min[tail] = states[c].min;
-          source.max[tail] = states[c].max;
-          source.sumSquares[tail] = states[c].sumSquares;
-        }
         for (let l = 0; l < targetLevels.length; l += 1) {
           const target = targetLevels[l];
           const child = targetLevels[l - 1];
@@ -168,6 +224,23 @@ export function createWaveformBuilder({ sampleRate, length, numberOfChannels, ba
             target.max.set(existing.max.subarray(start, end), start);
             target.sumSquares.set(existing.sumSquares.subarray(start, end), start);
           }
+          if (!child && actualLength % baseBlockSize) {
+            const tail = Math.floor(actualLength / baseBlockSize);
+            let { min, max, sumSquares } = states[c];
+            if (states[c].position !== actualLength) {
+              const raw = audioBuffer.getChannelData(c);
+              min = Infinity; max = -Infinity; sumSquares = 0;
+              for (let i = tail * baseBlockSize; i < actualLength; i += 1) {
+                const value = finiteSample(raw[i]);
+                min = Math.min(min, value);
+                max = Math.max(max, value);
+                sumSquares += value * value;
+              }
+            }
+            target.min[tail] = min;
+            target.max[tail] = max;
+            target.sumSquares[tail] = sumSquares;
+          }
           if (child) {
             // All complete parents were already maintained by append(). Only the tail path changes.
             const tail = target.min.length - 1;
@@ -178,7 +251,13 @@ export function createWaveformBuilder({ sampleRate, length, numberOfChannels, ba
             target.sumSquares[tail] = child.sumSquares[left] + (right === left ? 0 : child.sumSquares[right]);
           }
         }
+        if (overrun) {
+          const top = targetLevels.at(-1);
+          result.channelPeaks[c] = Math.max(Math.abs(top.min[0]), Math.abs(top.max[0]));
+        }
       }
+      if (overrun) result.sourcePeak = actualLength ? Math.max(...result.channelPeaks) : 0;
+      if (overrun && !actualLength) result.channelPeaks.fill(0);
       check();
       return result;
     },

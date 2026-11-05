@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWaveformBuilder, queryWaveformRange, validateWaveformPyramid } from '../waveformData';
 import { createWaveformService } from '../waveformService';
-import { createWaveformPersistence } from '../waveformPersistence';
-import { buildPyramid, generatedBuffer, referenceRange } from './waveformFixtures';
+import { createWaveformPersistence, validatePersistedWaveform } from '../waveformPersistence';
+import { audioBuffer, buildPyramid, generatedBuffer, referenceRange } from './waveformFixtures';
 
 const services = [];
 function makeService(options = {}) {
@@ -11,6 +11,18 @@ function makeService(options = {}) {
   return service;
 }
 afterEach(() => { for (const service of services.splice(0)) service.dispose(); });
+
+/** Coarsened buckets add child energies, so they match a direct build only within rounding. */
+function expectPyramidClose(actual, expected) {
+  const strip = (pyramid) => ({ ...pyramid, channels: pyramid.channels.map((channel) => ({
+    levels: channel.levels.map(({ sumSquares, ...level }) => ({ ...level, buckets: sumSquares.length })),
+  })) });
+  expect(strip(actual)).toEqual(strip(expected));
+  actual.channels.forEach((channel, c) => channel.levels.forEach((level, l) => level.sumSquares.forEach((value, i) => {
+    const reference = expected.channels[c].levels[l].sumSquares[i];
+    expect(Math.abs(value - reference)).toBeLessThanOrEqual(Math.max(1, reference) * 1e-12);
+  })));
+}
 
 async function appendBuffer(session, buffer, chunkSize) {
   for (let start = 0; start < buffer.length; start += chunkSize) {
@@ -59,7 +71,8 @@ describe('capacity-bounded incremental recording summaries', () => {
     await pending;
     expect(service.getStats().peakStagingBytes).toBe(16384 * 4);
     await expect(session.append([new Float32Array(1)])).rejects.toThrow(/capacity/);
-    await expect(session.finish(generatedBuffer(2, 1))).rejects.toThrow(/metadata/);
+    await expect(session.finish(generatedBuffer(2, 1, 44100))).rejects.toThrow(/metadata/);
+    await expect(session.finish(generatedBuffer(2, 2))).rejects.toThrow(/metadata/);
     await session.finish(buffer);
     await expect(session.append([new Float32Array(1)])).rejects.toMatchObject({ name: 'AbortError' });
   });
@@ -150,6 +163,85 @@ describe('capacity-bounded incremental recording summaries', () => {
     expect(service.getSource('r', decodedAgain).stats.cacheHit).toBe(true);
     expect(reads).not.toHaveBeenCalled();
     expect(service.getSource('r', decodedAgain).pyramid).toEqual(structuredClone(original.pyramid));
+  });
+
+  it.each([
+    [1, 0, 1000], [37, 3, 4000], [129, 7, 4097], [4096, 11, 9001],
+  ])('grows/coarsens a pure builder (chunk %i, seed %i) and finishes exactly at %i samples, with or without overrun', async (chunk, seed, length) => {
+    const buffer = generatedBuffer(length + 300);
+    for (const overrun of [0, 300]) {
+      const builder = createWaveformBuilder({ sampleRate: 48000, length: 256, numberOfChannels: 2 });
+      let state = seed;
+      const random = () => { state = (Math.imul(state, 1103515245) + 12345) >>> 0; return state / 0x100000000; };
+      for (let start = 0; start < length + overrun; start += chunk) {
+        const size = Math.min(chunk, length + overrun - start);
+        while (start + size > builder.capacity) builder.grow(builder.capacity * 2);
+        for (let c = 0; c < 2; c += 1) builder.append(c, start, buffer.getChannelData(c).slice(start, start + size));
+        if (random() < 0.05 && builder.baseBlockSize < 1024) builder.coarsen();
+      }
+      const final = audioBuffer([buffer.getChannelData(0).slice(0, length), buffer.getChannelData(1).slice(0, length)]);
+      const result = await builder.finishAt(length, { yieldControl: async () => {}, audioBuffer: final });
+      expect(await validatePersistedWaveform(result, { yieldControl: async () => {} })).toBe(true);
+      expectPyramidClose(result, buildPyramid(final, 997, builder.baseBlockSize));
+    }
+  });
+
+  it('rejects an overrun finish without its final PCM', async () => {
+    const builder = createWaveformBuilder({ sampleRate: 48000, length: 1000, numberOfChannels: 1 });
+    builder.append(0, 0, new Float32Array(300));
+    await expect(builder.finishAt(200, { yieldControl: async () => {} })).rejects.toThrow(/final PCM/);
+  });
+
+  it('grows an unknown-length take, coarsening only when its budget share requires it', async () => {
+    const service = makeService({ maxResidentBytes: 16384, recordingInitialCapacity: 256 });
+    const buffer = generatedBuffer(20000, 1);
+    const session = service.createRecordingBuilder('r', { sampleRate: 48000, numberOfChannels: 1 });
+    await appendBuffer(session, buffer, 1000);
+    expect(session.getStats().capacity).toBeGreaterThanOrEqual(20000);
+    expect(session.getStats().baseBlockSize).toBeGreaterThan(128);
+    expect(service.getStats().accountedBytes).toBeLessThanOrEqual(16384);
+    const result = await session.finish(buffer);
+    expectPyramidClose(result.pyramid, buildPyramid(buffer, 997, result.pyramid.baseBlockSize));
+    expect(await validatePersistedWaveform(result.pyramid, { yieldControl: async () => {} })).toBe(true);
+    expect(service.getStats()).toMatchObject({ recordingBytes: 0, fallbackJobs: 0 });
+  });
+
+  it('finishes shorter than appended by rereading one tail bucket, and catches up a longer buffer', async () => {
+    const service = makeService({ recordingInitialCapacity: 1024 });
+    const source = generatedBuffer(3000);
+    const prefix = (length) => audioBuffer([0, 1].map((c) => source.getChannelData(c).slice(0, length)));
+    const shorter = service.createRecordingBuilder('a', { sampleRate: 48000, numberOfChannels: 2 });
+    await appendBuffer(shorter, source, 333);
+    const truncated = prefix(2000 + 77);
+    const expected = buildPyramid(truncated);
+    const reads = vi.spyOn(truncated, 'getChannelData');
+    expect((await shorter.finish(truncated)).pyramid).toEqual(expected);
+    expect(reads).toHaveBeenCalledTimes(2);
+    const longer = service.createRecordingBuilder('b', { sampleRate: 48000, numberOfChannels: 2 });
+    await appendBuffer(longer, prefix(1500), 333);
+    const scanned = service.getStats().samplesScanned;
+    expect((await longer.finish(source)).pyramid).toEqual(buildPyramid(source));
+    expect(service.getStats().samplesScanned - scanned).toBe(1500 * 2);
+  });
+
+  it('publishes a provisional recording source that its media alias and first revision adopt without extraction', async () => {
+    const saveRevision = vi.fn(async () => true);
+    const service = makeService({ persistence: { saveRevision }, recordingInitialCapacity: 1024 });
+    const buffer = generatedBuffer(2500);
+    const session = service.createRecordingBuilder(null, { sampleRate: 48000, numberOfChannels: 2 });
+    await appendBuffer(session, buffer, 400);
+    const ready = await session.finish(buffer);
+    expect(service.getSource(null, buffer)).toBe(ready);
+    const revision = { waveformRevision: 'take-1', blobSize: 999, blobType: 'audio/wav' };
+    expect(service.ensureSource('media', buffer, { revision })).toBe(ready);
+    expect(ready.stats.revision.waveformRevision).toBe('take-1');
+    expect(service.getStats()).toMatchObject({ jobsStarted: 1, jobsCompleted: 1, fallbackJobs: 0 });
+    await vi.waitFor(() => expect(saveRevision).toHaveBeenCalledOnce(), { interval: 5 });
+    expect(saveRevision.mock.calls[0].slice(0, 3)).toEqual(['media', ready.stats.revision, ready.pyramid]);
+    expect(service.getSource(null, buffer)).toBeUndefined();
+    expect(service.ensureSource('media', buffer, { revision: { ...revision, waveformRevision: 'take-2' } }).status).toBe('loading');
+    service.releaseSource('media', buffer);
+    expect(service.getStats()).toMatchObject({ sources: 0, residentBytes: 0 });
   });
 
   it('pure finishAt rejects incomplete channels and supports deterministic non-finite/silence tails', async () => {
