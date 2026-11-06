@@ -151,4 +151,19 @@ describe('recording draw slices', () => {
     expect(sampleAt).toHaveBeenCalledTimes(11);
     expect(context.lineTo).toHaveBeenCalled();
   });
+
+  it('draws the selected amplitude scale instead of a fixed linear mapping', () => {
+    const context = { fillRect: vi.fn() };
+    const capture = { createRangeQuery: () => () => ({ done: true, rawSamples: 0, result: { min: -0.1, max: 0.1, count: 4 } }) };
+    const props = { capture, sourceStartFrame: 0, sourceEndFrame: 1000, sampleRate: 1000, numberOfChannels: 1,
+      pixelsPerMs: 0.01, leftPx: 0, widthPx: 1, height: 40, dpr: 1 };
+    createRecordingDrawJob(context, props)();
+    const linearY = context.fillRect.mock.calls[0][1];
+    context.fillRect.mockClear();
+    createRecordingDrawJob(context, { ...props, displayMode: 'db' })();
+    expect(context.fillRect.mock.calls[0][1]).toBeLessThan(linearY);
+    context.fillRect.mockClear();
+    createRecordingDrawJob(context, { ...props, displayMode: 'normalized', globalPeakAmplitude: 2 })();
+    expect(context.fillRect.mock.calls[0][1]).toBeGreaterThan(linearY);
+  });
 });

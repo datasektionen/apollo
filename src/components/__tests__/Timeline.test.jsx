@@ -26,6 +26,7 @@ vi.mock('../RecordingWaveform', () => ({ default: (props) => {
   return <div data-recording-waveform="true" />;
 } }));
 import { getWaveformWindow } from '../../lib/waveformRenderer';
+import { audioManager } from '../../lib/audioManager';
 import Timeline from '../Timeline';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -104,6 +105,10 @@ describe('Timeline integration', () => {
     const view = state.waveforms.get('clip');
     expect(view).toMatchObject({ blobId: 'clip', clipLeftPx: 0, clipWidthPx: 100, viewportLeftPx: 0,
       viewportWidthPx: 800, pixelsPerMs: 0.1, displayMode: 'linear', showRms: false, showClipping: false });
+    expect(host.querySelector('[data-ruler-unit]').dataset.rulerUnit).toBe('clock');
+    expect(host.querySelector('[data-ruler-tick="0"] span').textContent).toBe('0:00');
+    expect(host.querySelector('[data-playhead="ruler"]').style.left).toBe(host.querySelector('[data-playhead="tracks"]').style.left);
+    expect(Number.parseFloat(host.querySelector('[data-playhead="ruler"]').style.left)).toBeCloseTo(300);
     expect(range().getAttribute('aria-label')).toBe('Timeline zoom');
     expect(range().getAttribute('aria-valuetext')).toContain('visible');
   });
@@ -144,6 +149,12 @@ describe('Timeline integration', () => {
     expect(tracksElement().scrollLeft).toBe(0);
     await zoomToSamples();
     expect(host.querySelectorAll('[data-ruler-tick]').length).toBeLessThan(25);
+    const playhead = host.querySelector('[data-playhead="ruler"]');
+    const tick = host.querySelector('[data-ruler-tick]');
+    const zoomed = state.waveforms.get('clip').pixelsPerMs;
+    expect(playhead.style.left).toBe(host.querySelector('[data-playhead="tracks"]').style.left);
+    expect(Number.parseFloat(tick.style.left) - Number.parseFloat(playhead.style.left))
+      .toBeCloseTo((Number(tick.dataset.rulerTick) - 3000) * zoomed);
     expect(Number(range().value)).toBeGreaterThan(0.8);
     expect(Number.parseFloat(tracksElement().firstElementChild.style.width)).toBeLessThanOrEqual(1000000);
     // The clip ends 2 s before the playhead, far outside a sample-zoom view. It stays mounted only
@@ -301,61 +312,96 @@ describe('Timeline integration', () => {
 
 describe('Timeline playback follow', () => {
   const scroll = () => tracksElement().scrollLeft;
+  const followButton = () => host.querySelector('[aria-label="Follow playhead"]');
   async function zoomedLongProject() {
     current = project([makeTrack('track', [makeClip('clip', 0, 100_000)])]);
-    await render({ currentTimeMs: 0 });
+    await render({
+      currentTimeMs: 0,
+      onAddTrack: props.onAddTrack,
+      children: ({ header, tracks, rulerTools }) => <>{rulerTools}{header}{tracks}</>,
+    });
     for (let i = 0; i < 3; i += 1) await event(window, 'keydown', { key: '+' });
     expect(scroll()).toBe(0);
     return state.waveforms.get('clip').pixelsPerMs;
   }
 
-  it('turns the page at the right edge while playing or recording, and never moves an idle view', async () => {
+  it('jumps an off-screen playhead to center, eases one that is visible, and leaves an idle view alone', async () => {
     const ppm = await zoomedLongProject();
-    await render({ currentTimeMs: 790 / ppm });
-    expect(scroll()).toBe(0);
-    await render({ isPlaying: true, currentTimeMs: 400 / ppm });
-    expect(scroll()).toBe(0);
-    await render({ currentTimeMs: 790 / ppm });
-    expect(scroll()).toBeCloseTo(710);
-    await render({ currentTimeMs: 0 });
-    expect(scroll()).toBe(0);
-    await render({ isPlaying: false, isRecording: true, currentTimeMs: 1590 / ppm });
-    expect(scroll()).toBeCloseTo(1510);
-  });
-
-  it('pauses after manual scrolling or zooming until the playhead is visible again, ignoring scroll echoes', async () => {
-    const ppm = await zoomedLongProject();
-    await render({ isPlaying: true, currentTimeMs: 100 / ppm });
-    await event(tracksElement(), 'wheel', { deltaX: 3000 });
-    expect(scroll()).toBe(3000);
-    await render({ currentTimeMs: 900 / ppm });
-    expect(scroll()).toBe(3000);
-    await render({ currentTimeMs: 3400 / ppm });
-    await render({ currentTimeMs: 3790 / ppm });
-    expect(scroll()).toBeCloseTo(3710);
-    await event(tracksElement(), 'scroll');
-    await render({ currentTimeMs: 4500 / ppm });
-    expect(scroll()).toBeCloseTo(4420);
-    tracksElement().scrollLeft = 8000;
-    await event(tracksElement(), 'scroll');
     await render({ currentTimeMs: 5000 / ppm });
-    expect(scroll()).toBe(8000);
-    await event(tracksElement(), 'wheel', { ctrlKey: true, clientX: 700, deltaY: 100 });
+    expect(scroll()).toBe(0);
+    await render({ isPlaying: true, currentTimeMs: 600 / ppm });
+    expect(scroll()).toBe(0);
     await flush();
-    const zoomedScroll = scroll();
-    await render({ currentTimeMs: 5100 / ppm });
-    expect(scroll()).toBe(zoomedScroll);
+    const first = scroll();
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(8);
+    await flush();
+    expect(scroll()).toBeGreaterThan(first);
+    expect(scroll()).toBeLessThan(16);
+    await render({ isPlaying: false });
+    tracksElement().scrollLeft = 0;
+    await event(tracksElement(), 'scroll');
+    await render({ isPlaying: true, currentTimeMs: 2000 / ppm });
+    expect(scroll()).toBeCloseTo(1600);
+    await flush();
+    await render({ currentTimeMs: 2200 / ppm });
+    await flush();
+    expect(scroll()).toBeCloseTo(1800);
+    await render({ isPlaying: false, isRecording: true, currentTimeMs: 1590 / ppm });
+    expect(scroll()).toBeCloseTo(1190);
   });
 
-  it('restarts following at each playback start', async () => {
+  it('turns follow off when the user scrolls during playback and keeps scroll echoes from doing so', async () => {
     const ppm = await zoomedLongProject();
-    await event(tracksElement(), 'wheel', { deltaX: 3000 });
-    await render({ isPlaying: true, currentTimeMs: 100 / ppm });
-    expect(scroll()).toBeCloseTo(20);
+    await event(tracksElement(), 'wheel', { deltaX: 500 });
+    expect(followButton().getAttribute('aria-pressed')).toBe('true');
+    await render({ isPlaying: true, currentTimeMs: 2000 / ppm });
+    expect(scroll()).toBeCloseTo(1600);
+    await event(tracksElement(), 'scroll');
+    expect(followButton().getAttribute('aria-pressed')).toBe('true');
+    await event(tracksElement(), 'wheel', { deltaX: 400 });
+    expect(scroll()).toBeCloseTo(2000);
+    expect(followButton().getAttribute('aria-pressed')).toBe('false');
+    await render({ currentTimeMs: 4000 / ppm });
+    await flush();
+    expect(scroll()).toBeCloseTo(2000);
     await render({ isPlaying: false });
-    const againMs = (scroll() + 900) / ppm;
-    await render({ isPlaying: true, currentTimeMs: againMs });
-    expect(scroll()).toBeCloseTo(againMs * ppm - 80);
+    await render({ isPlaying: true, currentTimeMs: 4000 / ppm });
+    expect(scroll()).toBeCloseTo(2000);
+    await event(followButton(), 'click');
+    expect(followButton().getAttribute('aria-pressed')).toBe('true');
+    expect(scroll()).toBeCloseTo(3600);
+  });
+
+  it('glides the playhead from the audio clock between transport updates', async () => {
+    audioManager.getCurrentTime = () => 0;
+    try {
+      await render({ isPlaying: true, currentTimeMs: 0 });
+      audioManager.getCurrentTime = () => 250;
+      await flush();
+      const left = Number.parseFloat(host.querySelector('[data-playhead="ruler"]').style.left);
+      expect(left).toBeCloseTo(25);
+      expect(left).toBe(Number.parseFloat(host.querySelector('[data-playhead="tracks"]').style.left));
+      expect(scroll()).toBe(0);
+    } finally {
+      delete audioManager.getCurrentTime;
+    }
+  });
+
+  it('adds a track from the ruler and seeks from the fraction row', async () => {
+    const onAddTrack = vi.fn();
+    await render({
+      onAddTrack,
+      children: ({ header, tracks, rulerTools }) => <>{rulerTools}{header}{tracks}</>,
+    });
+    await event(host.querySelector('[aria-label="Add track"]'), 'click');
+    expect(onAddTrack).toHaveBeenCalledTimes(1);
+    await event(host.querySelector('[data-ruler-seek]'), 'mousedown', { button: 0, clientX: 40 });
+    expect(props.onSeek).toHaveBeenCalledWith(400);
+    await event(window, 'mousemove', { clientX: 80 });
+    expect(props.onSeek).toHaveBeenLastCalledWith(800);
+    await event(window, 'mouseup', { clientX: 80 });
+    expect(host.querySelectorAll('[data-ruler-fraction]').length).toBeGreaterThan(host.querySelectorAll('[data-ruler-tick]').length);
   });
 });
 
@@ -424,35 +470,33 @@ describe('Timeline gesture completion', () => {
   it('uses final release coordinates for loop creation, moving and crossing a marker', async () => {
     current = project([makeTrack('track', [makeClip('clip', 0, 5000)])]);
     await render();
-    const ruler = host.querySelector('.ruler-scrollbar-hidden > div');
+    const ruler = host.querySelector('[data-ruler-labels]');
     await event(ruler, 'mousedown', { button: 0, clientX: 100 });
     await event(window, 'mouseup', { clientX: 200 });
-    expect(current.loop).toMatchObject({ startMs: 1000, endMs: 2000 });
+    expect(current.loop).toMatchObject({ enabled: true, startMs: 1000, endMs: 2000 });
     await render();
     await event(ruler, 'mousedown', { button: 0, clientX: 150 });
     await event(window, 'mouseup', { clientX: 250 });
-    expect(current.loop).toMatchObject({ startMs: 2000, endMs: 3000 });
+    expect(current.loop).toMatchObject({ enabled: true, startMs: 1500, endMs: 2500 });
     await render();
     await event(host.querySelector('[data-loop-marker="start"]'), 'mousedown', { button: 0, clientX: 200 });
     await event(window, 'mouseup', { clientX: 400 });
-    expect(current.loop).toMatchObject({ startMs: 3000, endMs: 4000 });
+    expect(current.loop).toMatchObject({ startMs: 2500, endMs: 4000 });
   });
   it('keeps both loop drag preview markers local after rebasing', async () => {
     current = project([makeTrack('track', [makeClip('clip', 0, 36_000_000)])]);
     await render({ currentTimeMs: 18_000_000 });
     await fitProject();
     await zoomToSamples();
-    const ruler = host.querySelector('.ruler-scrollbar-hidden > div');
+    const ruler = host.querySelector('[data-ruler-labels]');
     await event(ruler, 'mousedown', { button: 0, clientX: 100 });
     await event(window, 'mousemove', { clientX: 120 });
     await event(window, 'mousemove', { clientX: 300 });
-    const markers = [...ruler.children].filter((node) => node.classList.contains('bg-yellow-500')
-      && node.classList.contains('pointer-events-none'));
+    const markers = [...ruler.children].filter((node) => node.hasAttribute('data-loop-preview'));
     expect(markers).toHaveLength(2);
-    const left = host.querySelector('.ruler-scrollbar-hidden').scrollLeft;
-    expect(Number.parseFloat(markers[0].style.left)).toBeCloseTo(left + 100);
-    expect(Number.parseFloat(markers[1].style.left)).toBeCloseTo(left + 300);
-    expect(Number.parseFloat(markers[1].style.left)).toBeLessThan(Number.parseFloat(ruler.style.width));
+    expect(Number.parseFloat(markers[0].style.left)).toBeCloseTo(100);
+    expect(Number.parseFloat(markers[1].style.left)).toBeCloseTo(300);
+    expect(Number.parseFloat(markers[1].style.left)).toBeLessThan(width);
     await event(window, 'keydown', { key: 'Escape' });
   });
   it('keeps the left clip id when splitting at the playhead', async () => {

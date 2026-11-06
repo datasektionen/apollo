@@ -1,4 +1,5 @@
 import { createWaveformBuilder, estimateWaveformBytes, queryWaveformRange, WAVEFORM_BASE_BLOCK_SIZE, waveformByteLength } from './waveformData';
+import { waveformAmplitude } from './waveformRenderer';
 
 export const RECORDING_SUMMARY_SAMPLES_PER_TASK = 1024;
 export const RECORDING_SUMMARY_BYTES = 16 * 1024 * 1024;
@@ -36,7 +37,7 @@ export function createRecordingWaveform({
   function insert(chunk) {
     const startFrame = Math.max(floor, chunk.startFrame);
     const endFrame = chunk.endFrame;
-    if (endFrame <= startFrame) return;
+    if (endFrame <= startFrame) return { startFrame, overlapped: false };
     const first = lowerBound(startFrame);
     let last = first;
     while (last < runs.length && runs[last].startFrame < endFrame) last += 1;
@@ -45,6 +46,8 @@ export function createRecordingWaveform({
     replacement.push({ startFrame, endFrame, chunk });
     if (last > first && runs[last - 1].endFrame > endFrame) replacement.push({ ...runs[last - 1], startFrame: endFrame });
     runs.splice(first, last - first, ...replacement);
+    // A pure append does not touch frames already drawn. Loop wrap replaces them.
+    return { startFrame, overlapped: last > first };
   }
   function queue() {
     if (!cancelTask && !disposed && (active || pendingIndex < pending.length)) cancelTask = scheduleTask(run);
@@ -58,7 +61,7 @@ export function createRecordingWaveform({
       if (pendingIndex === pending.length) { pending = []; pendingIndex = 0; }
       if (!chunk) return;
       if (chunk.endFrame <= floor) { queue(); return; }
-      insert(chunk);
+      const placed = insert(chunk);
       const size = estimateWaveformBytes(chunk.endFrame - chunk.startFrame, chunk.channels.length);
       // Reserve the in-progress summary too. Evicted blocks remain exactly queryable via borrowed PCM.
       while (summaries.size && bytes + size > maxBytes) {
@@ -68,7 +71,7 @@ export function createRecordingWaveform({
       }
       if (size > maxBytes) { onChange(); queue(); return; }
       active = {
-        chunk, size, channel: 0, offset: 0,
+        chunk, size, channel: 0, offset: 0, fromFrame: placed.overlapped ? placed.startFrame : undefined,
         builder: createWaveformBuilder({ sampleRate, length: chunk.endFrame - chunk.startFrame,
           numberOfChannels: chunk.channels.length }),
       };
@@ -83,8 +86,10 @@ export function createRecordingWaveform({
       const pyramid = builder.finish();
       const size = waveformByteLength(pyramid);
       if (chunk.endFrame > floor) { summaries.set(chunk, pyramid); bytes += size; }
+      const fromFrame = active.fromFrame;
       active = undefined;
-      onChange();
+      // Only an overlapping block (a loop overwriting earlier audio) invalidates drawn frames.
+      onChange(fromFrame == null ? undefined : { fromFrame });
     }
     queue();
   }
@@ -180,6 +185,7 @@ export function createRecordingWaveform({
 export function createRecordingDrawJob(context, {
   capture, sourceStartFrame, sourceMinFrame = sourceStartFrame, sourceEndFrame, sampleRate, numberOfChannels,
   pixelsPerMs, leftPx, widthPx, height, dpr, color = '#fca5a5',
+  displayMode = 'linear', globalPeakAmplitude = 1,
 }) {
   const samplesPerPx = sampleRate / (1000 * pixelsPerMs);
   if (!(samplesPerPx > 0) || !(widthPx > 0) || sourceEndFrame <= sourceStartFrame) return () => false;
@@ -192,7 +198,7 @@ export function createRecordingDrawJob(context, {
   let previous;
   return () => {
     const lane = height / numberOfChannels;
-    const y = (value) => (channel + 0.5) * lane - Math.max(-1, Math.min(1, value)) * Math.max(0, lane / 2 - 2);
+    const y = (value) => (channel + 0.5) * lane - waveformAmplitude(value, displayMode, globalPeakAmplitude) * Math.max(0, lane / 2 - 2);
     context.fillStyle = color;
     context.strokeStyle = color;
     context.lineWidth = 1 / dpr;

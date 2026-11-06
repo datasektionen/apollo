@@ -171,6 +171,23 @@ it('cancels an unfinished draw immediately at a loop split even when the capture
   expect(container.querySelector('canvas').width).toBe(0);
 });
 
+it('keeps a painted take and queries only the frames the window gains', async () => {
+  const render = (endTimeMs) => act(async () => root.render(<RecordingWaveform
+    startTimeMs={5000} endTimeMs={endTimeMs} pixelsPerMs={0.1} clipLeftPx={0}
+    clipWidthPx={(endTimeMs - 5000) * 0.1} viewportLeftPx={0} viewportWidthPx={1000} height={40} />));
+  await render(6000);
+  await flush();
+  const drawnTo = Math.max(...queries.map(([, , end]) => end));
+  queries.length = 0;
+  for (const listener of manager.listeners) listener();
+  await flush();
+  expect(queries).toHaveLength(0);
+  await render(7000);
+  await flush();
+  expect(queries.length).toBeGreaterThan(0);
+  expect(Math.min(...queries.map(([, start]) => start))).toBeGreaterThan(drawnTo - 2);
+});
+
 it('uses effective allocator DPR and retries a denied allocation when capacity is released', async () => {
   const allocate = vi.spyOn(waveformRasterBudget, 'allocate');
   allocate.mockReturnValueOnce(undefined);

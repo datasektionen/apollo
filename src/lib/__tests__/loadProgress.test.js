@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  abortLoadProgress,
   beginPlayStemProgress,
   dismissLoadProgress,
   finishLoadProgress,
@@ -14,6 +15,7 @@ import {
   reportPlayStemEvent,
   startLoadProgress,
   summarizeProjectForLoadLog,
+  updateWaveformProgress,
   withLoadStep,
 } from '../loadProgress';
 
@@ -197,6 +199,7 @@ describe('play progress bars', () => {
     expect(getLoadProgress().visible).toBe(false);
 
     const warmId = startLoadProgress({ kind: 'open', title: 'Song' });
+    expect(getLoadProgress().visible).toBe(true);
     beginPlayStemProgress({
       total: 4,
       cached: 4,
@@ -204,6 +207,10 @@ describe('play progress bars', () => {
       idbTotal: 0,
       fetchTotal: 0,
     }, warmId);
+    expect(getLoadProgress().visible).toBe(true);
+    expect(getLoadProgress().current).toBe('Preparing waveforms…');
+    updateWaveformProgress({ ready: 2, total: 4 });
+    expect(getLoadProgress().waveforms).toEqual({ ready: 2, total: 4 });
     finishLoadProgress(null, warmId);
     expect(getLoadProgress().visible).toBe(false);
     expect(getLoadProgress().status).toBe('done');
@@ -251,6 +258,17 @@ describe('play progress bars', () => {
     expect(stems.serverCached).toBe(1);
     expect(stems.activeDownloads).toBe(0);
     expect(stems.activeConverts).toBe(0);
+  });
+
+  it('backs out of an open without leaving the page up', () => {
+    let backedOut = false;
+    startLoadProgress({ kind: 'open', title: 'Song', onAbort: () => { backedOut = true; } });
+    abortLoadProgress();
+    expect(backedOut).toBe(true);
+    expect(getLoadProgress().status).toBe('aborted');
+    expect(getLoadProgress().visible).toBe(false);
+    abortLoadProgress();
+    expect(backedOut).toBe(true);
   });
 
   it('hides a play failure that happened before any audio dialog', () => {

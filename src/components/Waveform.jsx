@@ -6,7 +6,8 @@ import LegacyWaveform from './LegacyWaveform';
 import {
   createWaveformDrawJob, createWaveformSourceObserver, getWaveformWindow, waveformRasterBudget,
 } from '../lib/waveformRenderer';
-import { adoptWaveformBitmap, createWaveformSurface, getRetainedWindow, registerWaveformBitmap } from '../lib/waveformSurface';
+import { adoptWaveformBitmap, createWaveformSurface, getRetainedWindow, registerWaveformBitmap, waveformPaintTier } from '../lib/waveformSurface';
+import { takeZoomBitmap } from '../lib/visibleZoom';
 
 /** Legacy callers can omit geometry. Only this compatibility path measures ancestors. */
 export function useWaveformViewport(containerRef, geometry) {
@@ -91,17 +92,27 @@ export function useWaveformSources(getSources, priority, mediaCache) {
  * Hands scroll position to a retained surface without rebuilding it. Scrolling inside the retained
  * margin touches no pixels; a shift or a new jump target requests painting.
  */
-export function useSurfacePlacement(surfaceRef, requestRef, viewportLeftPx, returnViewportLeftPx, onMove) {
+export function useSurfacePlacement(surfaceRef, requestRef, viewportLeftPx, returnViewportLeftPx, onMove, prepareRef, revision) {
   const placementRef = useRef(null);
   placementRef.current = { left: viewportLeftPx, returnLeft: returnViewportLeftPx };
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
     if (!surface) return;
-    const moved = surface.setViewport(viewportLeftPx);
-    const retarget = surface.setReturnViewport(returnViewportLeftPx);
-    if (moved) onMove?.();
-    if (moved || retarget) requestRef.current?.();
-  }, [surfaceRef, requestRef, viewportLeftPx, returnViewportLeftPx, onMove]);
+    const prepared = prepareRef?.current?.();
+    // A zoom picture is already on the canvas, in the coordinates of the viewport it was painted for.
+    if (prepared === 'prepared') {
+      surface.setReturnViewport(placementRef.current.returnLeft);
+      onMove?.();
+      requestRef.current?.();
+      return;
+    }
+    // A new picture is held aside before the viewport moves, so the old pixels are not shifted away.
+    const replaced = prepared === true;
+    const moved = surface.setViewport(placementRef.current.left);
+    const retarget = surface.setReturnViewport(placementRef.current.returnLeft);
+    if (replaced || (moved && !surface.presenting())) onMove?.();
+    if (replaced || moved || retarget) requestRef.current?.();
+  }, [surfaceRef, requestRef, viewportLeftPx, returnViewportLeftPx, onMove, prepareRef, revision]);
   return placementRef;
 }
 
@@ -110,6 +121,7 @@ function ModernWaveform({
   height = 80, color = '#4F8EF7', onReady, globalPeakAmplitude = 1,
   pixelsPerMs, clipLeftPx, clipWidthPx, viewportLeftPx, viewportWidthPx, returnViewportLeftPx,
   displayMode = 'linear', showRms = false, showClipping = false, showSamples = false,
+  scheduleTier = 0, bitmapKey,
 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -119,8 +131,13 @@ function ModernWaveform({
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const [status, setStatus] = useState('loading');
-  const [widthGeneration, setWidthGeneration] = useState(0);
   const view = useWaveformViewport(containerRef, { clipLeftPx, clipWidthPx, viewportLeftPx, viewportWidthPx });
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const audioRef = useRef(audioBuffer);
+  audioRef.current = audioBuffer;
+  const tierRef = useRef(scheduleTier);
+  tierRef.current = scheduleTier;
   const endMs = cropEndMs ?? sourceDurationMs ?? (audioBuffer ? audioBuffer.length / audioBuffer.sampleRate * 1000 : 0);
   const measuredScale = pixelsPerMs > 0 ? pixelsPerMs : view.clipWidthPx / (endMs - cropStartMs);
   // Width / duration is the same zoom after a cut, but the division can differ by a rounding ulp.
@@ -132,9 +149,35 @@ function ModernWaveform({
   const retained = (left) => getRetainedWindow({ extentPx: view.clipWidthPx, viewportLeftPx: left, viewportWidthPx: view.viewportWidthPx }).widthPx > 0;
   const near = retained(localLeft) || (localReturn !== null && retained(localReturn));
   const { observerRef, requestRef } = useWaveformSources(
-    () => near && audioBuffer ? [{ blobId, audioBuffer }] : [], 1,
+    () => near && audioRef.current ? [{ blobId, audioBuffer: audioRef.current }] : [], 1,
   );
-  const placementRef = useSurfacePlacement(surfaceRef, requestRef, localLeft, localReturn);
+  // Appearance and zoom share one picture. A change redraws offscreen instead of rebuilding the canvas.
+  const picture = `${scale}|${height}|${color}|${displayMode}|${globalPeakAmplitude}|${showRms}|${showClipping}|${showSamples}|${view.dpr}|${cropStartMs}`;
+  const pictureRef = useRef(picture);
+  const prepareRef = useRef(() => false);
+  prepareRef.current = () => {
+    const surface = surfaceRef.current;
+    if (!surface) return false;
+    const prepared = takeZoomBitmap(bitmapKey || clipId, scale, cropStartMs);
+    if (prepared) {
+      pictureRef.current = picture;
+      surface.setViewport(localLeft);
+      const placed = surface.showPrepared({
+        extentPx: view.clipWidthPx, viewportWidthPx: view.viewportWidthPx, height, dpr: view.dpr, bitmap: prepared,
+      });
+      waveformRasterBudget.release(prepared.canvas);
+      return placed ? 'prepared' : false;
+    }
+    const replace = pictureRef.current !== picture;
+    pictureRef.current = picture;
+    return surface.revise({
+      extentPx: view.clipWidthPx, viewportWidthPx: view.viewportWidthPx, height, dpr: view.dpr, replace,
+    }) ? true : false;
+  };
+  const placementRef = useSurfacePlacement(
+    surfaceRef, requestRef, localLeft, localReturn, undefined, prepareRef,
+    `${picture}|${view.clipWidthPx}|${view.viewportWidthPx}`,
+  );
   // Read at paint time, so a shorter end reuses the canvas instead of rebuilding it.
   const drawRef = useRef(null);
   drawRef.current = {
@@ -155,30 +198,13 @@ function ModernWaveform({
     };
   };
   useEffect(() => registerWaveformBitmap(donorRef.current), []);
-  useLayoutEffect(() => {
-    const surface = surfaceRef.current;
-    // A shorter clip stays inside the canvas it already has. A longer one extends that canvas,
-    // or replaces it when the bitmap itself has to grow.
-    if (!surface || !(view.clipWidthPx > surface.extentPx + 0.5)) return;
-    const allocatedPx = surface.canvas.width / surface.dpr;
-    const neededPx = Math.min(view.clipWidthPx, 3 * view.viewportWidthPx);
-    if (allocatedPx + 0.5 >= neededPx) {
-      surface.setExtent(view.clipWidthPx);
-      surface.setViewport(placementRef.current.left);
-      requestRef.current?.();
-      return;
-    }
-    surface.dispose();
-    surfaceRef.current = null;
-    setWidthGeneration((generation) => generation + 1);
-  }, [view.clipWidthPx, view.viewportWidthPx]);
   // Layout, not a later frame: a new half must be copied onto the canvas before the browser paints.
   useLayoutEffect(() => {
     let cancel;
     let disposed = false;
     let surface = null;
     let source;
-    let background = false;
+    let scheduledTier = 0;
     let ready = false;
     let reused = false;
     let rasterBlocked = false;
@@ -192,27 +218,28 @@ function ModernWaveform({
     const paint = (context, strip) => {
       const draw = drawRef.current;
       return createWaveformDrawJob(context, {
-        audioBuffer, pyramid: source?.pyramid, cropStartMs: draw.cropStartMs, cropEndMs: draw.endMs,
+        audioBuffer: audioRef.current, pyramid: source?.pyramid, cropStartMs: draw.cropStartMs, cropEndMs: draw.endMs,
         pixelsPerMs: draw.scale, clipLeftPx: 0, clipWidthPx: draw.clipWidthPx, ...strip,
         height: draw.height, color: draw.color, displayMode: draw.displayMode,
         globalPeakAmplitude: draw.globalPeakAmplitude, showRms: draw.showRms,
         showClipping: draw.showClipping, showSamples: draw.showSamples,
-        requestDetail: (start, end) => waveformService.requestDetail(blobId, audioBuffer, start, end),
+        requestDetail: (start, end) => waveformService.requestDetail(blobId, audioRef.current, start, end),
       });
     };
     const run = (budget) => {
       if (disposed) return false;
       const update = observer.read();
-      if (update.stale) {
-        drop();
+      const buffer = audioRef.current;
+      if (update.stale && surface) {
+        surface.clear();
         ready = false;
         setStatus('loading');
       }
-      if (!audioBuffer) { setStatus('missing'); return false; }
+      if (!buffer) { setStatus('missing'); return false; }
       if (!near) return observer.dirty;
       source = update.snapshots.get(blobId)?.source;
       if (!ensureSurface()) return false;
-      const detail = audioBuffer.sampleRate / (1000 * scale * surface.dpr) <= 1;
+      const detail = buffer.sampleRate / (1000 * drawRef.current.scale * surface.dpr) <= 1;
       if (!source?.pyramid && !detail) {
         if (!reused) setStatus(source?.status === 'error' ? 'error' : 'loading');
         return observer.dirty;
@@ -221,37 +248,49 @@ function ModernWaveform({
       if (!ready && !surface.hasVisibleWork()) {
         ready = true;
         setStatus('ready');
-        if (readyRef.current?.buffer !== audioBuffer || readyRef.current?.clipId !== clipId) {
-          readyRef.current = { buffer: audioBuffer, clipId };
+        if (readyRef.current?.buffer !== buffer || readyRef.current?.clipId !== clipId) {
+          readyRef.current = { buffer, clipId };
           onReadyRef.current?.();
         }
       }
       if (!more) return observer.dirty;
-      if (background !== !surface.hasVisibleWork()) { queue(); return false; }
+      if (waveformPaintTier(surface, tierRef.current) !== scheduledTier) { queue(); return false; }
       return true;
     };
     function queue() {
       if (disposed) return;
-      background = Boolean(surface) && !surface.hasVisibleWork();
-      cancel = waveformScheduler.schedule(key.current, run, { background });
+      scheduledTier = waveformPaintTier(surface, tierRef.current);
+      cancel = waveformScheduler.schedule(key.current, run, { tier: scheduledTier });
     }
     function ensureSurface() {
       if (surface || !canvas) return Boolean(surface);
-      surface = createWaveformSurface({ canvas, extentPx: view.clipWidthPx, viewportWidthPx: view.viewportWidthPx,
-        height, dpr: view.dpr, paint });
+      const draw = drawRef.current;
+      const measured = viewRef.current;
+      surface = createWaveformSurface({ canvas, extentPx: draw.clipWidthPx, viewportWidthPx: measured.viewportWidthPx,
+        height: draw.height, dpr: measured.dpr, paint });
       rasterBlocked = !surface;
       if (!surface) { setStatus('limited'); return false; }
       surfaceRef.current = surface;
       surface.setViewport(placementRef.current.left);
       surface.setReturnViewport(placementRef.current.returnLeft);
-      // The other half of a cut already drew these columns. Copy them and paint only the gap.
-      reused = adoptWaveformBitmap(surface, { ...drawRef.current, blobId, pixelsPerMs: drawRef.current.scale }) > 0;
+      const prepared = takeZoomBitmap(bitmapKey || clipId, draw.scale, draw.cropStartMs);
+      if (prepared) {
+        surface.showPrepared({
+          extentPx: draw.clipWidthPx, viewportWidthPx: measured.viewportWidthPx,
+          height: draw.height, dpr: measured.dpr, bitmap: prepared,
+        });
+        waveformRasterBudget.release(prepared.canvas);
+        reused = !surface.hasVisibleWork();
+      } else {
+        // The other half of a cut already drew these columns. Copy them and paint only the gap.
+        reused = adoptWaveformBitmap(surface, { ...drawRef.current, blobId, pixelsPerMs: drawRef.current.scale }) > 0;
+      }
       return true;
     }
     requestRef.current = queue;
     const unsubscribeRaster = waveformRasterBudget.subscribe(() => { if (rasterBlocked) queue(); });
     observer.invalidate();
-    if (!audioBuffer) setStatus('missing');
+    if (!audioRef.current) setStatus('missing');
     else if (near && ensureSurface()) setStatus(!reused && surface.hasVisibleWork() ? 'loading' : 'ready');
     else if (near) setStatus('loading');
     queue();
@@ -262,8 +301,8 @@ function ModernWaveform({
       unsubscribeRaster();
       drop();
     };
-  }, [audioBuffer, blobId, clipId, cropStartMs, scale, height, color, displayMode,
-    globalPeakAmplitude, showRms, showClipping, showSamples, near, view.viewportWidthPx, view.dpr, widthGeneration]);
+    // Zoom, crop, color, size and resolution retarget this surface. They must not dispose the picture on screen.
+  }, [blobId, clipId, near]);
 
   const label = status === 'ready' ? `Waveform, ${displayMode} amplitude${displayMode === 'db' ? ', -60 dB floor' : ''}${showClipping ? ', source over-range indicators' : ''}`
     : status === 'error' ? 'Waveform unavailable' : status === 'limited' ? 'Waveform hidden: raster memory limit' : status === 'missing' ? 'Audio unavailable' : 'Loading waveform';

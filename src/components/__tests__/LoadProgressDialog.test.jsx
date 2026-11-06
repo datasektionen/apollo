@@ -11,6 +11,7 @@ import {
   logLoadProgress,
   reportPlayStemEvent,
   startLoadProgress,
+  updateWaveformProgress,
 } from '../../lib/loadProgress';
 
 beforeEach(() => {
@@ -147,7 +148,7 @@ describe('LoadProgressDialog play bars', () => {
     await view.unmount();
   });
 
-  it('stays open with the finished counts until dismissed', async () => {
+  it('shows an open on an empty page and leaves when Back is pressed', async () => {
     const view = await renderDialog();
     let sessionId;
     await act(async () => {
@@ -159,24 +160,25 @@ describe('LoadProgressDialog play bars', () => {
         idbTotal: 3,
         fetchTotal: 0,
       }, sessionId);
+      updateWaveformProgress({ ready: 1, total: 4 });
     });
+    expect(view.container.textContent).toContain('Opening project');
+    expect(view.container.textContent).toContain('Song');
+    expect(view.container.textContent).toContain('Audio sources');
+    expect(view.container.textContent).toContain('1/4');
+    expect(view.container.textContent).toContain('Waveforms');
+    expect(view.container.querySelector('[aria-label="Back"]')).toBeTruthy();
+    expect(view.container.textContent).not.toContain('Copy log');
+
     await act(async () => {
-      reportPlayStemEvent('idb-loaded', sessionId);
-      reportPlayStemEvent('idb-loaded', sessionId);
-      reportPlayStemEvent('idb-loaded', sessionId);
+      view.container.querySelector('[aria-label="Back"]').click();
+    });
+    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+
+    await act(async () => {
+      sessionId = startLoadProgress({ kind: 'open', title: 'Song' });
+      updateWaveformProgress({ ready: 4, total: 4 });
       finishLoadProgress(null, sessionId);
-    });
-    expect(view.container.textContent).toContain('Audio ready');
-    expect(view.container.textContent).toContain('4/4');
-    expect(view.container.textContent).toContain('3/3');
-    expect(view.container.textContent).not.toContain('Close');
-
-    const dialog = view.container.querySelector('[role="dialog"]');
-    dialog.click();
-    expect(view.container.querySelector('[role="dialog"]')).toBeTruthy();
-
-    await act(async () => {
-      view.container.firstElementChild.click();
     });
     expect(view.container.querySelector('[role="dialog"]')).toBeNull();
     await view.unmount();

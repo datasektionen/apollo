@@ -234,9 +234,11 @@ export function startLoadProgress({
   title = 'Loading',
   detail = '',
   verbose = false,
+  onAbort = null,
 } = {}) {
   const play = kind === 'play';
   const useVerboseLog = Boolean(verbose) || LOAD_PROGRESS_VERBOSE_LOG;
+  const openPage = !play && !useVerboseLog;
   session = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     kind: play ? 'play' : 'open',
@@ -244,8 +246,8 @@ export function startLoadProgress({
     title: String(title || 'Loading'),
     detail: String(detail || ''),
     status: 'running',
-    visible: useVerboseLog,
-    revealed: useVerboseLog,
+    visible: useVerboseLog || openPage,
+    revealed: useVerboseLog || openPage,
     startedAt: nowMs(),
     endedAt: null,
     current: useVerboseLog ? 'Starting…' : '',
@@ -255,6 +257,9 @@ export function startLoadProgress({
     error: null,
     logs: [],
     stems: createStemProgress(),
+    waveforms: { ready: 0, total: 0 },
+    onAbort: typeof onAbort === 'function' ? onAbort : null,
+    aborting: false,
   };
   if (useVerboseLog) {
     appendLog('info', `Started ${session.kind}: ${session.title}`);
@@ -291,10 +296,12 @@ export function beginPlayStemProgress(counts = {}, sessionId = null) {
     convertIdleMs: 0,
     pipelineMarkAt: fetchTotal > 0 ? nowMs() : null,
   };
-  const needsDialog = cached < total;
+  const needsDialog = session.kind === 'open' || cached < total;
   session.revealed = needsDialog;
   session.visible = needsDialog;
-  session.current = needsDialog ? 'Loading audio…' : 'Ready';
+  session.current = cached < total
+    ? 'Loading audio…'
+    : (session.kind === 'open' ? 'Preparing waveforms…' : 'Ready');
   emit();
 }
 
@@ -358,6 +365,29 @@ export function reportPlayStemEvent(event, sessionId = null, now = nowMs()) {
   if (stems[doneKey] >= stems[totalKey]) return;
   stems[doneKey] += 1;
   emit();
+}
+
+export function updateWaveformProgress({ ready = 0, total = 0 } = {}) {
+  if (!session || session.status !== 'running') return;
+  session.waveforms = {
+    ready: Math.max(0, Number(ready) || 0),
+    total: Math.max(0, Number(total) || 0),
+  };
+  emit();
+}
+
+export function abortLoadProgress() {
+  if (!session || session.aborting) return;
+  session.aborting = true;
+  const notify = session.onAbort;
+  if (session.status === 'running') {
+    session.status = 'aborted';
+    session.endedAt = nowMs();
+    session.current = 'Cancelled';
+  }
+  session.visible = false;
+  emit();
+  notify?.();
 }
 
 export function updateLoadProgress(patch = {}) {
@@ -441,7 +471,9 @@ export function finishLoadProgress(error = null, sessionId = null) {
     session.error = null;
     session.current = 'Done';
     session.status = 'done';
-    if (bars) {
+    if (bars && session.kind === 'open') {
+      session.visible = false;
+    } else if (bars) {
       session.visible = Boolean(session.revealed);
     } else {
       appendLog('ok', `Finished in ${formatLoadDuration(durationMs)}`, { durationMs });

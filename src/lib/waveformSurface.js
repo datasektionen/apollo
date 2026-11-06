@@ -104,43 +104,78 @@ function clipRanges(ranges, start, end) {
 }
 
 /**
+ * Which scheduler tier a view should use. On-screen work stays at `floor` (0 for a row on screen,
+ * 2 for a row above or below). After that window is painted, horizontal margins are tier 1 unless
+ * the row itself is waiting, and the return-to-start window is tier 3.
+ */
+export function waveformPaintTier(surface, floor = 0) {
+  if (!surface || surface.hasVisibleWork()) return floor;
+  if (surface.hasMarginWork()) return Math.max(floor, 1);
+  if (surface.hasReturnWork()) return 3;
+  return floor;
+}
+
+/**
  * Retained raster for one waveform view. Geometry is view-local CSS px: [0, extentPx) is the clip or
  * lane, viewport lefts are in the same frame. The canvas spans the viewport plus one viewport on each
  * side. Scrolling inside that range touches no pixels; nearing its edge shifts the bitmap by whole
  * device pixels and only the exposed strip is repainted, nearest the viewport first.
  *
+ * A replacement of an existing picture is drawn on an offscreen canvas. The canvas on screen keeps
+ * its pixels until the new visible window is finished, then swaps in one step. Margins paint after
+ * that swap. An empty first paint and a scroll-exposed edge still paint directly.
+ *
  * A second layer holds the window for one jump target (return to start). It is painted only after
  * the live canvas is complete, and adopted instead of repainting when the view jumps there.
  *
  * paint(context, { surfaceLeftPx, surfaceWidthPx, fromColumn, toColumn, dpr }) returns a resumable
- * job for those canvas device columns; the surface clears them first.
+ * job for those canvas device columns. The paint target's strip is cleared when the job starts.
  */
 export function createWaveformSurface({
   canvas, extentPx, viewportWidthPx, height, dpr, paint,
   budget = waveformRasterBudget, createCanvas = defaultCreateCanvas,
 }) {
   let coveredPx = finite(extentPx);
-  const widthPx = Math.min(coveredPx, 3 * finite(viewportWidthPx));
-  if (!(widthPx > 0) || !(height > 0)) return null;
-  const context = prepareWaveformCanvas(canvas, widthPx, height, dpr, budget);
-  if (!context) return null;
-  const ratio = budget.getAllocation(canvas).dpr;
-  const columns = canvas.width;
-  const rows = canvas.height;
-  let extent = Math.ceil(coveredPx * ratio);
-  const live = { canvas, context, origin: null, dirty: [] };
+  let viewportWidth = finite(viewportWidthPx);
+  let cssHeight = height;
+  let requestedDpr = dpr;
   let returned = null;
   let returnOrigin = null;
   let returnBlocked = false;
   let viewportLeft = 0;
   let current = null;
   let disposed = false;
+  let holding = false;
 
-  const originFor = (left) => Math.max(0, Math.min(extent - columns, Math.round((left - viewportWidthPx) * ratio)));
-  const span = (margin) => [
-    Math.max(0, Math.floor((viewportLeft - margin) * ratio)),
-    Math.min(extent, Math.ceil((viewportLeft + viewportWidthPx + margin) * ratio)),
-  ];
+  function allocate(target, cssWidth, layerHeight, layerDpr) {
+    if (!(cssWidth > 0) || !(layerHeight > 0)) return null;
+    const context = prepareWaveformCanvas(target, cssWidth, layerHeight, layerDpr, budget);
+    if (!context) return null;
+    const allocation = budget.getAllocation(target);
+    return {
+      canvas: target, context, origin: null, dirty: [],
+      ratio: allocation.dpr, columns: target.width, rows: target.height,
+      widthPx: cssWidth, height: layerHeight,
+    };
+  }
+
+  const initialWidth = Math.min(coveredPx, 3 * viewportWidth);
+  let shown = allocate(canvas, initialWidth, cssHeight, requestedDpr);
+  if (!shown) return null;
+  let live = shown;
+
+  const extentDevice = () => Math.ceil(coveredPx * live.ratio);
+  const originFor = (left) => {
+    const extent = extentDevice();
+    return Math.max(0, Math.min(Math.max(0, extent - live.columns), Math.round((left - viewportWidth) * live.ratio)));
+  };
+  const span = (margin) => {
+    const extent = extentDevice();
+    return [
+      Math.max(0, Math.floor((viewportLeft - margin) * live.ratio)),
+      Math.min(extent, Math.ceil((viewportLeft + viewportWidth + margin) * live.ratio)),
+    ];
+  };
   const visible = () => span(WAVEFORM_OVERSCAN_PX);
 
   function deviceOp(layer, operation) {
@@ -151,10 +186,24 @@ export function createWaveformSurface({
     } finally { layer.context.restore(); }
   }
 
+  function placeShown() {
+    if (shown.origin === null) return;
+    canvas.style.left = `${shown.origin / shown.ratio}px`;
+    canvas.style.width = `${shown.columns / shown.ratio}px`;
+  }
+
+  function cleanColumns(layer) {
+    if (!layer || layer.origin === null) return 0;
+    const dirty = layer.dirty.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, layer.origin + layer.columns) - Math.max(a, layer.origin)), 0);
+    return layer.columns - dirty;
+  }
+
   /** Places source's pixels into target at origin. Returns the columns target must still paint. */
   function copyLayer(source, target, origin) {
-    const start = source.origin === null ? origin : Math.max(source.origin, origin);
-    const end = source.origin === null ? origin : Math.min(source.origin, origin) + columns;
+    const { columns, rows } = target;
+    const compatible = source.columns === columns && source.rows === rows && source.ratio === target.ratio;
+    const start = !compatible || source.origin === null ? origin : Math.max(source.origin, origin);
+    const end = !compatible || source.origin === null ? origin : Math.min(source.origin, origin) + columns;
     if (start >= end) {
       deviceOp(target, (ctx) => ctx.clearRect(0, 0, columns, rows));
       return [[origin, origin + columns]];
@@ -201,31 +250,91 @@ export function createWaveformSurface({
 
   function moveLive(origin) {
     current = null;
+    if (live.origin === null) {
+      live.origin = origin;
+      live.dirty = [[origin, origin + live.columns]];
+      if (!holding) placeShown();
+      return;
+    }
     const overlap = (layer) => {
-      if (!layer || layer.origin === null) return -1;
+      if (!layer || layer.origin === null || layer.columns !== live.columns || layer.ratio !== live.ratio) return -1;
       const start = Math.max(layer.origin, origin);
-      const end = Math.min(layer.origin, origin) + columns;
+      const end = Math.min(layer.origin, origin) + live.columns;
       if (start >= end) return 0;
       return end - start - clipRanges(layer.dirty, start, end).reduce((sum, [a, b]) => sum + b - a, 0);
     };
-    const source = returned?.seeded && overlap(returned) > overlap(live) ? returned : live;
+    // A replacement draft is a new picture. It does not adopt the image still on screen.
+    const source = !holding && returned?.seeded && overlap(returned) > overlap(live) ? returned : live;
     live.dirty = copyLayer(source, live, origin);
     live.origin = origin;
-    canvas.style.left = `${origin / ratio}px`;
-    canvas.style.width = `${columns / ratio}px`;
+    if (!holding) placeShown();
+  }
+
+  /** Draws the next picture offscreen. The canvas on screen is left untouched. */
+  function beginHold({ blank, widthPx, height: layerHeight, dpr: layerDpr }) {
+    if (live !== shown) {
+      if (current?.layer === live) current = null;
+      budget.release(live.canvas);
+      live = shown;
+      holding = false;
+    }
+    const draft = allocate(createCanvas(), widthPx, layerHeight, layerDpr);
+    if (!draft) return false;
+    const same = shown.origin !== null && draft.columns === shown.columns && draft.rows === shown.rows && draft.ratio === shown.ratio;
+    if (same && !blank) {
+      draft.dirty = copyLayer(shown, draft, shown.origin);
+      draft.origin = shown.origin;
+    } else if (same) {
+      draft.origin = shown.origin;
+      draft.dirty = [[shown.origin, shown.origin + draft.columns]];
+    }
+    if (current?.layer === shown) current = null;
+    live = draft;
+    holding = true;
+    return true;
+  }
+
+  /** Copies a finished visible window onto the canvas on screen, then paints margins there. */
+  function commitHold() {
+    if (!holding) return;
+    const [start, end] = visible();
+    if (live.origin === null || live.dirty.some(([a, b]) => a < end && b > start)) return;
+    if (live !== shown) {
+      if (shown.columns !== live.columns || shown.rows !== live.rows || shown.ratio !== live.ratio) {
+        const next = allocate(canvas, live.widthPx, live.height, requestedDpr);
+        if (!next) { holding = false; return; }
+        shown = next;
+      }
+      const width = Math.min(shown.columns, live.columns);
+      const heightPx = Math.min(shown.rows, live.rows);
+      deviceOp(shown, (ctx) => {
+        ctx.clearRect(0, 0, shown.columns, shown.rows);
+        ctx.drawImage(live.canvas, 0, 0, width, heightPx, 0, 0, width, heightPx);
+      });
+      shown.origin = live.origin;
+      shown.dirty = live.dirty.map((range) => range.slice());
+      if (current?.layer === live) current = null;
+      budget.release(live.canvas);
+      live = shown;
+    }
+    holding = false;
+    placeShown();
   }
 
   function ensureReturn() {
-    if (returnOrigin === null || returnBlocked) return null;
+    if (returnOrigin === null || returnBlocked || holding) return null;
     if (!returned) {
       const other = createCanvas();
-      const otherContext = prepareWaveformCanvas(other, widthPx, height, dpr, budget);
-      if (!otherContext || budget.getAllocation(other).dpr !== ratio || other.width !== columns) {
+      const otherContext = prepareWaveformCanvas(other, live.widthPx, live.height, requestedDpr, budget);
+      if (!otherContext || budget.getAllocation(other).dpr !== live.ratio || other.width !== live.columns) {
         if (otherContext) budget.release(other);
         returnBlocked = true;
         return null;
       }
-      returned = { canvas: other, context: otherContext, origin: null, dirty: [], seeded: false };
+      returned = {
+        canvas: other, context: otherContext, origin: null, dirty: [], seeded: false,
+        ratio: live.ratio, columns: other.width, rows: other.height, widthPx: live.widthPx, height: live.height,
+      };
     }
     if (!returned.seeded) {
       returned.dirty = copyLayer(live, returned, returnOrigin);
@@ -269,22 +378,106 @@ export function createWaveformSurface({
 
   return {
     canvas,
-    dpr: ratio,
+    get dpr() { return live.ratio; },
     /** Clip or lane length the retained window was built for, in CSS px. */
     get extentPx() { return coveredPx; },
+    /** True while the canvas on screen is still the previous picture. */
+    presenting() { return holding; },
     /** Grows the covered length. A larger canvas is allocated by the caller; this only extends the clamp. */
     setExtent(nextPx) {
       const next = finite(nextPx);
       if (!(next > coveredPx)) return false;
       coveredPx = next;
-      extent = Math.ceil(coveredPx * ratio);
+      return true;
+    },
+    /**
+     * Starts a new picture when `replace` is set or the canvas must grow. An existing picture stays
+     * on screen until the new visible window is painted. A shorter clip keeps the canvas it has.
+     */
+    revise({ extentPx: nextExtent = coveredPx, viewportWidthPx: nextViewport = viewportWidth, height: nextHeight = cssHeight, dpr: nextDpr = requestedDpr, replace = false } = {}) {
+      if (disposed) return false;
+      const nextCovered = Math.max(0, finite(nextExtent));
+      const nextView = Math.max(0, finite(nextViewport));
+      const cap = 3 * nextView;
+      const nextWidth = Math.min(nextCovered, cap);
+      // A shorter clip keeps the pixels it already has. The canvas shrinks only when the
+      // margin cap, the height, or the resolution does, or when the picture is replaced.
+      const resized = nextWidth > shown.widthPx + 0.5 || cap + 0.5 < shown.widthPx
+        || nextHeight !== shown.height || nextDpr !== requestedDpr;
+      if (!replace && !resized) {
+        if (nextCovered > coveredPx + 0.5) coveredPx = nextCovered;
+        if (Math.abs(nextView - viewportWidth) > 0.5) viewportWidth = nextView;
+        return false;
+      }
+      coveredPx = replace ? nextCovered : Math.max(coveredPx, nextCovered);
+      viewportWidth = nextView;
+      cssHeight = nextHeight;
+      requestedDpr = nextDpr;
+      releaseReturn();
+      returnBlocked = false;
+      const widthPx = Math.min(coveredPx, 3 * viewportWidth);
+      if (!(widthPx > 0) || !(nextHeight > 0)) return false;
+      if (cleanColumns(shown) > 0 && beginHold({ blank: true, widthPx, height: nextHeight, dpr: nextDpr })) return true;
+      if (resized || shown.widthPx !== widthPx || shown.height !== nextHeight) {
+        const next = allocate(canvas, widthPx, nextHeight, nextDpr);
+        if (!next) return false;
+        shown = live = next;
+        holding = false;
+        return true;
+      }
+      if (live.origin !== null) {
+        deviceOp(live, (ctx) => ctx.clearRect(0, 0, live.columns, live.rows));
+        live.dirty = [[live.origin, live.origin + live.columns]];
+      }
+      return true;
+    },
+    /**
+     * Swaps in a picture painted for a zoom that has not been shown yet. The visible window is
+     * copied now, before the browser paints; the margins stay dirty and fill in afterwards.
+     */
+    showPrepared({ extentPx: nextExtent, viewportWidthPx: nextViewport, height: nextHeight, dpr: nextDpr, bitmap }) {
+      if (disposed || !bitmap?.canvas) return false;
+      if (live !== shown) {
+        if (current?.layer === live) current = null;
+        budget.release(live.canvas);
+        live = shown;
+        holding = false;
+      }
+      coveredPx = Math.max(0, finite(nextExtent));
+      viewportWidth = Math.max(0, finite(nextViewport));
+      cssHeight = nextHeight;
+      requestedDpr = nextDpr;
+      releaseReturn();
+      returnBlocked = false;
+      const widthPx = Math.min(coveredPx, 3 * viewportWidth);
+      if (!(widthPx > 0) || !(nextHeight > 0)) return false;
+      const next = allocate(canvas, widthPx, nextHeight, nextDpr);
+      if (!next) return false;
+      shown = live = next;
+      holding = false;
+      current = null;
+      moveLive(originFor(viewportLeft));
+      const srcW = bitmap.canvas.width;
+      const dst = Math.round(bitmap.leftPx * live.ratio);
+      const dstW = Math.max(1, Math.round((bitmap.widthPx || 0) * live.ratio));
+      const dstStart = Math.max(dst, live.origin ?? dst);
+      const dstEnd = Math.min(dst + dstW, (live.origin ?? dst) + live.columns);
+      if (srcW > 0 && dstEnd - dstStart >= 1 && live.origin !== null) {
+        const srcStart = (dstStart - dst) * srcW / dstW;
+        const srcWidth = (dstEnd - dstStart) * srcW / dstW;
+        deviceOp(live, (ctx) => {
+          ctx.drawImage(bitmap.canvas, srcStart, 0, srcWidth, bitmap.canvas.height || live.rows,
+            dstStart - live.origin, 0, dstEnd - dstStart, live.rows);
+        });
+        live.dirty = subtractRange(live.dirty, dstStart, dstEnd);
+      }
       return true;
     },
     /** Moves the viewport; returns true when this exposed pixels that need painting. */
     setViewport(left) {
       viewportLeft = finite(left);
-      const [a, b] = span(viewportWidthPx / 2);
-      if (live.origin !== null && (a >= b || (a >= live.origin && b <= live.origin + columns))) return false;
+      const [a, b] = span(viewportWidth / 2);
+      if (live.origin !== null && (a >= b || (a >= live.origin && b <= live.origin + live.columns))) return false;
       const origin = originFor(viewportLeft);
       if (origin === live.origin) return false;
       moveLive(origin);
@@ -302,80 +495,94 @@ export function createWaveformSurface({
     },
     /** View-local CSS px whose pixels must be repainted. */
     invalidate(fromPx, toPx) {
+      const ratio = live.ratio;
       const a = Math.floor(fromPx * ratio);
       const b = Math.ceil(toPx * ratio);
+      const [start, end] = visible();
+      if (!holding && cleanColumns(shown) > 0 && a < end && b > start) {
+        beginHold({ blank: false, widthPx: shown.widthPx, height: shown.height, dpr: requestedDpr });
+      }
       for (const layer of [live, returned]) {
-        if (layer?.origin != null) layer.dirty = addRange(layer.dirty, Math.max(a, layer.origin), Math.min(b, layer.origin + columns));
+        if (layer?.origin != null) layer.dirty = addRange(layer.dirty, Math.max(a, layer.origin), Math.min(b, layer.origin + layer.columns));
       }
       if (current && current.a < b && current.b > a) current = null;
     },
-    /** Drops every retained pixel, for replaced sources. */
+    /** Drops every retained pixel, for replaced sources. The picture on screen stays until the new one is ready. */
     clear() {
       current = null;
-      if (live.origin !== null) {
-        deviceOp(live, (ctx) => ctx.clearRect(0, 0, columns, rows));
-        live.dirty = [[live.origin, live.origin + columns]];
-      }
       if (returned) returned.seeded = false;
+      if (cleanColumns(shown) > 0 && beginHold({ blank: true, widthPx: shown.widthPx, height: shown.height, dpr: requestedDpr })) return;
+      if (live.origin !== null) {
+        deviceOp(live, (ctx) => ctx.clearRect(0, 0, live.columns, live.rows));
+        live.dirty = [[live.origin, live.origin + live.columns]];
+      }
     },
-    /** Live canvas in clip-local device columns, including ranges that are not painted yet. */
+    /** Displayed canvas in clip-local device columns, including ranges that are not painted yet. */
     bitmap() {
-      if (disposed || live.origin === null) return null;
+      const layer = shown;
+      if (disposed || layer.origin === null) return null;
       return {
-        canvas, dpr: ratio, origin: live.origin, columns,
-        dirty: live.dirty.map((range) => range.slice()),
+        canvas: layer.canvas, dpr: layer.ratio, origin: layer.origin, columns: layer.columns,
+        dirty: layer.dirty.map((range) => range.slice()),
       };
     },
     /** Copies painted device columns into this canvas and keeps them. */
     adoptPainted(sourceCanvas, srcX, dstAbsolute, width) {
-      if (disposed || live.origin === null || !(width >= 1)) return 0;
+      if (disposed || live.origin === null || !(width >= 1) || holding) return 0;
       const dst = Math.round(dstAbsolute);
       const src = Math.round(srcX);
       const wide = Math.round(width);
       const dstStart = Math.max(dst, live.origin);
-      const dstEnd = Math.min(dst + wide, live.origin + columns);
+      const dstEnd = Math.min(dst + wide, live.origin + live.columns);
       if (!(dstEnd - dstStart >= 1)) return 0;
       const srcStart = src + (dstStart - dst);
       deviceOp(live, (ctx) => {
-        ctx.drawImage(sourceCanvas, srcStart, 0, dstEnd - dstStart, rows, dstStart - live.origin, 0, dstEnd - dstStart, rows);
+        ctx.drawImage(sourceCanvas, srcStart, 0, dstEnd - dstStart, live.rows, dstStart - live.origin, 0, dstEnd - dstStart, live.rows);
       });
       live.dirty = subtractRange(live.dirty, dstStart, dstEnd);
       if (current && current.layer === live && current.a < dstEnd && current.b > dstStart) current = null;
       return dstEnd - dstStart;
     },
-    /** View-local CSS px currently covered by the live canvas. */
+    /** View-local CSS px currently covered by the paint target. */
     windowPx() {
       const origin = live.origin ?? originFor(viewportLeft);
-      return { leftPx: origin / ratio, rightPx: (origin + columns) / ratio };
+      return { leftPx: origin / live.ratio, rightPx: (origin + live.columns) / live.ratio };
     },
     hasVisibleWork() {
       const [start, end] = visible();
       return live.origin === null || live.dirty.some(([a, b]) => a < end && b > start);
     },
+    hasMarginWork() {
+      if (live.origin === null) return false;
+      const [start, end] = visible();
+      return live.dirty.some(([a, b]) => a < start || b > end);
+    },
+    hasReturnWork() { return returnPending(); },
     hasWork() {
       return live.origin === null || Boolean(current) || live.dirty.length > 0 || returnPending();
     },
     /** Paints one slice; returns true while work remains. */
-    run(budget) {
+    run(runBudget) {
       if (disposed) return false;
       if (live.origin === null) moveLive(originFor(viewportLeft));
       if (!current) {
         const strip = nextStrip();
         if (!strip) return false;
         const { layer, a, b } = strip;
-        deviceOp(layer, (ctx) => ctx.clearRect(a - layer.origin, 0, b - a, rows));
+        deviceOp(layer, (ctx) => ctx.clearRect(a - layer.origin, 0, b - a, layer.rows));
         strip.job = paint(layer.context, {
-          surfaceLeftPx: layer.origin / ratio, surfaceWidthPx: columns / ratio,
-          fromColumn: a - layer.origin, toColumn: b - layer.origin, dpr: ratio,
+          surfaceLeftPx: layer.origin / layer.ratio, surfaceWidthPx: layer.columns / layer.ratio,
+          fromColumn: a - layer.origin, toColumn: b - layer.origin, dpr: layer.ratio,
         });
         current = strip;
       }
       const strip = current;
       let more;
-      try { more = strip.job(budget) === true; } catch (error) { current = null; throw error; }
+      try { more = strip.job(runBudget) === true; } catch (error) { current = null; throw error; }
       if (!more && current === strip) {
         strip.layer.dirty = subtractRange(strip.layer.dirty, strip.a, strip.b);
         current = null;
+        if (holding && strip.layer === live) commitHold();
       }
       return this.hasWork();
     },
@@ -383,7 +590,8 @@ export function createWaveformSurface({
       disposed = true;
       current = null;
       releaseReturn();
-      budget.release(canvas);
+      if (live !== shown) budget.release(live.canvas);
+      budget.release(shown.canvas);
     },
   };
 }

@@ -927,5 +927,67 @@ export function createWaveformService({
   return service;
 }
 
+/**
+ * Pin each decoded stem and resolve when its overview is ready or has failed.
+ * Call the returned release after mounted views have pinned the same buffers.
+ */
+export function settleWaveformSources(service, entries, { isCancelled, onProgress } = {}) {
+  const unique = [];
+  const seen = new Set();
+  for (const entry of entries || []) {
+    if (!entry?.audioBuffer || entry.blobId == null || seen.has(entry.blobId)) continue;
+    seen.add(entry.blobId);
+    unique.push(entry);
+  }
+  const releases = [];
+  const pending = new Set(unique.map((entry) => String(entry.blobId)));
+  let settled = 0;
+  const report = () => onProgress?.({ ready: settled, total: unique.length });
+  const note = (blobId) => {
+    const id = String(blobId);
+    if (!pending.has(id)) return;
+    pending.delete(id);
+    settled += 1;
+    report();
+  };
+  report();
+  if (!unique.length) return Promise.resolve(() => {});
+  return new Promise((resolve) => {
+    let finished = false;
+    let poll = 0;
+    const release = () => { for (const unpin of releases) unpin(); };
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      unsubscribe();
+      clearInterval(poll);
+      resolve(release);
+    };
+    const unsubscribe = service.subscribe((event) => {
+      if (isCancelled?.()) { finish(); return; }
+      if (event?.type !== 'ready' && event?.type !== 'error') return;
+      for (const id of event.blobIds || []) note(id);
+      if (!pending.size) finish();
+    });
+    poll = setInterval(() => {
+      if (isCancelled?.()) { finish(); return; }
+      for (const entry of unique) {
+        const state = service.getSource(entry.blobId, entry.audioBuffer);
+        if (!state || state.status === 'ready' || state.status === 'error') note(entry.blobId);
+      }
+      if (!pending.size) finish();
+    }, 50);
+    for (const entry of unique) {
+      if (finished) break;
+      service.ensureSource(entry.blobId, entry.audioBuffer, { priority: 1 });
+      releases.push(service.pinSource(entry.blobId, entry.audioBuffer));
+      const state = service.getSource(entry.blobId, entry.audioBuffer);
+      if (!state || state.status === 'ready' || state.status === 'error') note(entry.blobId);
+      if (!pending.size) finish();
+    }
+    if (!finished && isCancelled?.()) finish();
+  });
+}
+
 export const waveformService = createWaveformService();
 export default waveformService;

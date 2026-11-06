@@ -111,6 +111,18 @@ describe('shared waveform scheduler', () => {
     expect(h.scheduler.getStats()).toMatchObject({ pending: 0, backgroundPending: 0, framePending: false });
   });
 
+  it('paints on-screen work, then side margins, then rows above and below, then the start', () => {
+    const h = harness();
+    const order = [];
+    const job = (name, tier) => () => { order.push(name); h.spend(1); return false; };
+    h.scheduler.schedule('start', job('start'), { tier: 3 });
+    h.scheduler.schedule('vertical', job('vertical'), { tier: 2 });
+    h.scheduler.schedule('margin', job('margin'), { tier: 1 });
+    h.scheduler.schedule('screen', job('screen'), { tier: 0 });
+    h.flush();
+    expect(order).toEqual(['screen', 'margin', 'vertical', 'start']);
+  });
+
   it('ages continuations past an endless high-priority self-notification stream', () => {
     const h = harness();
     let lowRuns = 0;

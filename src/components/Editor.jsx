@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import {
   ArrowLeft,
   AudioLines,
@@ -28,6 +29,7 @@ import { createTrack, createClip, normalizeExportSettings, TRACK_ROLES } from '.
 import FileImport from './FileImport';
 import TrackList from './TrackList';
 import Timeline from './Timeline';
+import { TIMELINE_RULER_HEIGHT } from '../utils/timelineViewport';
 import ExportDialog from './ExportDialog';
 import CreditsEditorDialog from './CreditsEditorDialog';
 import LyricsEditorDialog from './LyricsEditorDialog';
@@ -65,6 +67,8 @@ import {
   SUPPORTED_IMPORT_EXTENSIONS,
 } from '../lib/mediaEncoding';
 import { loadStemsIntoMediaCache } from '../lib/loadStemAudio';
+import { settleWaveformSources, waveformService } from '../lib/waveformService';
+import { getWaveformRenderer } from '../lib/waveformFeature';
 import { registerAndUploadMediaBlob } from '../lib/mediaUpload';
 import {
   finishLoadProgress,
@@ -72,6 +76,7 @@ import {
   logLoadProgress,
   summarizeProjectForLoadLog,
   updateLoadProgress,
+  updateWaveformProgress,
 } from '../lib/loadProgress';
 import {
   GROUP_ROLE_CHOIRS,
@@ -293,6 +298,23 @@ function isNodeInsideGroup(project, groupNodeId, nodeId) {
   return false;
 }
 
+function waitForOpenedWaveforms(isCancelled, expectNodes) {
+  const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (isCancelled()) { resolve(); return; }
+      const nodes = [...document.querySelectorAll('[data-waveform-status]')];
+      const pending = nodes.some((node) => node.getAttribute('data-waveform-status') === 'loading');
+      const expectPainted = expectNodes && getWaveformRenderer() !== 'legacy';
+      const settled = expectPainted ? nodes.length > 0 && !pending : !pending;
+      const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started;
+      if (settled || elapsed > 20000) { resolve(); return; }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
 function Editor({
   onBackToDashboard,
   onSwitchToPlayerMode = null,
@@ -339,6 +361,9 @@ function Editor({
   const masterVolumeRef = useRef(toFiniteNumber(project?.masterVolume, 100));
   const masterAnimationFrameRef = useRef(null);
   const [mediaMap, setMediaMap] = useState(new Map());
+  const [timelineReady, setTimelineReady] = useState(
+    () => getLoadProgress()?.kind !== 'open' || getLoadProgress()?.status !== 'running'
+  );
   const [missingMediaBlobIds, setMissingMediaBlobIds] = useState(() => new Set());
   const reloadingMediaBlobIdsRef = useRef(new Set());
   const [recordingSegments, setRecordingSegments] = useState([]);
@@ -1082,6 +1107,7 @@ function Editor({
     const isStale = () => (
       Boolean(options.isCancelled?.())
       || (!isolated && audioLoadGenerationRef.current !== generation)
+      || getLoadProgress()?.status === 'aborted'
     );
     const checkpoint = () => {
       if (!isStale()) return;
@@ -1176,8 +1202,25 @@ function Editor({
       if (!isolated) {
         updateLoadProgress({ current: 'Publishing media map to editor' });
       }
-      if (shouldFinish) {
-        logLoadProgress('Editor audio buffers ready; waveforms may still draw after Close');
+      if (shouldFinish && getLoadProgress()?.kind === 'open' && getLoadProgress()?.status === 'running') {
+        checkpoint();
+        updateLoadProgress({ phase: 'Waveforms', current: 'Preparing waveforms…' });
+        const releasePins = await settleWaveformSources(waveformService, blobIds.map((blobId) => ({
+          blobId,
+          audioBuffer: audioManager.mediaCache.get(blobId),
+        })), {
+          isCancelled: isStale,
+          onProgress: ({ ready, total }) => updateWaveformProgress({ ready, total }),
+        });
+        try {
+          checkpoint();
+          updateLoadProgress({ current: 'Drawing waveforms…' });
+          const expectNodes = blobIds.some((blobId) => audioManager.mediaCache.has(blobId));
+          flushSync(() => setTimelineReady(true));
+          await waitForOpenedWaveforms(isStale, expectNodes);
+        } finally {
+          releasePins();
+        }
       }
     } catch (error) {
       if (error?.name === 'StaleAudioLoad') {
@@ -4157,7 +4200,7 @@ function Editor({
   }, [canEditVisibleLyrics, setLyricsLaneVisible, updateProject]);
 
   useKeyboardShortcuts({
-    enabled: !showFileImport,
+    enabled: timelineReady && !showFileImport,
     onPlayPause: handlePlay,
     onRecord: handleRecord,
     onToggleLoop: handleToggleLoop,
@@ -4173,6 +4216,10 @@ function Editor({
     onToggleFold: handleToggleSelectedGroupFold,
     onToggleFoldRecursive: handleToggleSelectedGroupFoldRecursive,
   });
+
+  if (!timelineReady) {
+    return <div className="h-full w-full bg-gray-950" data-editor-preparing="" />;
+  }
 
   return (
     <div
@@ -4679,11 +4726,15 @@ function Editor({
           displayMode={dawView.displayMode}
           showRms={dawView.showRms}
           showClipping={dawView.showClipping}
+          onAddTrack={structuralEditsAllowed && caps.canCreateTracks ? handleAddEmptyTrack : null}
         >
-          {({ header, tracks, zoomOverlay, lyricsLane }) => (
-            <div className={`relative grid grid-cols-[384px_1fr] ${lyricsTrackShown ? 'grid-rows-[24px_44px_minmax(0,1fr)]' : 'grid-rows-[24px_minmax(0,1fr)]'} h-full min-h-0 min-w-0`}>
-              <div className="bg-gray-800 border-b border-r border-gray-700" />
-              <div className="relative z-50 overflow-visible min-w-0">{header}</div>
+          {({ header, tracks, zoomOverlay, lyricsLane, rulerTools }) => (
+            <div
+              className="relative grid h-full min-h-0 min-w-0 grid-cols-[384px_1fr]"
+              style={{ gridTemplateRows: lyricsTrackShown ? `${TIMELINE_RULER_HEIGHT}px 44px minmax(0,1fr)` : `${TIMELINE_RULER_HEIGHT}px minmax(0,1fr)` }}
+            >
+              <div className="flex min-w-0 items-stretch border-b border-r border-gray-700 bg-gray-800">{rulerTools}</div>
+              <div className="relative z-50 min-w-0 overflow-hidden">{header}</div>
               {lyricsTrackShown ? (
                 <>
                   <div
@@ -4749,7 +4800,10 @@ function Editor({
                   ) : null}
                 </>
               ) : null}
-              <div className={`absolute ${lyricsTrackShown ? 'top-[76px]' : 'top-[32px]'} right-3 z-40 pointer-events-auto`}>{zoomOverlay}</div>
+              <div
+                className="pointer-events-auto absolute right-3 z-40"
+                style={{ top: (lyricsTrackShown ? TIMELINE_RULER_HEIGHT + 44 : TIMELINE_RULER_HEIGHT) + 8 }}
+              >{zoomOverlay}</div>
               <div
                 ref={timelineRowsScrollAreaRef}
                 className="col-span-2 min-h-0 overflow-y-auto scrollbar-hidden relative z-10"

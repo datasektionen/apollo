@@ -168,15 +168,60 @@ describe('retained waveform surface', () => {
     h.surface.setReturnViewport(1050);
     h.settle();
     h.strips.length = 0;
+    const kept = h.canvas.columns.slice();
     h.surface.invalidate(1100, 1110);
+    expect(h.surface.presenting()).toBe(true);
+    expect(h.canvas.columns).toEqual(kept);
     h.settle();
+    expect(h.surface.presenting()).toBe(false);
     expect(h.strips.map(({ from, to }) => [from, to])).toEqual([[1100, 1110], [1100, 1110]]);
     h.strips.length = 0;
     h.surface.clear();
-    expect(h.canvas.columns.every((value) => value === undefined)).toBe(true);
+    expect(h.surface.presenting()).toBe(true);
+    expect(h.canvas.columns.every((value, column) => value === h.origin() + column)).toBe(true);
     expect(h.surface.hasVisibleWork()).toBe(true);
     h.settle();
+    expect(h.surface.presenting()).toBe(false);
     expect(h.exact()).toBe(true);
+    h.surface.dispose();
+  });
+
+  it('keeps the displayed picture until a replacement visible window is painted', () => {
+    const h = harness();
+    h.surface.setViewport(1000);
+    h.settle();
+    const kept = h.canvas.columns.slice();
+    expect(h.surface.revise({ extentPx: 10000, viewportWidthPx: 100, height: 10, dpr: 1, replace: true })).toBe(true);
+    expect(h.surface.presenting()).toBe(true);
+    expect(h.canvas.columns).toEqual(kept);
+    h.surface.run({});
+    expect(h.surface.presenting()).toBe(false);
+    expect(h.surface.hasVisibleWork()).toBe(false);
+    h.settle();
+    expect(h.exact()).toBe(true);
+    expect(h.budget.getStats().surfaces).toBe(1);
+    h.surface.dispose();
+  });
+
+  it('installs a prepared zoom picture in the visible window and leaves the margins dirty', () => {
+    const h = harness();
+    h.surface.setViewport(1000);
+    h.settle();
+    const bitmap = columnCanvas();
+    const width = 164;
+    bitmap.width = width;
+    bitmap.height = 10;
+    bitmap.columns = Array.from({ length: width }, () => 7);
+    h.surface.setViewport(1000);
+    expect(h.surface.showPrepared({
+      extentPx: 10000, viewportWidthPx: 100, height: 10, dpr: 1,
+      bitmap: { canvas: bitmap, dpr: 1, leftPx: 968, widthPx: width },
+    })).toBe(true);
+    expect(h.surface.presenting()).toBe(false);
+    expect(h.surface.hasVisibleWork()).toBe(false);
+    expect(h.surface.hasMarginWork()).toBe(true);
+    const origin = h.origin();
+    expect(h.canvas.columns.slice(968 - origin, 968 - origin + width).every((value) => value === 7)).toBe(true);
     h.surface.dispose();
   });
 

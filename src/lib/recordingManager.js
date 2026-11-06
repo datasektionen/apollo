@@ -208,6 +208,7 @@ class RecordingManager {
     this.waveformCapture = null;
     this.waveformSegment = null;
     this.waveformSnapshot = null;
+    this.waveformDirtyFrom = null;
     this.waveformListeners = new Set();
     this.waveformService = waveformService;
   }
@@ -231,10 +232,16 @@ class RecordingManager {
     return this.waveformSnapshot;
   }
 
-  publishWaveform() {
+  publishWaveform(fromFrame) {
+    if (Number.isFinite(fromFrame)) {
+      this.waveformDirtyFrom = this.waveformDirtyFrom == null ? fromFrame : Math.min(this.waveformDirtyFrom, fromFrame);
+    }
     const segment = this.waveformSegment;
+    const dirtyFromFrame = this.waveformDirtyFrom;
+    this.waveformDirtyFrom = null;
     this.waveformSnapshot = segment && this.waveformCapture ? {
       generation: this.recordingGeneration,
+      dirtyFromFrame,
       capture: this.waveformCapture,
       sampleRate: this.getSampleRate(),
       trackId: segment.trackId,
@@ -771,7 +778,7 @@ class RecordingManager {
     this.recordingGeneration += 1;
     this.clearWaveform();
     this.waveformCapture = createRecordingWaveform({
-      sampleRate: this.getSampleRate(), onChange: () => this.publishWaveform(),
+      sampleRate: this.getSampleRate(), onChange: (info) => this.publishWaveform(info?.fromFrame),
     });
     const sourceStart = startFrame + this.framesForMs(roundTripMs);
     for (const chunk of this.chunks) {

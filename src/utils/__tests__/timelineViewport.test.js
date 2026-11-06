@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  anchoredScroll, boundedRange, clampDuration, durationFromSlider, followScroll, intersectsViewport, normalizeWheel,
-  rowAtY, rowOffsets, rulerInterval, scrollSegment, visibleRulerTicks, zoomAnchor,
+  anchoredScroll, boundedRange, centeredScroll, clampDuration, durationFromSlider, easeFollowScroll, formatRulerLabel,
+  intersectsViewport, normalizeWheel, rowAtY, rowOffsets, rulerInterval, rulerScale, scrollSegment, visibleRulerTicks, zoomAnchor,
 } from '../timelineViewport';
 
 describe('timeline viewport geometry', () => {
@@ -21,14 +21,54 @@ describe('timeline viewport geometry', () => {
     expect(clampDuration(100, 1, 10)).toBe(10);
     expect(clampDuration(NaN, 1, 10)).toBe(10);
   });
-  it('turns the follow page only at the right edge or left of the view, clamped to the timeline', () => {
-    expect(followScroll(1500, 1000, 800, 10000)).toBeNull();
-    expect(followScroll(1776, 1000, 800, 10000)).toBeNull();
-    expect(followScroll(1777, 1000, 800, 10000)).toBe(1697);
-    expect(followScroll(900, 1000, 800, 10000)).toBe(820);
-    expect(followScroll(40, 1000, 800, 10000)).toBe(0);
-    expect(followScroll(9990, 9000, 800, 9800)).toBeNull();
-    expect(followScroll(9990, 8000, 800, 9800)).toBe(9000);
+  it('eases an on-screen playhead toward center and jumps only when it is off screen', () => {
+    expect(centeredScroll(2000, 800, 10000)).toBe(1600);
+    expect(easeFollowScroll({ playheadPx: 2000, scrollLeft: 0, width: 800, timelineWidth: 10000 })).toBe(1600);
+    const step = (playheadPx, scrollLeft, previousPlayheadPx = null) => easeFollowScroll({
+      playheadPx, previousPlayheadPx, scrollLeft, width: 800, timelineWidth: 10000, dt: 1 / 60,
+    });
+    const settle = (playheadPx, frames) => {
+      let scroll = 0;
+      let previous = null;
+      for (let i = 0; i < frames; i += 1) {
+        scroll = step(playheadPx, scroll, previous);
+        previous = playheadPx;
+      }
+      return scroll;
+    };
+    const near = settle(440, 90); // 40px from the clamped center
+    const far = settle(800, 90); // 400px from the center
+    expect(near / 40).toBeGreaterThan(far / 400);
+    expect(near).toBeGreaterThan(0);
+    expect(near).toBeLessThan(40);
+    expect(far).toBeGreaterThan(0);
+    expect(far).toBeLessThan(120);
+    expect(step(600, 0)).toBeGreaterThan(0);
+    expect(step(600, 0)).toBeLessThan(2);
+    expect(step(2100, 1600, 2000)).toBeCloseTo(1700);
+    expect(easeFollowScroll({ playheadPx: 9900, scrollLeft: 8000, width: 800, timelineWidth: 9800 })).toBe(9000);
+    expect(step(100, 0, 0)).toBe(0);
+  });
+  it('switches ruler units with zoom the way a time ruler does', () => {
+    const clock = rulerScale(80 / 30000);
+    expect(clock.unit).toBe('clock');
+    expect(clock.majorMs).toBe(30000);
+    expect(formatRulerLabel(0, clock.majorMs, clock.unit)).toBe('0:00');
+    expect(formatRulerLabel(90000, clock.majorMs, clock.unit)).toBe('1:30');
+    expect(formatRulerLabel(3661000, clock.majorMs, clock.unit)).toBe('1:01:01');
+    const seconds = rulerScale(80 / 200);
+    expect(seconds.unit).toBe('seconds');
+    expect(seconds.majorMs).toBe(200);
+    expect(formatRulerLabel(1500, seconds.majorMs, seconds.unit)).toBe('1.5');
+    const millis = rulerScale(80 / 2);
+    expect(millis.unit).toBe('millis');
+    expect(formatRulerLabel(5, millis.majorMs, millis.unit)).toBe('5 ms');
+    const samples = rulerScale(192, { sampleRate: 48000 });
+    expect(samples.unit).toBe('samples');
+    expect(samples.majorMs * 48).toBeCloseTo(20);
+    expect(formatRulerLabel(1000, samples.majorMs, samples.unit, 48000)).toBe('48000');
+    expect(samples.subMinorMs).toBeLessThan(samples.majorMs);
+    expect(clock.majorMs * (80 / 30000)).toBeGreaterThanOrEqual(79.999);
   });
   it('normalizes pixel, line and page wheel events', () => {
     expect(normalizeWheel({ deltaX: 1, deltaY: -2, deltaMode: 0 }, 900)).toEqual({ x: 1, y: -2 });

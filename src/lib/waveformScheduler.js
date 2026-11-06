@@ -7,7 +7,8 @@ import { yieldWaveformTask } from './waveformData';
  * frame started, stopping as soon as inputPending() reports queued input. The frame callback
  * itself never grows, so input handled later in that frame is not delayed by refinement.
  * interactionMs spans the gaps between wheel notches or slow slider steps of one gesture.
- * Background jobs (offscreen margins) run only while no foreground job is queued.
+ * Lower tiers run first: 0 on screen, 1 left/right margins, 2 rows above and below,
+ * 3 the return-to-start window. background: true is tier 1.
  */
 export function createWaveformScheduler({
   requestFrame = (callback) => requestAnimationFrame(callback),
@@ -44,8 +45,8 @@ export function createWaveformScheduler({
       do {
         let entry;
         for (const candidate of jobs.values()) {
-          if (entry && candidate.background !== entry.background) {
-            if (!candidate.background) entry = candidate;
+          if (entry && candidate.tier !== entry.tier) {
+            if (candidate.tier < entry.tier) entry = candidate;
             continue;
           }
           const score = candidate.waitSince - candidate.priority * 2;
@@ -54,7 +55,7 @@ export function createWaveformScheduler({
         }
         if (!entry) break;
         jobs.delete(entry.key);
-        if (!entry.background) stats.maxWaitSlices = Math.max(stats.maxWaitSlices, turn - entry.waitSince);
+        if (entry.tier === 0) stats.maxWaitSlices = Math.max(stats.maxWaitSlices, turn - entry.waitSince);
         running = entry;
         let more = false;
         try { more = entry.draw(budget) === true; }
@@ -106,13 +107,15 @@ export function createWaveformScheduler({
     }
   }
   return {
-    schedule(key, draw, { priority = 0, background = false } = {}) {
+    schedule(key, draw, { priority = 0, background = false, tier } = {}) {
       const queued = jobs.get(key);
       const previous = queued || (running?.key === key ? running : undefined);
       if (previous) { previous.cancelled = true; stats.cancelled += 1; }
+      const rank = Number.isInteger(tier) ? tier : (background ? 1 : 0);
       // Repeated notifications replace work without moving it to the back of the queue.
       const entry = {
-        key, draw, priority: Math.max(-4, Math.min(4, Number.isFinite(priority) ? priority : 0)), background: Boolean(background),
+        key, draw, priority: Math.max(-4, Math.min(4, Number.isFinite(priority) ? priority : 0)),
+        tier: rank, background: rank > 0,
         cancelled: false, waitSince: queued?.waitSince ?? (previous === running && running ? turn + 1 : turn),
         order: queued?.order ?? ++sequence,
       };

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { webcrypto } from 'node:crypto';
-import { createWaveformService } from '../waveformService';
+import { createWaveformService, settleWaveformSources } from '../waveformService';
 import { createWaveformWorkerHandler } from '../waveform.worker';
 import { createWaveformPersistence } from '../waveformPersistence';
 import { WAVEFORM_CHUNK_SAMPLES } from '../waveformData';
@@ -327,6 +327,24 @@ describe('verified persistence through the source service', () => {
     expect(third.pyramid).toEqual(first.pyramid);
     expect(persistence.getStats().hits).toBe(0);
     expect(service.getStats().samplesScanned).toBe(17000 * 3);
+  });
+
+  it('settles pinned overviews before the open screen reveals them', async () => {
+    const service = makeService();
+    const first = audioBuffer([[0.25, -0.5, 0.75]]);
+    const second = audioBuffer([[0.1, 0.2]]);
+    const progress = [];
+    const release = await settleWaveformSources(service, [
+      { blobId: 'a', audioBuffer: first },
+      { blobId: 'b', audioBuffer: second },
+      { blobId: 'a', audioBuffer: first },
+    ], { onProgress: (update) => progress.push(update) });
+    expect(service.getSource('a', first).status).toBe('ready');
+    expect(service.getSource('b', second).status).toBe('ready');
+    expect(progress.at(-1)).toEqual({ ready: 2, total: 2 });
+    expect(service.getStats().pinnedSources).toBe(2);
+    release();
+    expect(service.getStats().pins).toBe(0);
   });
 
   it('keeps usable summaries when cache reads and writes reject', async () => {

@@ -3,7 +3,8 @@ import { audioManager } from '../lib/audioManager';
 import { waveformScheduler } from '../lib/waveformScheduler';
 import { waveformService } from '../lib/waveformService';
 import { createWaveformDrawJob, getWaveformWindow, waveformRasterBudget, WAVEFORM_OVERSCAN_PX } from '../lib/waveformRenderer';
-import { createWaveformSurface, getRetainedWindow } from '../lib/waveformSurface';
+import { createWaveformSurface, getRetainedWindow, waveformPaintTier } from '../lib/waveformSurface';
+import { takeZoomBitmap } from '../lib/visibleZoom';
 import { getWaveformRenderer } from '../lib/waveformFeature';
 import LegacyWaveform from './LegacyWaveform';
 import { useSurfacePlacement, useWaveformSources, useWaveformViewport } from './Waveform';
@@ -76,7 +77,7 @@ function changedClipRanges(previous, next, pixelsPerMs) {
 function ModernGroupWaveform({
   clips: clipsProp = EMPTY_CLIPS, pixelsPerMs, viewportLeftPx = 0, viewportWidthPx = 0, returnViewportLeftPx, height = 80,
   globalPeakAmplitude = 1, displayMode = 'linear', showRms = false, showClipping = false,
-  missingMediaBlobIds,
+  missingMediaBlobIds, scheduleTier = 0, bitmapKey,
 }) {
   // Parents rebuild clip lists on unrelated project changes (loop toggles, track tree normalization);
   // equal content keeps the retained surface instead of repainting the lane.
@@ -99,16 +100,15 @@ function ModernGroupWaveform({
     viewportLeftPx, viewportWidthPx,
   });
   const measuredExtentPx = clips.reduce((end, clip) => Math.max(end, (clip.startMs + clip.durationMs) * pixelsPerMs), 0);
-  // A split keeps the same lane length. Sub-pixel jitter must not throw the canvas away.
-  const extentRef = useRef(0);
-  if (!(extentRef.current > 0) || measuredExtentPx > extentRef.current + 0.5) extentRef.current = measuredExtentPx;
-  const extentPx = extentRef.current;
   // Fit-to-project zoom can change by a rounding ulp when a clip is split. That is not a new picture.
   const zoomRef = useRef(pixelsPerMs);
-  if (!(zoomRef.current > 0) || Math.abs(pixelsPerMs - zoomRef.current) > 1e-4 * Math.max(pixelsPerMs, zoomRef.current)) {
-    zoomRef.current = pixelsPerMs;
-  }
+  const zoomChanged = !(zoomRef.current > 0) || Math.abs(pixelsPerMs - zoomRef.current) > 1e-4 * Math.max(pixelsPerMs, zoomRef.current);
+  if (zoomChanged) zoomRef.current = pixelsPerMs;
   const zoom = zoomRef.current;
+  // A split keeps the same lane length. A new zoom starts from the lane that zoom will show.
+  const extentRef = useRef(0);
+  if (zoomChanged || !(extentRef.current > 0) || measuredExtentPx > extentRef.current + 0.5) extentRef.current = measuredExtentPx;
+  const extentPx = extentRef.current;
   const viewportRef = useRef(viewportWidthPx);
   if (Math.abs(viewportWidthPx - viewportRef.current) > 0.5) viewportRef.current = viewportWidthPx;
   const viewportPx = viewportRef.current;
@@ -129,7 +129,37 @@ function ModernGroupWaveform({
     0, audioManager.mediaCache,
   );
   const repin = useCallback(() => observerRef.current?.invalidate(), [observerRef]);
-  const placementRef = useSurfacePlacement(surfaceRef, requestRef, viewportLeftPx, localReturn, repin);
+  const tierRef = useRef(scheduleTier);
+  tierRef.current = scheduleTier;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const missingKey = missingMediaBlobIds ? [...missingMediaBlobIds].sort().join(',') : '';
+  const picture = `${zoom}|${height}|${globalPeakAmplitude}|${displayMode}|${showRms}|${showClipping}|${view.dpr}|${missingKey}`;
+  const pictureRef = useRef(picture);
+  const prepareRef = useRef(() => false);
+  prepareRef.current = () => {
+    const surface = surfaceRef.current;
+    if (!surface) return false;
+    const prepared = takeZoomBitmap(bitmapKey, zoom);
+    if (prepared) {
+      pictureRef.current = picture;
+      surface.setViewport(viewportLeftPx);
+      const placed = surface.showPrepared({
+        extentPx, viewportWidthPx: viewportPx, height, dpr: view.dpr, bitmap: prepared,
+      });
+      waveformRasterBudget.release(prepared.canvas);
+      return placed ? 'prepared' : false;
+    }
+    const replace = pictureRef.current !== picture;
+    pictureRef.current = picture;
+    return surface.revise({
+      extentPx, viewportWidthPx: viewportPx, height, dpr: view.dpr, replace,
+    }) ? true : false;
+  };
+  const placementRef = useSurfacePlacement(
+    surfaceRef, requestRef, viewportLeftPx, localReturn, repin, prepareRef,
+    `${picture}|${extentPx}|${viewportPx}`,
+  );
   const appliedClipsRef = useRef(clips);
   const appliedBuffersRef = useRef(new Map());
   // Clip edits patch the retained lane. They do not rebuild it or show the loading label.
@@ -162,7 +192,7 @@ function ModernGroupWaveform({
     let disposed = false;
     let surface = null;
     let snapshots = new Map();
-    let background = false;
+    let scheduledTier = 0;
     let rasterBlocked = false;
     let seenReady = false;
     const canvas = canvasRef.current;
@@ -250,14 +280,23 @@ function ModernGroupWaveform({
       const drawState = drawRef.current;
       if (!(drawState.extentPx > 0)) { setStatus('ready'); return observer.dirty; }
       if (!surface) {
+        const measured = viewRef.current;
         surface = createWaveformSurface({
-          canvas, extentPx: drawState.extentPx, viewportWidthPx: viewportPx, height: drawState.height, dpr: view.dpr, paint,
+          canvas, extentPx: drawState.extentPx, viewportWidthPx: measured.viewportWidthPx, height: drawState.height, dpr: measured.dpr, paint,
         });
         rasterBlocked = !surface;
         if (!surface) { setStatus('limited'); return false; }
         surfaceRef.current = surface;
         surface.setViewport(placementRef.current.left);
         surface.setReturnViewport(placementRef.current.returnLeft);
+        const prepared = takeZoomBitmap(bitmapKey, drawRef.current.pixelsPerMs);
+        if (prepared) {
+          surface.showPrepared({
+            extentPx: drawState.extentPx, viewportWidthPx: measured.viewportWidthPx,
+            height: drawState.height, dpr: measured.dpr, bitmap: prepared,
+          });
+          waveformRasterBudget.release(prepared.canvas);
+        }
       } else if (update.stale) {
         // Replacements clear stale pixels at once; new summaries repaint only their clips.
         surface.clear();
@@ -274,13 +313,13 @@ function ModernGroupWaveform({
       if (!visibleWork) seenReady = true;
       setStatus(!seenReady && visibleWork ? 'loading' : statusOf());
       if (!more) return observer.dirty;
-      if (background !== !surface.hasVisibleWork()) { queue(); return false; }
+      if (waveformPaintTier(surface, tierRef.current) !== scheduledTier) { queue(); return false; }
       return true;
     };
     function queue() {
       if (disposed) return;
-      background = Boolean(surface) && !surface.hasVisibleWork();
-      cancel = waveformScheduler.schedule(key.current, run, { background });
+      scheduledTier = waveformPaintTier(surface, tierRef.current);
+      cancel = waveformScheduler.schedule(key.current, run, { tier: scheduledTier });
     }
     requestRef.current = queue;
     const unsubscribeRaster = waveformRasterBudget.subscribe(() => { if (rasterBlocked) queue(); });
@@ -295,7 +334,8 @@ function ModernGroupWaveform({
       surface?.dispose();
       surfaceRef.current = null;
     };
-  }, [zoom, viewportPx, height, globalPeakAmplitude, displayMode, showRms, showClipping, view.dpr]);
+    // Zoom and display changes retarget the lane. Restarting this effect would blank it and show the loading label.
+  }, []);
 
   const label = `Group activity overview (not mixed output)${status === 'missing' ? ', missing media' : status === 'error' ? ', waveform unavailable' : status === 'limited' ? ', raster memory limit' : status === 'loading' ? ', loading waveforms' : ''}${showClipping ? ', source over-range indicators' : ''}`;
   return (

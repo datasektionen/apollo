@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { VolumeX } from 'lucide-react';
+import { Plus, VolumeX } from 'lucide-react';
 import {
   formatTime,
   msToSeconds,
@@ -13,9 +13,11 @@ import Waveform from './Waveform';
 import GroupWaveform from './GroupWaveform';
 import RecordingWaveform from './RecordingWaveform';
 import { waveformService } from '../lib/waveformService';
+import { prepareVisibleZoom, releaseStoredZoomBitmaps, releaseZoomBitmaps, storeZoomBitmaps } from '../lib/visibleZoom';
 import {
-  anchoredScroll, boundedRange, clampDuration, durationFromSlider, followLanding, followScroll, intersectsViewport, normalizeWheel,
-  rowAtY, rowOffsets, rulerInterval, scrollSegment, visibleRulerTicks, zoomAnchor,
+  anchoredScroll, boundedRange, centeredScroll, clampDuration, durationFromSlider, easeFollowScroll, followLanding,
+  formatRulerLabel, intersectsViewport, normalizeWheel, rowAtY, rowOffsets, RULER_LABEL_HEIGHT, RULER_SEEK_HEIGHT,
+  rulerInterval, rulerScale, scrollSegment, TIMELINE_RULER_HEIGHT, visibleRulerTicks, zoomAnchor,
 } from '../utils/timelineViewport';
 import { getEffectiveTrackMix, getGroupDescendantTrackIdsByGroup, getTrackHeight, normalizeTrackTree } from '../utils/trackTree';
 import {
@@ -103,10 +105,16 @@ function Timeline({
   displayMode = 'linear',
   showRms = false,
   showClipping = false,
+  onAddTrack = null,
   children,
 }) {
   const timelineRef = useRef(null);
   const rulerScrollRef = useRef(null);
+  const rulerViewportRef = useRef(null);
+  const rulerPlayheadRef = useRef(null);
+  const tracksPlayheadRef = useRef(null);
+  const lyricsPlayheadRef = useRef(null);
+  const playheadHoldRef = useRef(null);
   const tracksScrollRef = useRef(null);
   const fallbackScrollRef = useRef(null);
   const internalScrollRef = scrollContainerRef || fallbackScrollRef;
@@ -116,8 +124,19 @@ function Timeline({
   const [focusedClipId, setFocusedClipId] = useState(null);
   const [mediaRevision, setMediaRevision] = useState(0);
   // Manual navigation pauses follow until the playhead is on screen again.
-  const followSuspendedRef = useRef(false);
+  const followEnabledRef = useRef(true);
+  const followingRef = useRef(false);
+  const scrollLeftRef = useRef(0);
+  const pixelsPerMsRef = useRef(0);
+  const viewportWidthRef = useRef(0);
+  const timelineWidthRef = useRef(0);
+  const timeRef = useRef(0);
+  const blockFollowRef = useRef(false);
+  const setLogicalScrollRef = useRef(() => {});
+  const noteUserScrollRef = useRef(() => {});
   const lastLogicalScrollRef = useRef(0);
+  const zoomCommitRef = useRef({ token: 0, anchor: null });
+  const cancelZoomRef = useRef(null);
   const cancelledGestureRef = useRef(false);
   const [visibleDurationMs, setVisibleDurationMs] = useState(null);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -136,6 +155,8 @@ function Timeline({
   const [clipboardClip, setClipboardClip] = useState(null);
   const [rulerDragState, setRulerDragState] = useState(null);
   const [loopMarkerDragState, setLoopMarkerDragState] = useState(null);
+  const [seekDragState, setSeekDragState] = useState(false);
+  const [followEnabled, setFollowEnabled] = useState(true);
   const [timelineSelectionState, setTimelineSelectionState] = useState(null);
   const rightClickDragRef = useRef(false);
   const dragPreviewRef = useRef(null);
@@ -670,6 +691,7 @@ function Timeline({
   const setLogicalScroll = (left, native) => {
     const segment = scrollSegment(left, timelineWidthPx, containerWidth, originRef.current);
     lastLogicalScrollRef.current = segment.logical;
+    scrollLeftRef.current = segment.logical;
     originRef.current = segment.origin;
     setOriginPx(segment.origin);
     setScrollLeft(segment.logical);
@@ -677,11 +699,12 @@ function Timeline({
       if (element && !(element === native?.element && native.left === segment.left)) element.scrollLeft = segment.left;
     }
   };
+  setLogicalScrollRef.current = setLogicalScroll;
   /** Native scroll events also echo our own writes; only a different position is user navigation. */
   const handleNativeScroll = (element) => {
     const left = element.scrollLeft;
     const logical = originRef.current + left;
-    if (Math.abs(logical - lastLogicalScrollRef.current) > 1) followSuspendedRef.current = true;
+    if (Math.abs(logical - lastLogicalScrollRef.current) > 1) noteUserScrollRef.current();
     setLogicalScroll(logical, { element, left });
   };
   const segmentRange = (left, width) => boundedRange(left, width, originPx, segmentWidthPx);
@@ -945,15 +968,86 @@ function Timeline({
     return durationFromSlider(value, maxZoomDurationMs, minZoomDurationMs);
   };
 
-  const applyZoomDuration = (nextVisibleDurationMs, pointerX) => {
+  // Predict the render that follows a zoom, including the ruler padding that depends on the new scale.
+  const zoomMetrics = (nextVisibleDurationMs) => {
+    const measure = (stateDuration) => {
+      const tempMin = Math.max(rawProjectDurationMs, MIN_VISIBLE_DURATION_MS);
+      const basis = stateDuration == null ? tempMin : stateDuration;
+      const projectDuration = calculatePaddedDuration(rawProjectDurationMs, rulerInterval(containerWidth / basis));
+      const minZoom = Math.max(projectDuration, MIN_VISIBLE_DURATION_MS);
+      const maxZoom = containerWidth * 1000 / ((sampleRate || 48000) * 4);
+      const visible = stateDuration == null ? minZoom : clampDuration(stateDuration, maxZoom, minZoom);
+      const ppm = containerWidth / visible;
+      return {
+        durationState: stateDuration == null ? null : visible, ppm,
+        timelineWidth: Math.max(projectDuration, minZoom) * ppm,
+      };
+    };
+    // Clamping can change the duration the next render uses to pad the ruler. Follow that pass.
+    let metrics = measure(nextVisibleDurationMs);
+    for (let pass = 0; pass < 3 && metrics.durationState != null && Math.abs(metrics.durationState - (nextVisibleDurationMs || 0)) > 1e-4; pass += 1) {
+      const settled = measure(metrics.durationState);
+      nextVisibleDurationMs = metrics.durationState;
+      if (Math.abs(settled.ppm - metrics.ppm) <= 1e-6 * metrics.ppm) return settled;
+      metrics = settled;
+    }
+    return metrics;
+  };
+  const commitZoom = (metrics) => {
+    const anchor = zoomCommitRef.current.anchor;
+    pendingZoomAnchorRef.current = anchor;
+    if (anchor && containerWidth > 0 && metrics.ppm > 0) {
+      const targetScroll = anchoredScroll(anchor, metrics.ppm, containerWidth, metrics.timelineWidth);
+      const segment = scrollSegment(targetScroll, metrics.timelineWidth, containerWidth, originRef.current);
+      originRef.current = segment.origin;
+      lastLogicalScrollRef.current = segment.logical;
+      setOriginPx(segment.origin);
+      setScrollLeft(segment.logical);
+    }
+    setVisibleDurationMs(metrics.durationState);
+  };
+  // The timeline scale stays where it is until the on-screen waveforms for the new scale are painted.
+  const applyZoomDuration = (nextVisibleDurationMs, pointerX, anchorOverride) => {
     if (dragState || lyricDragRef.current || rulerDragState || loopMarkerDragState || timelineSelectionRef.current) return false;
-    const left = logicalScrollLeft();
-    pendingZoomAnchorRef.current = zoomAnchor(left, containerWidth, pixelsPerMs, currentTimeMs, pointerX);
-    followSuspendedRef.current = true;
-    setVisibleDurationMs(nextVisibleDurationMs === null ? null
-      : clampDuration(nextVisibleDurationMs, maxZoomDurationMs, minZoomDurationMs));
+    const metrics = zoomMetrics(nextVisibleDurationMs);
+    const anchor = anchorOverride || zoomAnchor(logicalScrollLeft(), containerWidth, pixelsPerMs, currentTimeMs, pointerX);
+    const token = ++zoomCommitRef.current.token;
+    zoomCommitRef.current.anchor = anchor;
+    cancelZoomRef.current?.();
+    cancelZoomRef.current = null;
+    const sameZoom = Math.abs(metrics.ppm - pixelsPerMs) <= 1e-4 * Math.max(metrics.ppm, pixelsPerMs);
+    if (!(containerWidth > 0) || !(metrics.ppm > 0) || sameZoom) {
+      if (sameZoom) pendingZoomAnchorRef.current = anchor;
+      else commitZoom(metrics);
+      return true;
+    }
+    const targetScroll = anchoredScroll(anchor, metrics.ppm, containerWidth, metrics.timelineWidth);
+    const segment = scrollSegment(targetScroll, metrics.timelineWidth, containerWidth, originRef.current);
+    cancelZoomRef.current = prepareVisibleZoom({
+      rows: timelineRows, rowTops, vertical: verticalViewport, clipsByTrack: renderedClipsByTrackId,
+      groupClipsByNode: groupTimelinePreviewByNodeId, segment, pixelsPerMs: metrics.ppm, viewportWidth: containerWidth,
+      dpr: Math.max(1, globalThis.devicePixelRatio || 1),
+      display: {
+        displayMode, showRms, showClipping, globalPeakAmplitude,
+        clipColor: CLIP_WAVEFORM_COLOR, missingColor: MISSING_CLIP_WAVEFORM_COLOR,
+        groupColor: 'rgba(123, 173, 255, 0.55)', groupMissingColor: 'rgba(248, 113, 113, 0.55)',
+        missingIds: missingMediaBlobIds,
+      },
+      getBuffer: (id) => audioManager.mediaCache.get(id),
+      onReady: (bitmaps) => {
+        if (zoomCommitRef.current.token !== token) {
+          releaseZoomBitmaps(bitmaps);
+          return;
+        }
+        cancelZoomRef.current = null;
+        storeZoomBitmaps(bitmaps);
+        commitZoom(metrics);
+      },
+    });
     return true;
   };
+  useEffect(() => () => cancelZoomRef.current?.(), []);
+  useEffect(() => () => releaseStoredZoomBitmaps(), [pixelsPerMs]);
   const applyZoomRef = useRef(applyZoomDuration);
   applyZoomRef.current = applyZoomDuration;
   const wheelZoomRef = useRef({ frame: null, duration: undefined, pointerX: 0, pending: false });
@@ -962,30 +1056,93 @@ function Timeline({
   }, []);
 
   const following = Boolean(isPlaying || isRecording);
-  const wasFollowingRef = useRef(false);
+  const followActive = followEnabled && following;
+  scrollLeftRef.current = scrollLeft;
+  pixelsPerMsRef.current = pixelsPerMs;
+  viewportWidthRef.current = containerWidth;
+  timelineWidthRef.current = timelineWidthPx;
+  timeRef.current = currentTimeMs;
+  followingRef.current = following;
+  followEnabledRef.current = followEnabled;
+  blockFollowRef.current = Boolean(dragState || rulerDragState || loopMarkerDragState || seekDragState);
+  noteUserScrollRef.current = () => {
+    if (!followingRef.current || !followEnabledRef.current) return;
+    followEnabledRef.current = false;
+    setFollowEnabled(false);
+  };
+  // Off screen: put the playhead in the center on this frame. On screen: the animation eases there.
   useLayoutEffect(() => {
-    if (!following) { wasFollowingRef.current = false; return; }
-    if (!wasFollowingRef.current) {
-      wasFollowingRef.current = true;
-      followSuspendedRef.current = false;
+    if (!followActive) return;
+    if (pendingZoomAnchorRef.current || blockFollowRef.current || lyricDragRef.current || timelineSelectionRef.current) return;
+    const liveMs = typeof audioManager.getCurrentTime === 'function' ? Number(audioManager.getCurrentTime()) : NaN;
+    const playhead = (Number.isFinite(liveMs) ? liveMs : timeRef.current) * pixelsPerMsRef.current;
+    const width = viewportWidthRef.current;
+    if (width <= 0) return;
+    if (playhead < scrollLeftRef.current || playhead > scrollLeftRef.current + width) {
+      const target = centeredScroll(playhead, width, timelineWidthRef.current);
+      if (Math.abs(target - scrollLeftRef.current) >= 0.5) setLogicalScrollRef.current(target);
     }
-    if (pendingZoomAnchorRef.current || dragState || rulerDragState || loopMarkerDragState
-      || lyricDragRef.current || timelineSelectionRef.current) return;
-    const playheadPx = currentTimeMs * pixelsPerMs;
-    if (followSuspendedRef.current) {
-      const x = playheadPx - scrollLeft;
-      if (x >= 0 && x <= containerWidth) followSuspendedRef.current = false;
-      return;
+  }, [followActive, currentTimeMs, pixelsPerMs, scrollLeft, containerWidth, timelineWidthPx]);
+  const readLivePlayheadMs = () => {
+    if (followingRef.current && typeof audioManager.getCurrentTime === 'function') {
+      const live = Number(audioManager.getCurrentTime());
+      if (Number.isFinite(live)) return live;
     }
-    const target = followScroll(playheadPx, scrollLeft, containerWidth, timelineWidthPx);
-    if (target !== null) setLogicalScroll(target);
-  }, [following, currentTimeMs, pixelsPerMs, scrollLeft, containerWidth, timelineWidthPx,
-    dragState, rulerDragState, loopMarkerDragState]);
+    return timeRef.current;
+  };
+  // The transport publishes time in coarse steps. The playhead paints from the audio clock
+  // every frame so it glides instead of jumping by those steps.
+  useEffect(() => {
+    if (!following) return undefined;
+    let frame = 0;
+    let last = null;
+    let previousPlayhead = null;
+    const tick = (now) => {
+      const elapsed = last == null ? 1 / 60 : (now - last) / 1000;
+      const dt = elapsed > 0 ? Math.min(0.05, elapsed) : 1 / 60;
+      last = now;
+      const playhead = readLivePlayheadMs() * pixelsPerMsRef.current;
+      const width = viewportWidthRef.current;
+      const blocked = pendingZoomAnchorRef.current || blockFollowRef.current
+        || lyricDragRef.current || timelineSelectionRef.current;
+      if (followEnabledRef.current && !blocked && width > 0) {
+        const next = easeFollowScroll({
+          playheadPx: playhead,
+          previousPlayheadPx: previousPlayhead,
+          scrollLeft: scrollLeftRef.current,
+          width,
+          timelineWidth: timelineWidthRef.current,
+          dt,
+        });
+        if (Math.abs(next - scrollLeftRef.current) >= 0.25) setLogicalScrollRef.current(next);
+      }
+      const left = `${playhead - scrollLeftRef.current}px`;
+      playheadHoldRef.current = left;
+      for (const node of [rulerPlayheadRef.current, tracksPlayheadRef.current, lyricsPlayheadRef.current]) {
+        if (node) node.style.left = left;
+      }
+      previousPlayhead = playhead;
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [following]);
 
-  // Stop and playback end return to the loop start, or the song start. Waveforms keep that view
-  // painted (returnViewportLeftPx), and the follow page-turn after a loop wrap lands on it too.
+  // Stop and playback end return to the loop start, or the song start. That window is painted
+  // only after a zoom or a loop change, and only once the visible rows and their margins are done.
   const returnTimeMs = project.loop?.enabled && Number.isFinite(project.loop.startMs) ? project.loop.startMs : 0;
   const returnScrollLeft = followLanding(returnTimeMs * pixelsPerMs, containerWidth, timelineWidthPx);
+  const loopKey = `${project.loop?.enabled ? 1 : 0}:${project.loop?.startMs ?? ''}`;
+  const zoomWatchRef = useRef(pixelsPerMs);
+  const loopWatchRef = useRef(loopKey);
+  const [paintStart, setPaintStart] = useState(false);
+  if (Math.abs(pixelsPerMs - zoomWatchRef.current) > 1e-4 * Math.max(pixelsPerMs, zoomWatchRef.current)
+    || loopKey !== loopWatchRef.current) {
+    zoomWatchRef.current = pixelsPerMs;
+    loopWatchRef.current = loopKey;
+    if (!paintStart) setPaintStart(true);
+  }
+  const startViewportLeftPx = paintStart ? returnScrollLeft - originPx : undefined;
   useLayoutEffect(() => {
     if (!returnToStartToken) return;
     const x = returnTimeMs * pixelsPerMs - scrollLeft;
@@ -1001,8 +1158,13 @@ function Timeline({
     return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
   };
 
-  const rulerIntervalMs = rulerInterval(pixelsPerMs);
-  const rulerTicks = visibleRulerTicks(scrollLeft, containerWidth, pixelsPerMs, rulerIntervalMs, minZoomDurationMs);
+  const ruler = rulerScale(pixelsPerMs, { sampleRate });
+  const rulerTicks = visibleRulerTicks(scrollLeft, containerWidth, pixelsPerMs, ruler.majorMs, minZoomDurationMs);
+  const rulerFractions = visibleRulerTicks(scrollLeft, containerWidth, pixelsPerMs, ruler.subMinorMs, minZoomDurationMs);
+  const viewportX = (timeMs) => timeMs * pixelsPerMs - scrollLeft;
+  const playheadLeft = `${viewportX(currentTimeMs)}px`;
+  if (!following || playheadHoldRef.current == null) playheadHoldRef.current = playheadLeft;
+  const shownPlayheadLeft = following ? playheadHoldRef.current : playheadLeft;
 
   useLayoutEffect(() => {
     if (!pendingZoomAnchorRef.current) return;
@@ -1014,38 +1176,6 @@ function Timeline({
     setLogicalScroll(targetScrollLeft);
     pendingZoomAnchorRef.current = null;
   }, [pixelsPerMs, timelineWidthPx, containerWidth, currentTimeMs]);
-
-  const formatRulerTime = (ms, intervalMs) => {
-    if (intervalMs < 100) {
-      const digits = Math.max(0, Math.ceil(-Math.log10(intervalMs)));
-      return `${Number(ms.toFixed(digits))}ms`;
-    }
-    // Zoomed in: show decisecond precision.
-    if (intervalMs < 1000) {
-      const totalDeciseconds = Math.max(0, Math.round(ms / 100));
-      const wholeSeconds = Math.floor(totalDeciseconds / 10);
-      const decisecond = totalDeciseconds % 10;
-
-      if (wholeSeconds === 0) {
-        return `.${decisecond}`;
-      }
-      if (wholeSeconds < 60) {
-        return `${wholeSeconds}.${decisecond}`;
-      }
-      const minutes = Math.floor(wholeSeconds / 60);
-      const seconds = wholeSeconds % 60;
-      return `${minutes}:${seconds.toString().padStart(2, '0')}.${decisecond}`;
-    }
-
-    // Zoomed out: show whole seconds only.
-    const totalSeconds = Math.max(0, Math.round(ms / 1000));
-    if (totalSeconds < 60) {
-      return `${totalSeconds}`;
-    }
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
 
   useEffect(() => {
     if (visibleDurationMs === null && prevProjectDurationRef.current !== null) {
@@ -2416,16 +2546,19 @@ function Timeline({
     e.preventDefault();
   };
 
+  const timeFromRulerClientX = (clientX) => {
+    const rect = rulerScrollRef.current.getBoundingClientRect();
+    const x = clientX - rect.left + scrollLeftRef.current;
+    return Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
+  };
+
   const handleRulerMouseDown = (e) => {
     if (e.button !== 0) return; // Only left click
     e.preventDefault();
 
-    const rect = rulerScrollRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left + logicalScrollLeft();
-    const timeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
+    const timeMs = timeFromRulerClientX(e.clientX);
     const hasLoop = project.loop.startMs !== undefined && project.loop.endMs !== undefined;
     const clickedLoop = hasLoop && timeMs >= project.loop.startMs && timeMs <= project.loop.endMs;
-    const mode = clickedLoop ? 'move' : 'create';
 
     cancelledGestureRef.current = false;
     setRulerDragState({
@@ -2433,9 +2566,8 @@ function Timeline({
       startX: e.clientX,
       isDragging: false,
       clickedLoop,
-      mode,
-      initialLoopStartMs: project.loop.startMs,
-      initialLoopEndMs: project.loop.endMs,
+      currentStartMs: timeMs,
+      currentEndMs: timeMs,
     });
   };
 
@@ -2452,90 +2584,42 @@ function Timeline({
     });
   };
 
+  const handleSeekBarMouseDown = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cancelledGestureRef.current = false;
+    onSeek(timeFromRulerClientX(e.clientX));
+    setSeekDragState(true);
+  };
+
   useEffect(() => {
     if (!rulerDragState) return;
 
     const handleMouseMove = (e) => {
-      const deltaX = Math.abs(e.clientX - rulerDragState.startX);
-
-      // Consider it a drag if mouse moved more than 5 pixels
-      if (deltaX > 5 && !rulerDragState.isDragging) {
-        setRulerDragState(prev => ({ ...prev, isDragging: true }));
-      }
-
-      if (rulerDragState.isDragging) {
-        const rect = rulerScrollRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left + logicalScrollLeft();
-        const currentTimeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
-
-        if (rulerDragState.mode === 'move' && rulerDragState.initialLoopStartMs !== undefined) {
-          const loopLengthMs = rulerDragState.initialLoopEndMs - rulerDragState.initialLoopStartMs;
-          const timelineDurationMs = projectDurationMs || minZoomDurationMs;
-          let newStartMs = rulerDragState.initialLoopStartMs + (currentTimeMs - rulerDragState.startTimeMs);
-          let newEndMs = newStartMs + loopLengthMs;
-
-          if (newStartMs < 0) {
-            newStartMs = 0;
-            newEndMs = loopLengthMs;
-          } else if (newEndMs > timelineDurationMs) {
-            newEndMs = timelineDurationMs;
-            newStartMs = timelineDurationMs - loopLengthMs;
-          }
-
-          setRulerDragState(prev => ({
-            ...prev,
-            currentStartMs: newStartMs,
-            currentEndMs: newEndMs,
-          }));
-        } else {
-          // Update drag state with current position for visual feedback (loop creation)
-          const startMs = Math.min(rulerDragState.startTimeMs, currentTimeMs);
-          const endMs = Math.max(rulerDragState.startTimeMs, currentTimeMs);
-
-          setRulerDragState(prev => ({
-            ...prev,
-            currentStartMs: startMs,
-            currentEndMs: endMs,
-          }));
-        }
-      }
+      const pointerMs = timeFromRulerClientX(e.clientX);
+      const startMs = Math.min(rulerDragState.startTimeMs, pointerMs);
+      const endMs = Math.max(rulerDragState.startTimeMs, pointerMs);
+      setRulerDragState((prev) => ({
+        ...prev,
+        isDragging: prev.isDragging || Math.abs(e.clientX - prev.startX) > 5,
+        currentStartMs: startMs,
+        currentEndMs: endMs,
+      }));
     };
 
     const handleMouseUp = (e) => {
       if (cancelledGestureRef.current) return;
-      const element = rulerScrollRef.current;
-      const releaseTimeMs = Math.max(0, Math.min((e.clientX - element.getBoundingClientRect().left + logicalScrollLeft()) / pixelsPerMs, projectDurationMs || minZoomDurationMs));
+      const releaseTimeMs = timeFromRulerClientX(e.clientX);
       if (rulerDragState.isDragging || Math.abs(e.clientX - rulerDragState.startX) > 5) {
-        if (rulerDragState.mode === 'move') {
-          const length = rulerDragState.initialLoopEndMs - rulerDragState.initialLoopStartMs;
-          const finalStartMs = Math.max(0, Math.min((projectDurationMs || minZoomDurationMs) - length,
-            rulerDragState.initialLoopStartMs + releaseTimeMs - rulerDragState.startTimeMs));
-          const finalEndMs = finalStartMs + length;
-          if (finalStartMs !== rulerDragState.initialLoopStartMs ||
-              finalEndMs !== rulerDragState.initialLoopEndMs) {
-            updateLoop((loop) => ({
-              ...loop,
-              startMs: finalStartMs,
-              endMs: finalEndMs,
-            }), 'Move loop region');
-          }
-        } else {
-          // Create loop
-          const rect = rulerScrollRef.current.getBoundingClientRect();
-          const x = e.clientX - rect.left + logicalScrollLeft();
-          const endTimeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
-
-          const startMs = Math.min(rulerDragState.startTimeMs, endTimeMs);
-          const endMs = Math.max(rulerDragState.startTimeMs, endTimeMs);
-
-          // Only create loop if there's a meaningful range (at least 100ms)
-          if (endMs - startMs >= 100) {
-            updateLoop(() => ({
-              enabled: true,
-              startMs,
-              endMs,
-            }), 'Set loop region');
-          }
+        const startMs = Math.min(rulerDragState.startTimeMs, releaseTimeMs);
+        const endMs = Math.max(rulerDragState.startTimeMs, releaseTimeMs);
+        if (endMs - startMs >= 100) {
+          updateLoop(() => ({
+            enabled: true,
+            startMs,
+            endMs,
+          }), 'Set loop region');
         }
       } else if (rulerDragState.clickedLoop) {
         updateLoop((loop) => ({
@@ -2563,9 +2647,7 @@ function Timeline({
     if (!loopMarkerDragState) return;
 
     const handleMouseMove = (e) => {
-      const rect = rulerScrollRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left + logicalScrollLeft();
-      const timeMs = Math.max(0, Math.min(x / pixelsPerMs, projectDurationMs || minZoomDurationMs));
+      const timeMs = timeFromRulerClientX(e.clientX);
 
       let newStartMs = loopMarkerDragState.initialStartMs;
       let newEndMs = loopMarkerDragState.initialEndMs;
@@ -2588,8 +2670,7 @@ function Timeline({
 
     const handleMouseUp = (event) => {
       if (cancelledGestureRef.current) return;
-      const element = rulerScrollRef.current;
-      const timeMs = Math.max(0, Math.min((event.clientX - element.getBoundingClientRect().left + logicalScrollLeft()) / pixelsPerMs, projectDurationMs || minZoomDurationMs));
+      const timeMs = timeFromRulerClientX(event.clientX);
       const rawStartMs = loopMarkerDragState.markerType === 'start' ? timeMs : loopMarkerDragState.initialStartMs;
       const rawEndMs = loopMarkerDragState.markerType === 'end' ? timeMs : loopMarkerDragState.initialEndMs;
       const finalStartMs = Math.min(rawStartMs, rawEndMs);
@@ -2615,6 +2696,20 @@ function Timeline({
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [loopMarkerDragState, pixelsPerMs, scrollLeft, projectDurationMs, minZoomDurationMs, updateLoop]);
+
+  useEffect(() => {
+    if (!seekDragState) return undefined;
+    const handleMouseMove = (event) => {
+      if (!cancelledGestureRef.current) onSeek(timeFromRulerClientX(event.clientX));
+    };
+    const handleMouseUp = () => setSeekDragState(false);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [seekDragState, pixelsPerMs, scrollLeft, projectDurationMs, minZoomDurationMs, onSeek]);
 
   // One listener per disjoint viewport, never on both a child and its ancestor.
   useEffect(() => {
@@ -2647,20 +2742,21 @@ function Timeline({
       } else if (event.shiftKey || Math.abs(delta.x) > Math.abs(delta.y)) {
         event.preventDefault();
         event.stopPropagation();
-        followSuspendedRef.current = true;
+        noteUserScrollRef.current();
         setLogicalScroll(logicalScrollLeft() + (event.shiftKey ? delta.y : delta.x));
       }
     };
-    const elements = [tracksScrollRef.current, rulerScrollRef.current].filter(Boolean);
+    const elements = [tracksScrollRef.current, rulerViewportRef.current].filter(Boolean);
     elements.forEach((element) => element.addEventListener('wheel', handleWheel, { passive: false }));
     return () => elements.forEach((element) => element.removeEventListener('wheel', handleWheel));
   }, [clampedVisibleMs, pixelsPerMs, containerWidth, minZoomDurationMs, maxZoomDurationMs, currentTimeMs,
     dragState, rulerDragState, loopMarkerDragState]);
 
   const fitProject = () => {
-    if (!applyZoomDuration(null)) return;
+    if (!applyZoomDuration(null, undefined, { timeMs: 0, x: 0 })) return;
+    zoomCommitRef.current.anchor = { timeMs: 0, x: 0 };
     pendingZoomAnchorRef.current = { timeMs: 0, x: 0 };
-    setLogicalScroll(0);
+    if (visibleDurationMs === null) setLogicalScroll(0);
   };
 
   const handleZoomIn = () => {
@@ -2851,173 +2947,172 @@ function Timeline({
             </>
           );
         })()}
-        <div
-          className="absolute top-0 z-20 h-full w-0.5 bg-red-400/80 pointer-events-none"
-          style={{ left: `${localPosition(currentTimeMs * pixelsPerMs)}px` }}
-        />
       </div>
+        <div
+          ref={lyricsPlayheadRef}
+          data-playhead="lyrics"
+          className="pointer-events-none absolute top-0 z-20 h-full w-px bg-red-500"
+          style={{ left: shownPlayheadLeft }}
+        />
     </div>
   ) : null;
 
+  const onRulerStep = (timeMs, stepMs) => Math.abs(timeMs - Math.round(timeMs / stepMs) * stepMs) <= stepMs * 0.02;
+  const loopRange = (() => {
+    if (rulerDragState?.isDragging && rulerDragState.currentStartMs !== undefined && rulerDragState.currentEndMs !== undefined) {
+      return { startMs: rulerDragState.currentStartMs, endMs: rulerDragState.currentEndMs, enabled: true };
+    }
+    if (project.loop.startMs === undefined || project.loop.endMs === undefined) return null;
+    return {
+      startMs: loopMarkerDragState?.currentStartMs ?? project.loop.startMs,
+      endMs: loopMarkerDragState?.currentEndMs ?? project.loop.endMs,
+      enabled: Boolean(project.loop.enabled),
+    };
+  })();
+  const loopBandStyle = (startMs, endMs) => {
+    const left = viewportX(Math.min(startMs, endMs));
+    const right = viewportX(Math.max(startMs, endMs));
+    const clippedLeft = Math.max(-2, left);
+    const clippedRight = Math.min(containerWidth + 2, right);
+    if (clippedRight - clippedLeft <= 0) {
+      if (left < -2 || left > containerWidth) return null;
+      return { left: `${Math.max(0, Math.min(containerWidth - 2, left))}px`, width: '2px' };
+    }
+    return { left: `${clippedLeft}px`, width: `${clippedRight - clippedLeft}px` };
+  };
+  const loopBand = loopRange ? loopBandStyle(loopRange.startMs, loopRange.endMs) : null;
+
+  const rulerTools = (
+    <div className="flex h-full w-full items-center justify-between px-1.5">
+      <button
+        type="button"
+        aria-label="Add track"
+        title="Add track"
+        disabled={!onAddTrack}
+        className="flex h-6 w-6 items-center justify-center rounded text-gray-200 hover:bg-gray-700 disabled:invisible"
+        onClick={() => onAddTrack?.()}
+      >
+        <Plus size={16} strokeWidth={2.25} />
+      </button>
+      <button
+        type="button"
+        aria-label="Follow playhead"
+        title="Follow playhead"
+        aria-pressed={followEnabled}
+        className={`flex h-6 w-6 items-center justify-center rounded ${followEnabled ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+        onClick={() => setFollowEnabled((enabled) => {
+          followEnabledRef.current = !enabled;
+          return !enabled;
+        })}
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 2.25v11.5" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M4.25 5.2 1.7 8l2.55 2.8M11.75 5.2 14.3 8l-2.55 2.8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+    </div>
+  );
+
   const header = (
-    <div className="relative flex flex-col overflow-visible w-full min-w-0">
-      {/* Timeline Ruler */}
-      <div className="bg-gray-850 flex overflow-visible" style={{ height: '24px' }}>
-        <div
-          ref={rulerScrollRef}
-          className="flex-1 overflow-x-scroll overflow-y-visible ruler-scrollbar-hidden w-full min-w-0"
-          onScroll={(event) => handleNativeScroll(event.currentTarget)}
-        >
-          <div
-            style={{ width: `${segmentWidthPx}px`, height: '24px' }}
-            className="relative cursor-pointer"
-            onMouseDown={handleRulerMouseDown}
-            onDragStart={handleNativeDragStart}
-          >
-            <div className="absolute left-0 right-0 top-0 h-[23px] overflow-hidden">
-              {/* Time markers */}
-            {rulerTicks.map((timeMs) => {
-              if (timeMs * pixelsPerMs > timelineWidthPx + 50) return null;
-
-              return (
-                <div
-                  key={timeMs}
-                  data-ruler-tick={timeMs}
-                  className="absolute top-0 border-l border-gray-600"
-                  style={{ left: `${timeMs * pixelsPerMs - originPx}px`, height: '23px' }}
-                >
-                  <span className="text-xs text-gray-500 ml-1 whitespace-nowrap pointer-events-none select-none">
-                    {formatRulerTime(timeMs, rulerIntervalMs)}
-                  </span>
-                </div>
-              );
-            }).filter(Boolean)}
-
-            {/* Loop region background (always show if loop exists, faint when disabled) */}
-            {/* Show drag state if dragging new loop, otherwise show project loop */}
-          {(() => {
-            if (rulerDragState?.isDragging && rulerDragState.mode === 'create' && rulerDragState.currentStartMs !== undefined) {
-              return (
-                <div
-                  className="absolute top-0 bottom-0 pointer-events-none bg-yellow-500 bg-opacity-20"
-                    style={{
-                      left: segmentRange(rulerDragState.currentStartMs * pixelsPerMs, (rulerDragState.currentEndMs - rulerDragState.currentStartMs) * pixelsPerMs).left,
-                      width: segmentRange(rulerDragState.currentStartMs * pixelsPerMs, (rulerDragState.currentEndMs - rulerDragState.currentStartMs) * pixelsPerMs).width,
-                    }}
-                  />
-                );
-              }
-
-              if (project.loop.startMs !== undefined && project.loop.endMs !== undefined) {
-              const rawStartMs = loopMarkerDragState?.currentStartMs
-                ?? (rulerDragState?.mode === 'move' ? rulerDragState.currentStartMs : undefined)
-                ?? project.loop.startMs;
-              const rawEndMs = loopMarkerDragState?.currentEndMs
-                ?? (rulerDragState?.mode === 'move' ? rulerDragState.currentEndMs : undefined)
-                ?? project.loop.endMs;
-              const displayStartMs = Math.min(rawStartMs, rawEndMs);
-              const displayEndMs = Math.max(rawStartMs, rawEndMs);
-
-              return (
-                  <div
-                    className={`absolute top-0 bottom-0 pointer-events-none ${
-                      project.loop.enabled ? 'bg-yellow-500 bg-opacity-20' : 'bg-gray-500 bg-opacity-5'
-                    }`}
-                    style={{
-                      left: segmentRange(displayStartMs * pixelsPerMs, (displayEndMs - displayStartMs) * pixelsPerMs).left,
-                      width: segmentRange(displayStartMs * pixelsPerMs, (displayEndMs - displayStartMs) * pixelsPerMs).width,
-                    }}
-                  />
-                );
-              }
-
-              return null;
-            })()}
-            </div>
-            <div className="absolute left-0 right-0 bottom-0 h-px bg-gray-700 pointer-events-none" />
-            {/* Playhead (ruler) */}
-            <div
-              className="absolute top-0 w-0.5 bg-red-500 pointer-events-none z-40"
-              style={{
-                left: `${localPosition(currentTimeMs * pixelsPerMs)}px`,
-                height: '24px',
-              }}
-            />
-
-            {/* Loop start marker */}
-            {(() => {
-              if (rulerDragState?.isDragging && rulerDragState.currentStartMs !== undefined) {
-                return (
-                  <div
-                    className="absolute top-0 bottom-px w-1 pointer-events-none bg-yellow-500"
-                    style={{
-                      left: `${localPosition(rulerDragState.currentStartMs * pixelsPerMs)}px`,
-                    }}
-                  />
-                );
-              }
-
-            if (project.loop.startMs !== undefined && project.loop.endMs !== undefined) {
-              const displayStartMs = loopMarkerDragState?.currentStartMs
-                ?? (rulerDragState?.mode === 'move' ? rulerDragState.currentStartMs : undefined)
-                ?? project.loop.startMs;
-
-              return (
-                <div
-                  className={`absolute top-0 bottom-px w-1 cursor-ew-resize ${
-                      project.loop.enabled ? 'bg-yellow-500' : 'bg-gray-500 opacity-40'
-                    }`}
-                  style={{
-                    left: `${localPosition(displayStartMs * pixelsPerMs)}px`,
-                  }}
-                  data-loop-marker="start"
-                  aria-label="Loop start marker"
-                  onMouseDown={(e) => handleLoopMarkerMouseDown(e, 'start')}
-                />
-              );
-            }
-
-            return null;
-            })()}
-
-            {/* Loop end marker */}
-            {(() => {
-              if (rulerDragState?.isDragging && rulerDragState.currentEndMs !== undefined) {
-                return (
-                  <div
-                    className="absolute top-0 bottom-px w-1 pointer-events-none bg-yellow-500"
-                    style={{
-                      left: `${localPosition(rulerDragState.currentEndMs * pixelsPerMs)}px`,
-                    }}
-                  />
-                );
-              }
-
-            if (project.loop.startMs !== undefined && project.loop.endMs !== undefined) {
-              const displayEndMs = loopMarkerDragState?.currentEndMs
-                ?? (rulerDragState?.mode === 'move' ? rulerDragState.currentEndMs : undefined)
-                ?? project.loop.endMs;
-
-              return (
-                <div
-                  className={`absolute top-0 bottom-px w-1 cursor-ew-resize ${
-                    project.loop.enabled ? 'bg-yellow-500' : 'bg-gray-500 opacity-40'
-                  }`}
-                  style={{
-                    left: `${localPosition(displayEndMs * pixelsPerMs)}px`,
-                  }}
-                  data-loop-marker="end"
-                  aria-label="Loop end marker"
-                  onMouseDown={(e) => handleLoopMarkerMouseDown(e, 'end')}
-                />
-              );
-            }
-
-            return null;
-            })()}
-          </div>
-        </div>
+    <div ref={rulerViewportRef} className="relative w-full min-w-0 overflow-hidden bg-gray-800" style={{ height: TIMELINE_RULER_HEIGHT }}>
+      <div
+        ref={rulerScrollRef}
+        className="ruler-scrollbar-hidden absolute inset-0 overflow-x-scroll overflow-y-hidden"
+        onScroll={(event) => handleNativeScroll(event.currentTarget)}
+      >
+        <div style={{ width: `${segmentWidthPx}px`, height: 1 }} />
       </div>
+      <div className="pointer-events-none absolute inset-x-0 top-0 bg-gray-800" style={{ height: RULER_LABEL_HEIGHT }} />
+      <div
+        className="pointer-events-none absolute inset-x-0 bg-gray-900/80"
+        style={{ top: RULER_LABEL_HEIGHT, height: RULER_SEEK_HEIGHT }}
+      />
+      {loopBand ? (
+        <div
+          className={`pointer-events-none absolute top-0 ${loopRange.enabled ? 'bg-yellow-600' : 'bg-[#121a28]'}`}
+          style={{ ...loopBand, height: RULER_LABEL_HEIGHT }}
+        />
+      ) : null}
+      {rulerTicks.map((timeMs) => (
+        <div
+          key={timeMs}
+          data-ruler-tick={timeMs}
+          className="pointer-events-none absolute top-0 z-[1] w-px bg-gray-500"
+          style={{ left: `${viewportX(timeMs)}px`, height: RULER_LABEL_HEIGHT + 14 }}
+        >
+          <span className="absolute left-1 top-2 select-none whitespace-nowrap text-[11px] leading-none text-gray-200" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.9)' }}>
+            {formatRulerLabel(timeMs, ruler.majorMs, ruler.unit, sampleRate)}
+          </span>
+        </div>
+      ))}
+      {rulerFractions.map((timeMs) => (
+        onRulerStep(timeMs, ruler.majorMs) ? null : (
+          <div
+            key={timeMs}
+            data-ruler-fraction={timeMs}
+            className="pointer-events-none absolute z-[1] w-px bg-gray-500"
+            style={{
+              left: `${viewportX(timeMs)}px`,
+              top: RULER_LABEL_HEIGHT,
+              height: onRulerStep(timeMs, ruler.minorMs) ? 8 : 4,
+              opacity: 0.7,
+            }}
+          />
+        )
+      ))}
+      <div
+        ref={rulerPlayheadRef}
+        data-playhead="ruler"
+        className="pointer-events-none absolute top-0 z-10 w-px bg-red-500"
+        style={{ left: shownPlayheadLeft, height: TIMELINE_RULER_HEIGHT }}
+      />
+      <div
+        data-ruler-labels
+        data-ruler-unit={ruler.unit}
+        className="absolute inset-x-0 top-0 cursor-pointer"
+        style={{ height: RULER_LABEL_HEIGHT }}
+        onMouseDown={handleRulerMouseDown}
+        onDragStart={handleNativeDragStart}
+      >
+        {rulerDragState?.isDragging && rulerDragState.currentStartMs !== undefined ? (
+          <div
+            data-loop-preview="start"
+            className="pointer-events-none absolute top-0 h-px w-px"
+            style={{ left: `${viewportX(rulerDragState.currentStartMs)}px` }}
+          />
+        ) : null}
+        {rulerDragState?.isDragging && rulerDragState.currentEndMs !== undefined ? (
+          <div
+            data-loop-preview="end"
+            className="pointer-events-none absolute top-0 h-px w-px"
+            style={{ left: `${viewportX(rulerDragState.currentEndMs)}px` }}
+          />
+        ) : null}
+        {!rulerDragState?.isDragging && project.loop.startMs !== undefined && project.loop.endMs !== undefined ? (
+          <>
+            <div
+              className="absolute top-0 h-full w-2 -translate-x-1/2 cursor-ew-resize bg-transparent"
+              style={{ left: `${viewportX(loopMarkerDragState?.currentStartMs ?? project.loop.startMs)}px` }}
+              data-loop-marker="start"
+              aria-label="Loop start marker"
+              onMouseDown={(e) => handleLoopMarkerMouseDown(e, 'start')}
+            />
+            <div
+              className="absolute top-0 h-full w-2 -translate-x-1/2 cursor-ew-resize bg-transparent"
+              style={{ left: `${viewportX(loopMarkerDragState?.currentEndMs ?? project.loop.endMs)}px` }}
+              data-loop-marker="end"
+              aria-label="Loop end marker"
+              onMouseDown={(e) => handleLoopMarkerMouseDown(e, 'end')}
+            />
+          </>
+        ) : null}
+      </div>
+      <div
+        data-ruler-seek
+        className="absolute inset-x-0 cursor-pointer"
+        style={{ top: RULER_LABEL_HEIGHT, height: RULER_SEEK_HEIGHT }}
+        onMouseDown={handleSeekBarMouseDown}
+      />
     </div>
   );
 
@@ -3045,13 +3140,6 @@ function Timeline({
         }}
       >
         <div style={{ width: `${segmentWidthPx}px`, height: `${totalTimelineHeight}px`, minHeight: '100%', position: 'relative', overflow: 'clip' }}>
-              {/* Playhead (tracks) */}
-              <div
-                className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none z-30"
-                style={{
-                  left: `${localPosition(currentTimeMs * pixelsPerMs)}px`,
-                }}
-              />
               {timelineSelectionState?.moved && (() => {
                 const selectionRect = getSelectionRect(timelineSelectionState);
                 return (
@@ -3068,9 +3156,11 @@ function Timeline({
               })()}
               {timelineRows.map((row, rowIndex) => {
                 const trackY = rowTops[rowIndex];
-                const rowVisible = verticalViewport.height > 0 && intersectsViewport(trackY, row.height, verticalViewport.top, verticalViewport.height);
+                const measuredRows = verticalViewport.height > 0;
+                const rowVisible = measuredRows && intersectsViewport(trackY, row.height, verticalViewport.top, verticalViewport.height);
+                const rowOnScreen = measuredRows && intersectsViewport(trackY, row.height, verticalViewport.top, verticalViewport.height, 0);
                 // Shells are mounted one viewport beyond each edge; an unmeasured viewport mounts every row.
-                const rowNear = !(verticalViewport.height > 0)
+                const rowNear = !measuredRows
                   || intersectsViewport(trackY, row.height, verticalViewport.top, verticalViewport.height, verticalViewport.height);
                 const shellNear = (left, width) => rowNear && intersectsViewport(left, width, scrollLeft, containerWidth, containerWidth);
                 // Clips around the return-to-start view stay mounted so their waveforms are painted before the jump.
@@ -3117,10 +3207,11 @@ function Timeline({
                         );
                       })}
 
-                      {rowVisible && <div className="absolute inset-x-0 pointer-events-none" style={{ top: rowPadding }}>
+                      {measuredRows && (rowOnScreen || rowNear) && <div className="absolute inset-x-0 pointer-events-none" style={{ top: rowPadding }}>
                         <GroupWaveform clips={groupSurfaceClipsByNodeId.get(row.nodeId)} pixelsPerMs={pixelsPerMs}
+                          bitmapKey={`group:${row.nodeId}`}
                           viewportLeftPx={scrollLeft - originPx} viewportWidthPx={containerWidth} height={rowInternalHeight}
-                          returnViewportLeftPx={returnScrollLeft - originPx}
+                          returnViewportLeftPx={startViewportLeftPx} scheduleTier={rowOnScreen ? 0 : 2}
                           globalPeakAmplitude={globalPeakAmplitude} displayMode={displayMode}
                           showRms={showRms} showClipping={showClipping} missingMediaBlobIds={missingMediaBlobIds} />
                       </div>}
@@ -3177,6 +3268,9 @@ function Timeline({
                       const visibleRightPx = Math.min(clipRightPx, scrollLeft + containerWidth);
                       const visibleWidthPx = Math.max(0, visibleRightPx - visibleLeftPx);
                       const labelFits = visibleWidthPx >= estimatedLabelWidth + (labelPadding * 2);
+                      const clipOnScreen = rowOnScreen && intersectsViewport(clipLeftPx, clipWidthPx, scrollLeft, containerWidth, 0);
+                      const clipSide = intersectsViewport(clipLeftPx, clipWidthPx, scrollLeft, containerWidth, containerWidth);
+                      const waveformTier = clipOnScreen ? 0 : rowOnScreen && clipSide ? 1 : clipSide ? 2 : 3;
 
                       return (
                         <div
@@ -3219,8 +3313,9 @@ function Timeline({
                               zIndex: 1,
                             }}
                           />
-                          {/* Mounted one viewport ahead, so a clip's retained canvas is painted before it scrolls in. */}
-                          {rowVisible && (intersectsViewport(clipLeftPx, clipWidthPx, scrollLeft, containerWidth, containerWidth)
+                          {/* On-screen clips first, then one viewport left and right, then rows above and below.
+                              The start view stays mounted and is painted last, after a zoom or a loop change. */}
+                          {measuredRows && (rowOnScreen || rowNear) && (intersectsViewport(clipLeftPx, clipWidthPx, scrollLeft, containerWidth, containerWidth)
                             || returnNear(clipLeftPx, clipWidthPx)) && (
                             <Waveform
                               audioBuffer={audioBuffer}
@@ -3230,11 +3325,13 @@ function Timeline({
                               clipWidthPx={shell.width}
                               viewportLeftPx={scrollLeft - originPx}
                               viewportWidthPx={containerWidth}
-                              returnViewportLeftPx={returnScrollLeft - originPx}
+                              returnViewportLeftPx={startViewportLeftPx}
+                              scheduleTier={waveformTier}
                               displayMode={displayMode}
                               showRms={showRms}
                               showClipping={showClipping}
                               clipId={clip.id}
+                              bitmapKey={clip.id}
                               cropStartMs={drawCropStartMs}
                               cropEndMs={drawCropStartMs + shell.width / drawScale}
                               sourceDurationMs={clip.sourceDurationMs}
@@ -3307,7 +3404,7 @@ function Timeline({
                       return (
                         <div
                           key="recording-clip"
-                          className="absolute rounded overflow-hidden pointer-events-none animate-pulse"
+                          className="absolute rounded overflow-hidden pointer-events-none"
                           data-recording-overlay="true"
                           style={{
                             left: `${recordingRange.left}px`,
@@ -3332,6 +3429,8 @@ function Timeline({
                                 viewportWidthPx={containerWidth}
                                 pixelsPerMs={pixelsPerMs}
                                 height={clipInternalHeight}
+                                displayMode={displayMode}
+                                globalPeakAmplitude={globalPeakAmplitude}
                               />
                             </div>
                           )}
@@ -3347,16 +3446,24 @@ function Timeline({
               })}
             </div>
           </div>
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div
+          ref={tracksPlayheadRef}
+          data-playhead="tracks"
+          className="absolute top-0 bottom-0 w-px bg-red-500"
+          style={{ left: shownPlayheadLeft }}
+        />
+      </div>
     </div>
   );
 
   if (typeof children === 'function') {
-    return children({ header, tracks, zoomOverlay, lyricsLane });
+    return children({ header, tracks, zoomOverlay, lyricsLane, rulerTools });
   }
 
   return (
     <div className={`${sharedVerticalScroll ? '' : 'flex-1'} flex flex-col bg-gray-900 ${sharedVerticalScroll ? '' : 'overflow-hidden'} relative`} style={{ minWidth: 0 }}>
-      <div className="absolute top-9 right-3 z-50">{zoomOverlay}</div>
+      <div className="absolute right-3 z-50" style={{ top: TIMELINE_RULER_HEIGHT + 12 }}>{zoomOverlay}</div>
       {header}
       {lyricsLane}
       {tracks}

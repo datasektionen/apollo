@@ -39,23 +39,47 @@ export function anchoredScroll(anchor, pixelsPerMs, width, timelineWidth) {
   return Math.max(0, Math.min(Math.max(0, timelineWidth - width), anchor.timeMs * pixelsPerMs - anchor.x));
 }
 
-export const FOLLOW_EDGE_PX = 24;
 export const FOLLOW_LEAD = 0.1;
+// Per second. A small offset takes a couple of seconds to settle.
+export const FOLLOW_EASE_RATE = 0.6;
+// Caps the centering speed. A playhead farther from the center takes longer to arrive.
+export const FOLLOW_MAX_CATCHUP_PX_PER_SEC = 48;
 
-/**
- * Page-turn playback follow. Returns the logical scroll that puts the playhead FOLLOW_LEAD into
- * the viewport once it reaches the right edge or leaves the left, otherwise null.
- */
-export function followScroll(playheadPx, scrollLeft, width, timelineWidth) {
-  const x = playheadPx - scrollLeft;
-  if (x >= 0 && x <= width - FOLLOW_EDGE_PX) return null;
-  const target = followLanding(playheadPx, width, timelineWidth);
-  return Math.abs(target - scrollLeft) < 0.5 ? null : target;
-}
-
-/** The logical scroll that puts the playhead FOLLOW_LEAD into the viewport. */
+/** The logical scroll that puts the playhead FOLLOW_LEAD into the viewport. Used when playback stops. */
 export function followLanding(playheadPx, width, timelineWidth) {
   return Math.max(0, Math.min(Math.max(0, timelineWidth - width), playheadPx - width * FOLLOW_LEAD));
+}
+
+/** The logical scroll that puts the playhead in the middle of the viewport. */
+export function centeredScroll(playheadPx, width, timelineWidth) {
+  return Math.max(0, Math.min(Math.max(0, timelineWidth - width), playheadPx - width / 2));
+}
+
+/**
+ * Continuous follow. A playhead that is completely off screen lands in the center.
+ * One that is on screen eases toward the center. Playback motion is tracked immediately;
+ * only the centering error eases, and a speed cap makes a farther playhead take longer.
+ */
+export function easeFollowScroll({
+  playheadPx, previousPlayheadPx = null, scrollLeft, width, timelineWidth, dt = 1 / 60,
+}) {
+  const desired = centeredScroll(playheadPx, width, timelineWidth);
+  const onScreen = playheadPx >= scrollLeft && playheadPx <= scrollLeft + width;
+  if (!onScreen) return desired;
+  const previousDesired = previousPlayheadPx == null
+    ? desired
+    : centeredScroll(previousPlayheadPx, width, timelineWidth);
+  const desiredMotion = desired - previousDesired;
+  const residual = desired - (scrollLeft + desiredMotion);
+  const step = Math.max(0, dt);
+  const alpha = 1 - Math.exp(-FOLLOW_EASE_RATE * step);
+  let correction = residual * alpha;
+  const maxStep = FOLLOW_MAX_CATCHUP_PX_PER_SEC * step;
+  if (Math.abs(correction) > maxStep) correction = Math.sign(correction) * maxStep;
+  const next = scrollLeft + desiredMotion + correction;
+  const maxScroll = Math.max(0, timelineWidth - width);
+  const clamped = Math.max(0, Math.min(maxScroll, next));
+  return Math.abs(desired - clamped) < 0.25 ? desired : clamped;
 }
 
 export function normalizeWheel(event, pageSize) {
@@ -73,6 +97,75 @@ export function visibleRulerTicks(left, width, pixelsPerMs, interval, duration) 
   const first = Math.max(0, Math.floor((left - VIEWPORT_OVERSCAN_PX) / pixelsPerMs / interval));
   const last = Math.min(Math.ceil(duration / interval), Math.ceil((left + width + VIEWPORT_OVERSCAN_PX) / pixelsPerMs / interval));
   return Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => (first + i) * interval);
+}
+
+export const RULER_LABEL_HEIGHT = 22;
+export const RULER_SEEK_HEIGHT = 16;
+export const TIMELINE_RULER_HEIGHT = RULER_LABEL_HEIGHT + RULER_SEEK_HEIGHT;
+
+// Clock-friendly steps (15s, 30s, minutes) sit alongside the 1-2-5 zoom ladder.
+const RULER_MAJOR_LADDER_MS = [
+  0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5,
+  1, 2, 5, 10, 20, 50, 100, 200, 500,
+  1000, 2000, 5000, 10000, 15000, 30000,
+  60000, 120000, 300000, 600000, 900000, 1800000, 3600000,
+];
+const RULER_SAMPLE_LADDER = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+
+/**
+ * Major labels switch unit the way Audacity's time ruler does:
+ * clock (m:ss, or h:mm:ss past an hour) at 1s and above, decimal seconds down to 10ms,
+ * milliseconds until samples are far enough apart to read, then sample indexes.
+ */
+export function rulerScale(pixelsPerMs, { sampleRate = 48000, minMajorPx = 80 } = {}) {
+  const safePpm = Math.max(pixelsPerMs, 1e-12);
+  const minMs = minMajorPx / safePpm;
+  let majorMs = RULER_MAJOR_LADDER_MS[RULER_MAJOR_LADDER_MS.length - 1];
+  for (const step of RULER_MAJOR_LADDER_MS) {
+    if (step >= minMs - 1e-9) { majorMs = step; break; }
+  }
+  while (majorMs < minMs) majorMs *= 2;
+  const sampleMs = 1000 / Math.max(1, sampleRate);
+  let unit = 'clock';
+  if (majorMs >= 1000) unit = 'clock';
+  else if (majorMs >= 10) unit = 'seconds';
+  else if (majorMs > sampleMs * 40) unit = 'millis';
+  else {
+    unit = 'samples';
+    const minSamples = Math.max(1, minMs / sampleMs);
+    const snapped = RULER_SAMPLE_LADDER.find((count) => count >= minSamples - 1e-6) || Math.ceil(minSamples);
+    majorMs = snapped * sampleMs;
+  }
+  let divisions = 10;
+  let minorMs = majorMs / divisions;
+  while (divisions > 1 && minorMs * safePpm < 5) {
+    divisions /= 2;
+    minorMs = majorMs / divisions;
+  }
+  const subMinorMs = minorMs / 2 * safePpm >= 4 ? minorMs / 2 : minorMs;
+  return { majorMs, minorMs, subMinorMs, unit };
+}
+
+export function formatRulerLabel(ms, stepMs, unit, sampleRate = 48000) {
+  const sign = ms < -0.0001 ? '-' : '';
+  const abs = Math.abs(ms);
+  if (unit === 'samples') return `${sign}${Math.round(abs * sampleRate / 1000)}`;
+  if (unit === 'millis') {
+    const digits = stepMs >= 1 ? 0 : stepMs >= 0.1 ? 1 : stepMs >= 0.01 ? 2 : 3;
+    return `${sign}${Number(abs.toFixed(digits))} ms`;
+  }
+  if (unit === 'seconds') {
+    const digits = stepMs >= 100 ? 1 : stepMs >= 10 ? 2 : 3;
+    return `${sign}${(abs / 1000).toFixed(digits)}`;
+  }
+  const totalSeconds = Math.round(abs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0 || stepMs >= 3600000) {
+    return `${sign}${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+  return `${sign}${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 export function rowOffsets(rows) {
