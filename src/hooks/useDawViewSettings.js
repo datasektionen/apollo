@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { waveformService } from '../lib/waveformService';
 
 export const DAW_VIEW_STORAGE_KEY = 'apollo.dawView';
 
@@ -6,6 +7,7 @@ export const DEFAULT_DAW_VIEW_SETTINGS = {
   displayMode: 'linear',
   showRms: false,
   showClipping: false,
+  stereo: false,
 };
 
 export function normalizeDawViewSettings(value) {
@@ -14,6 +16,7 @@ export function normalizeDawViewSettings(value) {
     displayMode: mode === 'normalized' || mode === 'db' ? mode : 'linear',
     showRms: value?.showRms === true,
     showClipping: value?.showClipping === true,
+    stereo: value?.stereo === true,
   };
 }
 
@@ -30,6 +33,10 @@ function readDawViewSettings() {
 export function useDawViewSettings() {
   const [settings, setSettings] = useState(readDawViewSettings);
   const skipWrite = useRef(true);
+
+  useEffect(() => {
+    waveformService?.setDefaultChannels?.(settings.stereo ? 2 : 1);
+  }, [settings.stereo]);
 
   useEffect(() => {
     if (skipWrite.current) {

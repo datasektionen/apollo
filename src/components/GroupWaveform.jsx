@@ -77,7 +77,7 @@ function changedClipRanges(previous, next, pixelsPerMs) {
 function ModernGroupWaveform({
   clips: clipsProp = EMPTY_CLIPS, pixelsPerMs, viewportLeftPx = 0, viewportWidthPx = 0, returnViewportLeftPx, height = 80,
   globalPeakAmplitude = 1, displayMode = 'linear', showRms = false, showClipping = false,
-  missingMediaBlobIds, scheduleTier = 0, bitmapKey,
+  missingMediaBlobIds, scheduleTier = 0, bitmapKey, stereo = false,
 }) {
   // Parents rebuild clip lists on unrelated project changes (loop toggles, track tree normalization);
   // equal content keeps the retained surface instead of repainting the lane.
@@ -114,7 +114,7 @@ function ModernGroupWaveform({
   const viewportPx = viewportRef.current;
   const drawRef = useRef(null);
   drawRef.current = {
-    pixelsPerMs, height, globalPeakAmplitude, displayMode, showRms, showClipping, missingMediaBlobIds, extentPx,
+    pixelsPerMs, height, globalPeakAmplitude, displayMode, showRms, showClipping, missingMediaBlobIds, extentPx, stereo,
   };
   const localReturn = Number.isFinite(returnViewportLeftPx) ? returnViewportLeftPx : null;
   // Sources are pinned for every clip on the retained canvas, margins included.
@@ -125,7 +125,11 @@ function ModernGroupWaveform({
       && (clip.startMs + clip.durationMs) * pixelsPerMs > window.leftPx);
   };
   const { observerRef, requestRef } = useWaveformSources(
-    () => windowClips().map((clip) => ({ blobId: clip.blobId, audioBuffer: audioManager.mediaCache.get(clip.blobId) })),
+    () => windowClips().map((clip) => ({
+      blobId: clip.blobId,
+      audioBuffer: audioManager.mediaCache.get(clip.blobId),
+      ...(stereo ? { channels: 2 } : {}),
+    })),
     0, audioManager.mediaCache,
   );
   const repin = useCallback(() => observerRef.current?.invalidate(), [observerRef]);
@@ -134,7 +138,7 @@ function ModernGroupWaveform({
   const viewRef = useRef(view);
   viewRef.current = view;
   const missingKey = missingMediaBlobIds ? [...missingMediaBlobIds].sort().join(',') : '';
-  const picture = `${zoom}|${height}|${globalPeakAmplitude}|${displayMode}|${showRms}|${showClipping}|${view.dpr}|${missingKey}`;
+  const picture = `${zoom}|${height}|${globalPeakAmplitude}|${displayMode}|${showRms}|${showClipping}|${view.dpr}|${missingKey}|${stereo}`;
   const pictureRef = useRef(picture);
   const prepareRef = useRef(() => false);
   prepareRef.current = () => {
@@ -248,7 +252,7 @@ function ModernGroupWaveform({
             height: drawState.height,
             color: isMissing ? MISSING_COLOR : ACTIVITY_COLOR, displayMode: drawState.displayMode,
             globalPeakAmplitude: drawState.globalPeakAmplitude, showRms: drawState.showRms,
-            showClipping: drawState.showClipping,
+            showClipping: drawState.showClipping, stereo: drawState.stereo,
             requestDetail: (from, to) => waveformService.requestDetail(clip.blobId, audioBuffer, from, to),
           });
           return true;

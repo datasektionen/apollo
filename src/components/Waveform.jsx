@@ -121,7 +121,7 @@ function ModernWaveform({
   height = 80, color = '#4F8EF7', onReady, globalPeakAmplitude = 1,
   pixelsPerMs, clipLeftPx, clipWidthPx, viewportLeftPx, viewportWidthPx, returnViewportLeftPx,
   displayMode = 'linear', showRms = false, showClipping = false, showSamples = false,
-  scheduleTier = 0, bitmapKey,
+  scheduleTier = 0, bitmapKey, stereo = false,
 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -149,10 +149,14 @@ function ModernWaveform({
   const retained = (left) => getRetainedWindow({ extentPx: view.clipWidthPx, viewportLeftPx: left, viewportWidthPx: view.viewportWidthPx }).widthPx > 0;
   const near = retained(localLeft) || (localReturn !== null && retained(localReturn));
   const { observerRef, requestRef } = useWaveformSources(
-    () => near && audioRef.current ? [{ blobId, audioBuffer: audioRef.current }] : [], 1,
+    () => near && audioRef.current ? [{
+      blobId,
+      audioBuffer: audioRef.current,
+      ...(stereo ? { channels: audioRef.current.numberOfChannels } : {}),
+    }] : [], 1,
   );
   // Appearance and zoom share one picture. A change redraws offscreen instead of rebuilding the canvas.
-  const picture = `${scale}|${height}|${color}|${displayMode}|${globalPeakAmplitude}|${showRms}|${showClipping}|${showSamples}|${view.dpr}|${cropStartMs}`;
+  const picture = `${scale}|${height}|${color}|${displayMode}|${globalPeakAmplitude}|${showRms}|${showClipping}|${showSamples}|${view.dpr}|${cropStartMs}|${stereo}`;
   const pictureRef = useRef(picture);
   const prepareRef = useRef(() => false);
   prepareRef.current = () => {
@@ -182,7 +186,7 @@ function ModernWaveform({
   const drawRef = useRef(null);
   drawRef.current = {
     cropStartMs, endMs, scale, clipWidthPx: view.clipWidthPx, height, color, displayMode,
-    globalPeakAmplitude, showRms, showClipping, showSamples,
+    globalPeakAmplitude, showRms, showClipping, showSamples, stereo,
   };
   const donorRef = useRef(null);
   if (!donorRef.current) donorRef.current = { read: () => null };
@@ -194,7 +198,7 @@ function ModernWaveform({
       surface: surfaceRef.current, blobId, cropStartMs: draw.cropStartMs, pixelsPerMs: draw.scale,
       height: draw.height, color: draw.color, displayMode: draw.displayMode,
       showRms: draw.showRms, showClipping: draw.showClipping, showSamples: draw.showSamples,
-      globalPeakAmplitude: draw.globalPeakAmplitude, ...bitmap,
+      globalPeakAmplitude: draw.globalPeakAmplitude, stereo: draw.stereo, ...bitmap,
     };
   };
   useEffect(() => registerWaveformBitmap(donorRef.current), []);
@@ -222,7 +226,7 @@ function ModernWaveform({
         pixelsPerMs: draw.scale, clipLeftPx: 0, clipWidthPx: draw.clipWidthPx, ...strip,
         height: draw.height, color: draw.color, displayMode: draw.displayMode,
         globalPeakAmplitude: draw.globalPeakAmplitude, showRms: draw.showRms,
-        showClipping: draw.showClipping, showSamples: draw.showSamples,
+        showClipping: draw.showClipping, showSamples: draw.showSamples, stereo: draw.stereo,
         requestDetail: (start, end) => waveformService.requestDetail(blobId, audioRef.current, start, end),
       });
     };

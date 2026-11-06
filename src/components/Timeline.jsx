@@ -105,6 +105,7 @@ function Timeline({
   displayMode = 'linear',
   showRms = false,
   showClipping = false,
+  stereo = false,
   onAddTrack = null,
   children,
 }) {
@@ -3213,7 +3214,7 @@ function Timeline({
                           viewportLeftPx={scrollLeft - originPx} viewportWidthPx={containerWidth} height={rowInternalHeight}
                           returnViewportLeftPx={startViewportLeftPx} scheduleTier={rowOnScreen ? 0 : 2}
                           globalPeakAmplitude={globalPeakAmplitude} displayMode={displayMode}
-                          showRms={showRms} showClipping={showClipping} missingMediaBlobIds={missingMediaBlobIds} />
+                          showRms={showRms} showClipping={showClipping} stereo={stereo} missingMediaBlobIds={missingMediaBlobIds} />
                       </div>}
 
                     </div>
@@ -3330,6 +3331,7 @@ function Timeline({
                               displayMode={displayMode}
                               showRms={showRms}
                               showClipping={showClipping}
+                              stereo={stereo}
                               clipId={clip.id}
                               bitmapKey={clip.id}
                               cropStartMs={drawCropStartMs}

@@ -151,6 +151,39 @@ function addRaw(pcm, position, end, total) {
   total.count += end - position;
 }
 
+function addRawCombined(pcm0, pcm1, position, end, total) {
+  let min = Infinity;
+  let max = -Infinity;
+  let sumSquares = 0;
+  for (let i = position; i < end; i += 1) {
+    const v0 = pcm0[i];
+    const v1 = pcm1[i];
+    const value = Math.abs(v0) >= Math.abs(v1) ? v0 : v1;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+    sumSquares += value * value;
+  }
+  if (!(sumSquares < Infinity)) {
+    min = Infinity;
+    max = -Infinity;
+    sumSquares = 0;
+    for (let i = position; i < end; i += 1) {
+      let v0 = pcm0[i];
+      let v1 = pcm1[i];
+      if (!Number.isFinite(v0)) v0 = 0;
+      if (!Number.isFinite(v1)) v1 = 0;
+      const value = Math.abs(v0) >= Math.abs(v1) ? v0 : v1;
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+      sumSquares += value * value;
+    }
+  }
+  total.min = Math.min(total.min, min);
+  total.max = Math.max(total.max, max);
+  total.sumSquares += sumSquares;
+  total.count += end - position;
+}
+
 /**
  * Reusable exact range reader for one channel. reset(start, end) begins a range; each step()
  * refines at most rawLimit PCM samples and sets done, rawSamples and the min/max/sumSquares/count totals.
@@ -239,14 +272,48 @@ function createWaveformReader(pyramid, channel, audioBuffer, detail, { sumSquare
         next = Math.min(next, fineEnd);
       }
       if (!pcm) {
-        if (pyramid && (!audioBuffer || audioBuffer.length !== length || audioBuffer.numberOfChannels !== pyramid.numberOfChannels
+        if (pyramid && (!audioBuffer || audioBuffer.length !== length
+          || (pyramid.numberOfChannels !== 1 && audioBuffer.numberOfChannels !== pyramid.numberOfChannels)
           || audioBuffer.sampleRate !== pyramid.sampleRate)) throw new Error('Exact waveform edges require matching audioBuffer PCM');
-        pcm = audioBuffer.getChannelData(channel);
+        pcm = audioBuffer ? audioBuffer.getChannelData(Math.min(channel, audioBuffer.numberOfChannels - 1)) : undefined;
       }
-      addRaw(pcm, position, next, reader);
+      if (pyramid?.numberOfChannels === 1 && audioBuffer?.numberOfChannels > 1) {
+        addRawCombined(audioBuffer.getChannelData(0), audioBuffer.getChannelData(1), position, next, reader);
+      } else {
+        addRaw(pcm, position, next, reader);
+      }
       reader.rawSamples = next - position;
       position = next;
       nextEdge();
+    },
+  };
+  return reader;
+}
+
+export function createWaveformCombinedReader(pyramid, audioBuffer, detail, options) {
+  const reader0 = createWaveformReader(pyramid, 0, audioBuffer, detail, options);
+  const reader1 = createWaveformReader(pyramid, 1, audioBuffer, detail, options);
+  const reader = {
+    min: 0, max: 0, sumSquares: 0, count: 0, done: true, rawSamples: 0,
+    reset(start, end) {
+      reader0.reset(start, end);
+      reader1.reset(start, end);
+      reader.min = Math.min(reader0.min, reader1.min);
+      reader.max = Math.max(reader0.max, reader1.max);
+      reader.sumSquares = (reader0.sumSquares + reader1.sumSquares) * 0.5;
+      reader.count = reader0.count;
+      reader.done = reader0.done && reader1.done;
+      reader.rawSamples = 0;
+    },
+    step(rawLimit = WAVEFORM_RAW_SAMPLES_PER_SLICE) {
+      if (!reader0.done) reader0.step(rawLimit);
+      if (!reader1.done) reader1.step(rawLimit);
+      reader.done = reader0.done && reader1.done;
+      reader.rawSamples = reader0.rawSamples + reader1.rawSamples;
+      reader.min = Math.min(reader0.min, reader1.min);
+      reader.max = Math.max(reader0.max, reader1.max);
+      reader.sumSquares = (reader0.sumSquares + reader1.sumSquares) * 0.5;
+      reader.count = Math.max(reader0.count, reader1.count);
     },
   };
   return reader;
@@ -311,12 +378,13 @@ export function createWaveformSourceObserver({ service, getSources, subscribeMed
             pins.delete(buffer);
           }
         }
-        for (const { blobId, audioBuffer } of desired) {
+        for (const { blobId, audioBuffer, channels } of desired) {
           const previous = snapshots.get(blobId);
           let source;
           if (audioBuffer) {
             // Do not pass revision: it belongs to the trusted media-cache owner.
-            source = service.getSource(blobId, audioBuffer) || service.ensureSource(blobId, audioBuffer, { priority });
+            const opts = channels ? { priority, channels } : { priority };
+            source = service.getSource(blobId, audioBuffer, opts) || service.ensureSource(blobId, audioBuffer, opts);
             if (!pins.has(audioBuffer)) pins.set(audioBuffer, { blobId, unpin: service.pinSource(blobId, audioBuffer) });
           }
           const same = previous?.audioBuffer === audioBuffer && previous?.source?.status === source?.status
@@ -355,18 +423,20 @@ export function createWaveformDrawJob(context, {
   clipLeftPx = 0, clipWidthPx, surfaceLeftPx, surfaceWidthPx, height,
   dpr = 1, color = '#4F8EF7', displayMode = 'linear', globalPeakAmplitude = 1,
   showRms = false, showClipping = false, showSamples = false, requestDetail,
-  fromColumn = 0, toColumn = Infinity,
+  fromColumn = 0, toColumn = Infinity, stereo,
 }) {
-  const { sampleRate, length, numberOfChannels } = audioBuffer;
+  const { sampleRate, length } = audioBuffer;
   if (finite(cropEndMs, length / sampleRate * 1000) <= finite(cropStartMs)) return () => false;
   const cropStart = Math.max(0, Math.min(length, Math.floor(finite(cropStartMs) * sampleRate / 1000)));
   const cropEnd = Math.max(cropStart, Math.min(length, Math.ceil(finite(cropEndMs, length / sampleRate * 1000) * sampleRate / 1000)));
   const left = Math.max(0, clipLeftPx - surfaceLeftPx, fromColumn / dpr);
   const right = Math.min(surfaceWidthPx, clipLeftPx + clipWidthPx - surfaceLeftPx, toColumn / dpr);
   if (!(pixelsPerMs > 0) || right <= left || cropEnd <= cropStart) return () => false;
+  const isStereo = stereo === true || (stereo === undefined && audioBuffer.numberOfChannels > 1 && (pyramid ? pyramid.numberOfChannels > 1 : true));
+  const drawChannels = isStereo ? 2 : 1;
   const samplesPerPx = sampleRate / (1000 * pixelsPerMs);
   const detail = samplesPerPx / dpr <= 1;
-  const laneHeight = height / numberOfChannels;
+  const laneHeight = height / drawChannels;
   const amplitude = (value) => waveformAmplitude(value, displayMode, globalPeakAmplitude);
   const sampleAt = (x) => finite(cropStartMs) * sampleRate / 1000 + (surfaceLeftPx + x - clipLeftPx) * samplesPerPx;
   const detailPages = !detail && pyramid?.baseBlockSize > WAVEFORM_BASE_BLOCK_SIZE
@@ -406,14 +476,23 @@ export function createWaveformDrawJob(context, {
     context.lineWidth = 1 / dpr;
     let finished = false;
     if (detail) {
-      const pcm = audioBuffer.getChannelData(channel);
+      const pcm0 = audioBuffer.getChannelData(0);
+      const pcm1 = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : pcm0;
       const end = Math.min(cropEnd, Math.ceil(sampleAt(right + detailReachPx)) + 1);
       // Paths break at absolute multiples of 64 samples, so joins do not depend on where drawing began.
       const stop = Math.min(end, (Math.floor(sample / 64) + 1) * 64);
       context.beginPath();
       if (previous) context.moveTo(previous.x, previous.y);
       for (; sample < stop; sample += 1) {
-        const value = finite(pcm[sample]);
+        let value;
+        if (!isStereo && audioBuffer.numberOfChannels > 1) {
+          const v0 = finite(pcm0[sample]);
+          const v1 = finite(pcm1[sample]);
+          value = Math.abs(v0) >= Math.abs(v1) ? v0 : v1;
+        } else {
+          const pcm = channel === 1 && audioBuffer.numberOfChannels > 1 ? pcm1 : pcm0;
+          value = finite(pcm[sample]);
+        }
         const x = clipLeftPx - surfaceLeftPx + (sample - finite(cropStartMs) * sampleRate / 1000) / samplesPerPx;
         const point = { x, y: y(value) };
         if (previous) context.lineTo(point.x, point.y);
@@ -431,7 +510,13 @@ export function createWaveformDrawJob(context, {
     } else {
       let rawRemaining = WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE;
       let work = 0;
-      reader ||= createWaveformReader(pyramid, channel, audioBuffer, detailPages, { sumSquares: showRms });
+      if (!reader) {
+        if (!isStereo && (pyramid?.numberOfChannels || 1) > 1) {
+          reader = createWaveformCombinedReader(pyramid, audioBuffer, detailPages, { sumSquares: showRms });
+        } else {
+          reader = createWaveformReader(pyramid, channel, audioBuffer, detailPages, { sumSquares: showRms });
+        }
+      }
       // Batch small exact queries, but bound both PCM work and summary-only work even with a stalled clock.
       // Reading the clock costs about as much as a summary step, so it is sampled by work done.
       for (let i = 0; i < WAVEFORM_DRAW_STEPS_PER_SLICE && column / dpr < right && rawRemaining > 0; i += 1) {
@@ -479,6 +564,6 @@ export function createWaveformDrawJob(context, {
       initialized = false;
       reader = undefined;
     }
-    return channel < numberOfChannels;
+    return channel < drawChannels;
   };
 }

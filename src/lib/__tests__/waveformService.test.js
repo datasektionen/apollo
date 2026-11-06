@@ -357,4 +357,29 @@ describe('verified persistence through the source service', () => {
     expect(service.getStats().errors).toBe(0);
     expect(persistence.save).toHaveBeenCalledOnce();
   });
+
+  it('extracts combined mono when defaultChannels is 1 or channels is 1 on a stereo buffer', async () => {
+    const service = makeService({ defaultChannels: 1 });
+    const buffer = audioBuffer([[0.8, -0.2], [0.1, -0.9]]);
+    service.ensureSource('stereo-file', buffer);
+    const ready = await settled(service, 'stereo-file', buffer);
+    expect(ready.pyramid.numberOfChannels).toBe(1);
+    expect(ready.pyramid.channels).toHaveLength(1);
+    expect(ready.pyramid.channelPeaks[0]).toBeCloseTo(0.9);
+  });
+
+  it('upgrades an existing mono extraction to stereo when channels: 2 is requested', async () => {
+    const service = makeService({ defaultChannels: 1 });
+    const buffer = audioBuffer([[0.8, -0.2], [0.1, -0.9]]);
+    service.ensureSource('stereo-file', buffer, { channels: 1 });
+    const monoReady = await settled(service, 'stereo-file', buffer);
+    expect(monoReady.pyramid.numberOfChannels).toBe(1);
+
+    // Request stereo upgrade
+    expect(service.getSource('stereo-file', buffer, { channels: 2 })).toBeUndefined();
+    service.ensureSource('stereo-file', buffer, { channels: 2 });
+    const stereoReady = await settled(service, 'stereo-file', buffer);
+    expect(stereoReady.pyramid.numberOfChannels).toBe(2);
+    expect(stereoReady.pyramid.channels).toHaveLength(2);
+  });
 });

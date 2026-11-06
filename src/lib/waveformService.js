@@ -46,6 +46,7 @@ export function createWaveformService({
   maxBaseBlockSize = 4096,
   workerTimeoutMs = 15000,
   cacheReadTimeoutMs = 150,
+  defaultChannels,
 } = {}) {
   if (!Number.isFinite(maxResidentBytes) || maxResidentBytes < 2048
     || !Number.isFinite(maxSourceBytes) || maxSourceBytes <= 0 || maxSourceBytes > maxResidentBytes
@@ -57,7 +58,9 @@ export function createWaveformService({
     || !Number.isSafeInteger(maxPendingSources) || maxPendingSources < 1
     || !Number.isSafeInteger(maxRecordingBuilders) || maxRecordingBuilders < 1
     || !Number.isSafeInteger(maxBaseBlockSize) || maxBaseBlockSize < 128 || Math.log2(maxBaseBlockSize) % 1 !== 0
-    || !Number.isFinite(cacheReadTimeoutMs) || cacheReadTimeoutMs < 0) throw new RangeError('Invalid waveform service limits');
+    || !Number.isFinite(cacheReadTimeoutMs) || cacheReadTimeoutMs < 0
+    || (defaultChannels !== undefined && (!Number.isSafeInteger(defaultChannels) || defaultChannels < 1))) throw new RangeError('Invalid waveform service limits');
+  let currentDefaultChannels = defaultChannels;
   const objects = new WeakMap(); // Includes weakly-held eviction descriptors for demand-driven retry.
   const entries = new Map();
   const aliases = new Map();
@@ -219,17 +222,33 @@ export function createWaveformService({
         if (!buffer || !wantsDetail(entry, generation) || entry.pages.has(index)) continue;
         const start = index * detailPageSamples;
         const length = Math.min(detailPageSamples, buffer.length - start);
-        const bytes = estimateWaveformBytes(length, buffer.numberOfChannels);
+        const channels = entry.state.pyramid.numberOfChannels;
+        const bytes = estimateWaveformBytes(length, channels);
         if (length <= 0 || !reserveDetail(bytes)) continue;
         let page;
         try {
-          const builder = createWaveformBuilder({ sampleRate: buffer.sampleRate, length, numberOfChannels: buffer.numberOfChannels });
-          for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex += 1) {
+          const builder = createWaveformBuilder({ sampleRate: buffer.sampleRate, length, numberOfChannels: channels });
+          const isCombined = channels === 1 && buffer.numberOfChannels > 1;
+          for (let channelIndex = 0; channelIndex < channels; channelIndex += 1) {
+            const left = isCombined ? buffer.getChannelData(0) : null;
+            const right = isCombined ? buffer.getChannelData(1) : null;
+            const pcm = !isCombined ? buffer.getChannelData(channelIndex) : null;
             for (let offset = 0; offset < length; offset += WAVEFORM_CHUNK_SAMPLES) {
               await yieldControl();
               if (disposed || !wantsDetail(entry, generation)) throw abortError();
               const end = Math.min(offset + WAVEFORM_CHUNK_SAMPLES, length);
-              builder.append(channelIndex, offset, buffer.getChannelData(channelIndex).subarray(start + offset, start + end));
+              let chunk;
+              if (isCombined) {
+                chunk = new Float32Array(end - offset);
+                for (let i = 0; i < chunk.length; i += 1) {
+                  const l = left[start + offset + i];
+                  const r = right[start + offset + i];
+                  chunk[i] = Math.abs(l) >= Math.abs(r) ? l : r;
+                }
+              } else {
+                chunk = pcm.subarray(start + offset, start + end);
+              }
+              builder.append(channelIndex, offset, chunk);
               counters.detailSamplesScanned += end - offset;
             }
           }
@@ -417,14 +436,34 @@ export function createWaveformService({
       builder = createWaveformBuilder(metadata);
       fingerprint = createWaveformFingerprint(metadata);
     }
+    const isCombinedMono = metadata.numberOfChannels === 1 && buffer.numberOfChannels > 1;
     for (let channelIndex = 0; channelIndex < metadata.numberOfChannels; channelIndex += 1) {
-      const pcm = buffer.getChannelData(channelIndex);
-      if (!ArrayBuffer.isView(pcm) || Object.prototype.toString.call(pcm) !== '[object Float32Array]'
-        || pcm.length !== metadata.length) throw new TypeError('Invalid AudioBuffer channel data');
+      let pcm;
+      let left;
+      let right;
+      if (isCombinedMono) {
+        left = buffer.getChannelData(0);
+        right = buffer.getChannelData(1);
+      } else {
+        pcm = buffer.getChannelData(channelIndex);
+        if (!ArrayBuffer.isView(pcm) || Object.prototype.toString.call(pcm) !== '[object Float32Array]'
+          || pcm.length !== metadata.length) throw new TypeError('Invalid AudioBuffer channel data');
+      }
       for (let startSample = 0; startSample < metadata.length; startSample += WAVEFORM_CHUNK_SAMPLES) {
         await yieldControl();
         check(entry);
-        const samples = pcm.slice(startSample, Math.min(startSample + WAVEFORM_CHUNK_SAMPLES, metadata.length));
+        const chunkSize = Math.min(WAVEFORM_CHUNK_SAMPLES, metadata.length - startSample);
+        let samples;
+        if (isCombinedMono) {
+          samples = new Float32Array(chunkSize);
+          for (let i = 0; i < chunkSize; i += 1) {
+            const l = left[startSample + i];
+            const r = right[startSample + i];
+            samples[i] = Math.abs(l) >= Math.abs(r) ? l : r;
+          }
+        } else {
+          samples = pcm.slice(startSample, startSample + chunkSize);
+        }
         const copiedBytes = samples.byteLength;
         stagingBytes += copiedBytes;
         counters.peakStagingBytes = Math.max(counters.peakStagingBytes, stagingBytes);
@@ -446,7 +485,9 @@ export function createWaveformService({
     return { pyramid: builder.finish(), fingerprint: hash };
   }
   function metadataFor(entry, buffer) {
-    const { sampleRate, length, numberOfChannels } = buffer;
+    const { sampleRate, length } = buffer;
+    const requested = entry?.targetChannels || currentDefaultChannels || buffer.numberOfChannels;
+    const numberOfChannels = Math.max(1, Math.min(buffer.numberOfChannels, requested));
     const available = maxResidentBytes - pinnedBytes(entry) - ioBytes() - recordingBytes;
     let baseBlockSize;
     try { baseBlockSize = chooseWaveformBlockSize(length, numberOfChannels, Math.max(0, Math.min(maxSourceBytes, available))); }
@@ -580,6 +621,13 @@ export function createWaveformService({
       if (entry?.lifecycle !== lifecycle) entry = undefined;
       const revisionProvided = Object.prototype.hasOwnProperty.call(options, 'revision');
       const normalized = revisionProvided ? normalizeWaveformRevision(options.revision) : entry?.revisionKey;
+      const requestedChannels = options.channels || (options.stereo ? audioBuffer.numberOfChannels : (options.stereo === false ? 1 : undefined));
+      if (entry && requestedChannels && requestedChannels > (entry.state.pyramid?.numberOfChannels ?? entry.targetChannels ?? 1)) {
+        entry.targetChannels = requestedChannels;
+        if (entry.state.status === 'ready' || entry.state.status === 'error') {
+          queue(entry);
+        }
+      }
       let adopted = false;
       if (entry && !entry.removed && revisionProvided && entry.revisionKey !== normalized) {
         // A provisional recording summary was built from this exact buffer; its first media revision names it.
@@ -602,8 +650,11 @@ export function createWaveformService({
           jobId: ++nextJob, revisionKey: normalized,
           revision: revisionSnapshot(normalized),
           cacheBlobId: blobId, pages: new Map(), pageGeneration: 0,
+          targetChannels: requestedChannels,
         };
         objects.set(audioBuffer, entry);
+      } else if (requestedChannels && !entry.targetChannels) {
+        entry.targetChannels = requestedChannels;
       }
       const key = aliasFor(blobId, entry);
       const previous = latestAliases.get(key)?.deref();
@@ -642,13 +693,23 @@ export function createWaveformService({
       } else notify('error', entry);
       return entry.state;
     },
-    getSource(blobId, audioBuffer) {
+    getSource(blobId, audioBuffer, options = {}) {
       const entry = lookup(blobId, audioBuffer);
       if (!entry) return undefined;
+      const requested = options.channels || (options.stereo ? audioBuffer?.numberOfChannels : undefined);
+      if (requested && requested > (entry.state.pyramid?.numberOfChannels ?? entry.targetChannels ?? 1)) {
+        return undefined;
+      }
       entry.observed = true;
       demand(entry);
       touch(entry);
       return entry.state;
+    },
+    setDefaultChannels(channels) {
+      currentDefaultChannels = channels;
+    },
+    getDefaultChannels() {
+      return currentDefaultChannels;
     },
     /** Passive normalization/diagnostic read: no admission, observation, jobs, LRU touch or events. */
     getSourceStats(blobId, audioBuffer) { return lookup(blobId, audioBuffer)?.stats; },

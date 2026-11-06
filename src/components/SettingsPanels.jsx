@@ -263,6 +263,15 @@ export function DawSettingsPanel({ settings, setSettings }) {
         <input
           type="checkbox"
           className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+          checked={Boolean(settings.stereo)}
+          onChange={(event) => update({ stereo: event.target.checked })}
+        />
+        <span>Stereo waveforms</span>
+      </label>
+      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
           checked={settings.showRms}
           onChange={(event) => update({ showRms: event.target.checked })}
         />

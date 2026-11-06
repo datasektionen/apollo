@@ -156,6 +156,7 @@ api.run = async ({ fixture: name = 'quick', coldTimeoutMs = 60000 } = {}) => {
       longTaskObserver.observe({ type: 'longtask', buffered: true });
     }
     stage('generating real AudioBuffers');
+    waveformService.setDefaultChannels?.(2);
     context = new AudioContext({ sampleRate: 48000 });
     const buffers = await createFixtureBuffers(context, result.fixture);
     result.fixtureCreationMs = performance.now() - started;
@@ -163,7 +164,7 @@ api.run = async ({ fixture: name = 'quick', coldTimeoutMs = 60000 } = {}) => {
     let render;
     const mount = () => {
       root = createRoot(host);
-      render = () => flushSync(() => root.render(<Timeline project={project} rows={getVisibleTimelineRows(project)}
+      render = () => flushSync(() => root.render(<Timeline project={project} rows={getVisibleTimelineRows(project)} stereo={true}
         currentTimeMs={0} isPlaying={false} isRecording={false} recordingSegments={[]} shortcutsEnabled
         onSeek={() => {}} updateProject={(update) => { project = typeof update === 'function' ? update(project) : update; render(); }} />));
       render();

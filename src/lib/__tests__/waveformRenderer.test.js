@@ -391,4 +391,33 @@ describe('waveform renderer', () => {
     // 25 visible samples, plus the 2 px reach and one neighbour on each side.
     expect(reads).toBeLessThanOrEqual(29);
   });
+
+  it('renders a stereo buffer as a single combined lane when stereo is false (default)', () => {
+    const left = [0.8, -0.2, 0.4, 0.1];
+    const right = [0.1, -0.9, 0.2, -0.7];
+    const { buffer, pyramid } = source([left, right]);
+    const ctx = context();
+    finish(createWaveformDrawJob(ctx, {
+      audioBuffer: buffer, pyramid, pixelsPerMs: 0.5,
+      clipWidthPx: 2, surfaceLeftPx: 0, surfaceWidthPx: 2, height: 80, stereo: false,
+    }));
+    // Only one clip rect covering the full height 80
+    expect(ctx.rect).toHaveBeenCalledTimes(1);
+    expect(ctx.rect).toHaveBeenCalledWith(0, 0, 2, 80);
+  });
+
+  it('renders a stereo buffer as two separate lanes when stereo is true', () => {
+    const left = [0.8, -0.2, 0.4, 0.1];
+    const right = [0.1, -0.9, 0.2, -0.7];
+    const { buffer, pyramid } = source([left, right]);
+    const ctx = context();
+    finish(createWaveformDrawJob(ctx, {
+      audioBuffer: buffer, pyramid, pixelsPerMs: 0.5,
+      clipWidthPx: 2, surfaceLeftPx: 0, surfaceWidthPx: 2, height: 80, stereo: true,
+    }));
+    // Two clip rects: lane 0 at y:0 height:40, lane 1 at y:40 height:40
+    expect(ctx.rect).toHaveBeenCalledTimes(2);
+    expect(ctx.rect.mock.calls[0]).toEqual([0, 0, 2, 40]);
+    expect(ctx.rect.mock.calls[1]).toEqual([0, 40, 2, 40]);
+  });
 });
