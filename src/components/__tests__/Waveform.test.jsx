@@ -624,7 +624,7 @@ describe('GroupWaveform', () => {
     await flush();
     expect(view.container.firstChild.getAttribute('data-waveform-status')).toBe('ready');
     // The lane is 820 device columns: two strips, each drawing the new summary exactly once.
-    expect(jobs.mock.calls.filter(([, options]) => options.audioBuffer === second)).toHaveLength(2);
+    expect(jobs.mock.calls.filter(([, options]) => options.clips?.some((c) => c.audioBuffer === second) || options.audioBuffer === second)).toHaveLength(2);
   });
 
   it('handles a cold summary event without stale draw publication or polling', async () => {

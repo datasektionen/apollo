@@ -420,4 +420,88 @@ describe('waveform renderer', () => {
     expect(ctx.rect.mock.calls[0]).toEqual([0, 0, 2, 40]);
     expect(ctx.rect.mock.calls[1]).toEqual([0, 40, 2, 40]);
   });
+
+  it('renders multiple overlapping clips as a composite envelope in a single pass without overdraw', () => {
+    const { buffer: bufferA, pyramid: pyramidA } = source([[0.8, 0.8, 0.8, 0.8]]);
+    const { buffer: bufferB, pyramid: pyramidB } = source([[-0.9, -0.9, -0.9, -0.9]]);
+    const ctx = context();
+    const clipA = {
+      audioBuffer: bufferA,
+      pyramid: pyramidA,
+      clipLeftPx: 0,
+      clipWidthPx: 4,
+      cropStartMs: 0,
+      cropEndMs: 4,
+    };
+    const clipB = {
+      audioBuffer: bufferB,
+      pyramid: pyramidB,
+      clipLeftPx: 0,
+      clipWidthPx: 4,
+      cropStartMs: 0,
+      cropEndMs: 4,
+    };
+    finish(createWaveformDrawJob(ctx, {
+      clips: [clipA, clipB],
+      pixelsPerMs: 1,
+      surfaceLeftPx: 0,
+      surfaceWidthPx: 4,
+      height: 100,
+    }));
+    // Exactly 1 fillRect bar per column across the 4 columns (x = 0, 1, 2, 3), not 2 per column from duplicate drawing
+    const mainBars = ctx.fillRect.mock.calls.filter((call) => call[2] === 1 && call[3] > 1);
+    expect(mainBars).toHaveLength(4);
+    // At height 100, center is 50, radius is 48.
+    // composite max is 0.8 -> y = 50 - 0.8*48 = 11.6
+    // composite min is -0.9 -> bottom = 50 - (-0.9)*48 = 93.2
+    mainBars.forEach((call) => {
+      const [, y, width, height] = call;
+      expect(width).toBe(1);
+      expect(y).toBeLessThanOrEqual(15);
+      expect(y + height).toBeGreaterThanOrEqual(90);
+    });
+  });
+
+  it('does not draw any center line or waveform bars in the gap between separated child clips', () => {
+    const { buffer: bufferA, pyramid: pyramidA } = source([[0.5, 0.5, 0.5, 0.5]]);
+    const { buffer: bufferB, pyramid: pyramidB } = source([[0.7, 0.7, 0.7, 0.7]]);
+    const ctx = context();
+    const clipA = {
+      audioBuffer: bufferA,
+      pyramid: pyramidA,
+      clipLeftPx: 0,
+      clipWidthPx: 4,
+      cropStartMs: 0,
+      cropEndMs: 4,
+    };
+    const clipB = {
+      audioBuffer: bufferB,
+      pyramid: pyramidB,
+      clipLeftPx: 10,
+      clipWidthPx: 4,
+      cropStartMs: 0,
+      cropEndMs: 4,
+    };
+    finish(createWaveformDrawJob(ctx, {
+      clips: [clipA, clipB],
+      pixelsPerMs: 1,
+      surfaceLeftPx: 0,
+      surfaceWidthPx: 16,
+      height: 100,
+    }));
+    // Check all fillRect calls
+    const allRects = ctx.fillRect.mock.calls;
+    // None of the rects should fall inside the gap [4, 10)
+    for (const [x, y, w, h] of allRects) {
+      const right = x + w;
+      const overlapsGap = Math.max(x, 4) < Math.min(right, 10);
+      expect(overlapsGap).toBe(false);
+    }
+    // Zero line rects (at y === 50) should only exist for [0, 4] and [10, 14]
+    const zeroLines = allRects.filter((call) => call[1] === 50 && call[3] === 1);
+    expect(zeroLines).toEqual([
+      [0, 50, 4, 1],
+      [10, 50, 4, 1],
+    ]);
+  });
 });

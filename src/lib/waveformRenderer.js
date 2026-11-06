@@ -423,146 +423,348 @@ export function createWaveformDrawJob(context, {
   clipLeftPx = 0, clipWidthPx, surfaceLeftPx, surfaceWidthPx, height,
   dpr = 1, color = '#4F8EF7', displayMode = 'linear', globalPeakAmplitude = 1,
   showRms = false, showClipping = false, showSamples = false, requestDetail,
-  fromColumn = 0, toColumn = Infinity, stereo,
+  fromColumn = 0, toColumn = Infinity, stereo, clips,
 }) {
-  const { sampleRate, length } = audioBuffer;
-  if (finite(cropEndMs, length / sampleRate * 1000) <= finite(cropStartMs)) return () => false;
-  const cropStart = Math.max(0, Math.min(length, Math.floor(finite(cropStartMs) * sampleRate / 1000)));
-  const cropEnd = Math.max(cropStart, Math.min(length, Math.ceil(finite(cropEndMs, length / sampleRate * 1000) * sampleRate / 1000)));
-  const left = Math.max(0, clipLeftPx - surfaceLeftPx, fromColumn / dpr);
-  const right = Math.min(surfaceWidthPx, clipLeftPx + clipWidthPx - surfaceLeftPx, toColumn / dpr);
-  if (!(pixelsPerMs > 0) || right <= left || cropEnd <= cropStart) return () => false;
-  const isStereo = stereo === true || (stereo === undefined && audioBuffer.numberOfChannels > 1 && (pyramid ? pyramid.numberOfChannels > 1 : true));
+  const clipEntries = Array.isArray(clips) && clips.length > 0
+    ? clips
+    : (audioBuffer ? [{
+        audioBuffer,
+        pyramid,
+        cropStartMs,
+        cropEndMs,
+        clipLeftPx,
+        clipWidthPx,
+        requestDetail,
+      }] : []);
+
+  if (!clipEntries.length) return () => false;
+
+  const minClipLeft = Math.min(...clipEntries.map((c) => finite(c.clipLeftPx, 0)));
+  const maxClipRight = Math.max(...clipEntries.map((c) => finite(c.clipLeftPx, 0) + finite(c.clipWidthPx, 0)));
+  const left = Math.max(0, minClipLeft - surfaceLeftPx, fromColumn / dpr);
+  const right = Math.min(surfaceWidthPx, maxClipRight - surfaceLeftPx, toColumn / dpr);
+  if (!(pixelsPerMs > 0) || right <= left) return () => false;
+
+  const isStereo = stereo === true || (stereo === undefined && clipEntries.some((c) => (
+    c.audioBuffer?.numberOfChannels > 1 && (c.pyramid ? c.pyramid.numberOfChannels > 1 : true)
+  )));
   const drawChannels = isStereo ? 2 : 1;
-  const samplesPerPx = sampleRate / (1000 * pixelsPerMs);
-  const detail = samplesPerPx / dpr <= 1;
   const laneHeight = height / drawChannels;
   const amplitude = (value) => waveformAmplitude(value, displayMode, globalPeakAmplitude);
-  const sampleAt = (x) => finite(cropStartMs) * sampleRate / 1000 + (surfaceLeftPx + x - clipLeftPx) * samplesPerPx;
-  const detailPages = !detail && pyramid?.baseBlockSize > WAVEFORM_BASE_BLOCK_SIZE
-    ? requestDetail?.(Math.max(cropStart, Math.floor(sampleAt(left))), Math.min(cropEnd, Math.ceil(sampleAt(right))))
-    : undefined;
-  // fromColumn / dpr * dpr can round just below fromColumn.
-  const firstColumn = Math.max(fromColumn, Math.floor(left * dpr));
-  // Sample lines start and end this far outside the clip: strokes, sample dots and clipping marks of
-  // samples just outside still reach in, and a column range must match a full pass.
-  const detailReachPx = 2;
-  const firstSample = detail
-    ? Math.max(cropStart, Math.floor(sampleAt(left - detailReachPx)) - 1)
-    : Math.max(cropStart, Math.floor(sampleAt(left)));
+
+  // Optimized single-clip path
+  if (clipEntries.length === 1) {
+    const entry = clipEntries[0];
+    const { sampleRate, length } = entry.audioBuffer;
+    if (finite(entry.cropEndMs, length / sampleRate * 1000) <= finite(entry.cropStartMs)) return () => false;
+    const cropStart = Math.max(0, Math.min(length, Math.floor(finite(entry.cropStartMs) * sampleRate / 1000)));
+    const cropEnd = Math.max(cropStart, Math.min(length, Math.ceil(finite(entry.cropEndMs, length / sampleRate * 1000) * sampleRate / 1000)));
+    if (cropEnd <= cropStart) return () => false;
+    const clipLeft = Math.max(0, finite(entry.clipLeftPx, 0) - surfaceLeftPx, fromColumn / dpr);
+    const clipRight = Math.min(surfaceWidthPx, finite(entry.clipLeftPx, 0) + finite(entry.clipWidthPx, 0) - surfaceLeftPx, toColumn / dpr);
+    if (clipRight <= clipLeft) return () => false;
+    const samplesPerPx = sampleRate / (1000 * pixelsPerMs);
+    const detail = samplesPerPx / dpr <= 1;
+    const sampleAt = (x) => finite(entry.cropStartMs) * sampleRate / 1000 + (surfaceLeftPx + x - finite(entry.clipLeftPx, 0)) * samplesPerPx;
+    const detailPages = !detail && entry.pyramid?.baseBlockSize > WAVEFORM_BASE_BLOCK_SIZE
+      ? entry.requestDetail?.(Math.max(cropStart, Math.floor(sampleAt(clipLeft))), Math.min(cropEnd, Math.ceil(sampleAt(clipRight))))
+      : undefined;
+    const firstColumn = Math.max(fromColumn, Math.floor(clipLeft * dpr));
+    const detailReachPx = 2;
+    const firstSample = detail
+      ? Math.max(cropStart, Math.floor(sampleAt(clipLeft - detailReachPx)) - 1)
+      : Math.max(cropStart, Math.floor(sampleAt(clipLeft)));
+    let channel = 0;
+    let column = firstColumn;
+    let sample = firstSample;
+    let previous;
+    let initialized = false;
+    let reader;
+    let reading = false;
+    return ({ now = () => performance.now(), deadline = Infinity } = {}) => {
+      const sliceDeadline = Math.min(deadline, now() + 1);
+      const center = (channel + 0.5) * laneHeight;
+      const radius = Math.max(0, laneHeight / 2 - 2);
+      const y = (value) => center - amplitude(value) * radius;
+      context.save();
+      context.beginPath();
+      context.rect(clipLeft, channel * laneHeight, clipRight - clipLeft, laneHeight);
+      context.clip();
+      if (!initialized) {
+        context.fillStyle = 'rgba(148, 163, 184, 0.35)';
+        context.fillRect(clipLeft, center, clipRight - clipLeft, 1 / dpr);
+        initialized = true;
+      }
+      context.strokeStyle = color;
+      context.fillStyle = color;
+      context.lineWidth = 1 / dpr;
+      let finished = false;
+      if (detail) {
+        const pcm0 = entry.audioBuffer.getChannelData(0);
+        const pcm1 = entry.audioBuffer.numberOfChannels > 1 ? entry.audioBuffer.getChannelData(1) : pcm0;
+        const end = Math.min(cropEnd, Math.ceil(sampleAt(clipRight + detailReachPx)) + 1);
+        const stop = Math.min(end, (Math.floor(sample / 64) + 1) * 64);
+        context.beginPath();
+        if (previous) context.moveTo(previous.x, previous.y);
+        for (; sample < stop; sample += 1) {
+          let value;
+          if (!isStereo && entry.audioBuffer.numberOfChannels > 1) {
+            const v0 = finite(pcm0[sample]);
+            const v1 = finite(pcm1[sample]);
+            value = Math.abs(v0) >= Math.abs(v1) ? v0 : v1;
+          } else {
+            const pcm = channel === 1 && entry.audioBuffer.numberOfChannels > 1 ? pcm1 : pcm0;
+            value = finite(pcm[sample]);
+          }
+          const x = finite(entry.clipLeftPx, 0) - surfaceLeftPx + (sample - finite(entry.cropStartMs) * sampleRate / 1000) / samplesPerPx;
+          const point = { x, y: y(value) };
+          if (previous) context.lineTo(point.x, point.y);
+          else context.moveTo(point.x, point.y);
+          previous = point;
+          if (showSamples && 1 / samplesPerPx >= 4) context.fillRect(x - 1.5, point.y - 1.5, 3, 3);
+          if (showClipping && Math.abs(value) > 1) {
+            context.fillStyle = '#ef4444';
+            context.fillRect(x, value > 0 ? channel * laneHeight : (channel + 1) * laneHeight - 2, 2, 2);
+            context.fillStyle = color;
+          }
+        }
+        context.stroke();
+        finished = sample >= end;
+      } else {
+        let rawRemaining = WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE;
+        let work = 0;
+        if (!reader) {
+          if (!isStereo && (entry.pyramid?.numberOfChannels || 1) > 1) {
+            reader = createWaveformCombinedReader(entry.pyramid, entry.audioBuffer, detailPages, { sumSquares: showRms });
+          } else {
+            reader = createWaveformReader(entry.pyramid, channel, entry.audioBuffer, detailPages, { sumSquares: showRms });
+          }
+        }
+        for (let i = 0; i < WAVEFORM_DRAW_STEPS_PER_SLICE && column / dpr < clipRight && rawRemaining > 0; i += 1) {
+          if (work >= WAVEFORM_CLOCK_CHECK_WORK) {
+            if (now() >= sliceDeadline) break;
+            work = 0;
+          }
+          const x = Math.max(clipLeft, column / dpr);
+          const endX = Math.min(clipRight, (column + 1) / dpr);
+          if (!reading) {
+            reader.reset(Math.max(cropStart, Math.floor(sampleAt(x))), Math.min(cropEnd, Math.ceil(sampleAt(endX))));
+            reading = true;
+          }
+          reader.step(Math.min(rawRemaining, WAVEFORM_RAW_SAMPLES_PER_SLICE));
+          rawRemaining -= reader.rawSamples;
+          work += 16 + reader.rawSamples;
+          if (!reader.done) continue;
+          reading = false;
+          column += 1;
+          if (!reader.count) continue;
+          const top = y(reader.max);
+          const bottom = y(reader.min);
+          context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
+          if (showRms) {
+            const rms = Math.sqrt(reader.sumSquares / reader.count);
+            context.globalAlpha = 0.35;
+            context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
+            context.globalAlpha = 1;
+          }
+          if (showClipping && (reader.max > 1 || reader.min < -1)) {
+            context.fillStyle = '#ef4444';
+            if (reader.max > 1) context.fillRect(x, channel * laneHeight, endX - x, 2);
+            if (reader.min < -1) context.fillRect(x, (channel + 1) * laneHeight - 2, endX - x, 2);
+            context.fillStyle = color;
+          }
+        }
+        finished = column / dpr >= clipRight;
+      }
+      context.restore();
+      if (finished) {
+        channel += 1;
+        column = firstColumn;
+        sample = firstSample;
+        previous = undefined;
+        initialized = false;
+        reader = undefined;
+      }
+      return channel < drawChannels;
+    };
+  }
+
+  // Multi-clip single-pass composite path
+  const preparedClips = clipEntries.map((entry) => {
+    const { sampleRate, length } = entry.audioBuffer;
+    const cropStart = Math.max(0, Math.min(length, Math.floor(finite(entry.cropStartMs) * sampleRate / 1000)));
+    const cropEnd = Math.max(cropStart, Math.min(length, Math.ceil(finite(entry.cropEndMs, length / sampleRate * 1000) * sampleRate / 1000)));
+    const samplesPerPx = sampleRate / (1000 * pixelsPerMs);
+    const detail = samplesPerPx / dpr <= 1;
+    const clipStartPx = finite(entry.clipLeftPx, 0) - surfaceLeftPx;
+    const clipEndPx = clipStartPx + finite(entry.clipWidthPx, 0);
+    const sampleAt = (x) => finite(entry.cropStartMs) * sampleRate / 1000 + (surfaceLeftPx + x - finite(entry.clipLeftPx, 0)) * samplesPerPx;
+    const detailPages = !detail && entry.pyramid?.baseBlockSize > WAVEFORM_BASE_BLOCK_SIZE
+      ? entry.requestDetail?.(Math.max(cropStart, Math.floor(sampleAt(left))), Math.min(cropEnd, Math.ceil(sampleAt(right))))
+      : undefined;
+    return {
+      entry, sampleRate, length, cropStart, cropEnd, samplesPerPx, detail,
+      clipStartPx, clipEndPx, sampleAt, detailPages,
+      reader: null, reading: false,
+    };
+  });
+
+  // Compute contiguous clip intervals clamped to [left, right]
+  const intervals = [];
+  const sortedIntervals = preparedClips
+    .map((c) => ({
+      start: Math.max(left, c.clipStartPx),
+      end: Math.min(right, c.clipEndPx),
+    }))
+    .filter((seg) => seg.end > seg.start)
+    .sort((a, b) => a.start - b.start);
+
+  for (const seg of sortedIntervals) {
+    if (!intervals.length || intervals[intervals.length - 1].end < seg.start) {
+      intervals.push({ start: seg.start, end: seg.end });
+    } else {
+      intervals[intervals.length - 1].end = Math.max(intervals[intervals.length - 1].end, seg.end);
+    }
+  }
+
+  if (!intervals.length) return () => false;
+
+  const firstColumn = Math.max(fromColumn, Math.floor(intervals[0].start * dpr));
   let channel = 0;
   let column = firstColumn;
-  let sample = firstSample;
-  let previous;
   let initialized = false;
-  let reader;
-  let reading = false;
+
   return ({ now = () => performance.now(), deadline = Infinity } = {}) => {
     const sliceDeadline = Math.min(deadline, now() + 1);
     const center = (channel + 0.5) * laneHeight;
     const radius = Math.max(0, laneHeight / 2 - 2);
     const y = (value) => center - amplitude(value) * radius;
+
     context.save();
     context.beginPath();
-    context.rect(left, channel * laneHeight, right - left, laneHeight);
+    for (let idx = 0; idx < intervals.length; idx += 1) {
+      const seg = intervals[idx];
+      context.rect(seg.start, channel * laneHeight, seg.end - seg.start, laneHeight);
+    }
     context.clip();
     if (!initialized) {
       context.fillStyle = 'rgba(148, 163, 184, 0.35)';
-      context.fillRect(left, center, right - left, 1 / dpr);
+      for (let idx = 0; idx < intervals.length; idx += 1) {
+        const seg = intervals[idx];
+        context.fillRect(seg.start, center, seg.end - seg.start, 1 / dpr);
+      }
       initialized = true;
     }
     context.strokeStyle = color;
     context.fillStyle = color;
     context.lineWidth = 1 / dpr;
-    let finished = false;
-    if (detail) {
-      const pcm0 = audioBuffer.getChannelData(0);
-      const pcm1 = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : pcm0;
-      const end = Math.min(cropEnd, Math.ceil(sampleAt(right + detailReachPx)) + 1);
-      // Paths break at absolute multiples of 64 samples, so joins do not depend on where drawing began.
-      const stop = Math.min(end, (Math.floor(sample / 64) + 1) * 64);
-      context.beginPath();
-      if (previous) context.moveTo(previous.x, previous.y);
-      for (; sample < stop; sample += 1) {
-        let value;
-        if (!isStereo && audioBuffer.numberOfChannels > 1) {
-          const v0 = finite(pcm0[sample]);
-          const v1 = finite(pcm1[sample]);
-          value = Math.abs(v0) >= Math.abs(v1) ? v0 : v1;
+
+    for (const c of preparedClips) {
+      if (!c.reader) {
+        if (!isStereo && (c.entry.pyramid?.numberOfChannels || 1) > 1) {
+          c.reader = createWaveformCombinedReader(c.entry.pyramid, c.entry.audioBuffer, c.detailPages, { sumSquares: showRms });
         } else {
-          const pcm = channel === 1 && audioBuffer.numberOfChannels > 1 ? pcm1 : pcm0;
-          value = finite(pcm[sample]);
-        }
-        const x = clipLeftPx - surfaceLeftPx + (sample - finite(cropStartMs) * sampleRate / 1000) / samplesPerPx;
-        const point = { x, y: y(value) };
-        if (previous) context.lineTo(point.x, point.y);
-        else context.moveTo(point.x, point.y);
-        previous = point;
-        if (showSamples && 1 / samplesPerPx >= 4) context.fillRect(x - 1.5, point.y - 1.5, 3, 3);
-        if (showClipping && Math.abs(value) > 1) {
-          context.fillStyle = '#ef4444';
-          context.fillRect(x, value > 0 ? channel * laneHeight : (channel + 1) * laneHeight - 2, 2, 2);
-          context.fillStyle = color;
+          c.reader = createWaveformReader(c.entry.pyramid, channel, c.entry.audioBuffer, c.detailPages, { sumSquares: showRms });
         }
       }
-      context.stroke();
-      finished = sample >= end;
-    } else {
-      let rawRemaining = WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE;
-      let work = 0;
-      if (!reader) {
-        if (!isStereo && (pyramid?.numberOfChannels || 1) > 1) {
-          reader = createWaveformCombinedReader(pyramid, audioBuffer, detailPages, { sumSquares: showRms });
-        } else {
-          reader = createWaveformReader(pyramid, channel, audioBuffer, detailPages, { sumSquares: showRms });
+    }
+
+    let rawRemaining = WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE;
+    let work = 0;
+
+    for (let i = 0; i < WAVEFORM_DRAW_STEPS_PER_SLICE && column / dpr < right && rawRemaining > 0; i += 1) {
+      if (work >= WAVEFORM_CLOCK_CHECK_WORK) {
+        if (now() >= sliceDeadline) break;
+        work = 0;
+      }
+      const x = Math.max(left, column / dpr);
+      const endX = Math.min(right, (column + 1) / dpr);
+
+      const active = [];
+      for (let cIdx = 0; cIdx < preparedClips.length; cIdx += 1) {
+        const c = preparedClips[cIdx];
+        if (c.clipEndPx > x && c.clipStartPx < endX && c.reader) {
+          active.push(c);
         }
       }
-      // Batch small exact queries, but bound both PCM work and summary-only work even with a stalled clock.
-      // Reading the clock costs about as much as a summary step, so it is sampled by work done.
-      for (let i = 0; i < WAVEFORM_DRAW_STEPS_PER_SLICE && column / dpr < right && rawRemaining > 0; i += 1) {
-        if (work >= WAVEFORM_CLOCK_CHECK_WORK) {
-          if (now() >= sliceDeadline) break;
-          work = 0;
+
+      if (!active.length) {
+        const nextSeg = intervals.find((seg) => seg.start > x);
+        if (nextSeg) {
+          column = Math.floor(nextSeg.start * dpr);
+        } else {
+          column = Math.ceil(right * dpr);
         }
-        const x = Math.max(left, column / dpr);
-        const endX = Math.min(right, (column + 1) / dpr);
-        if (!reading) {
-          reader.reset(Math.max(cropStart, Math.floor(sampleAt(x))), Math.min(cropEnd, Math.ceil(sampleAt(endX))));
-          reading = true;
+        continue;
+      }
+
+      let allDone = true;
+      for (const c of active) {
+        if (!c.reading) {
+          const sStart = Math.max(c.cropStart, Math.floor(c.sampleAt(x)));
+          const sEnd = Math.min(c.cropEnd, Math.ceil(c.sampleAt(endX)));
+          c.reader.reset(sStart, sEnd);
+          c.reading = true;
         }
-        reader.step(Math.min(rawRemaining, WAVEFORM_RAW_SAMPLES_PER_SLICE));
-        rawRemaining -= reader.rawSamples;
-        work += 16 + reader.rawSamples;
-        if (!reader.done) continue;
-        reading = false;
-        column += 1;
-        if (!reader.count) continue;
-        const top = y(reader.max);
-        const bottom = y(reader.min);
+        if (!c.reader.done) {
+          c.reader.step(Math.min(rawRemaining, WAVEFORM_RAW_SAMPLES_PER_SLICE));
+          rawRemaining -= c.reader.rawSamples;
+          work += 16 + c.reader.rawSamples;
+          if (!c.reader.done) allDone = false;
+        }
+      }
+
+      if (!allDone) continue;
+
+      for (const c of active) c.reading = false;
+      column += 1;
+
+      let compMax = -Infinity;
+      let compMin = Infinity;
+      let compSumSquares = 0;
+      let compCount = 0;
+      let hasClipping = false;
+
+      for (let aIdx = 0; aIdx < active.length; aIdx += 1) {
+        const r = active[aIdx].reader;
+        if (!r.count) continue;
+        if (r.max > compMax) compMax = r.max;
+        if (r.min < compMin) compMin = r.min;
+        compSumSquares += r.sumSquares;
+        compCount += r.count;
+        if (r.max > 1 || r.min < -1) hasClipping = true;
+      }
+
+      if (compCount > 0 && Number.isFinite(compMax) && Number.isFinite(compMin)) {
+        const top = y(compMax);
+        const bottom = y(compMin);
         context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
         if (showRms) {
-          const rms = Math.sqrt(reader.sumSquares / reader.count);
+          const rms = Math.sqrt(compSumSquares / compCount);
           context.globalAlpha = 0.35;
           context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
           context.globalAlpha = 1;
         }
-        if (showClipping && (reader.max > 1 || reader.min < -1)) {
+        if (showClipping && hasClipping) {
           context.fillStyle = '#ef4444';
-          if (reader.max > 1) context.fillRect(x, channel * laneHeight, endX - x, 2);
-          if (reader.min < -1) context.fillRect(x, (channel + 1) * laneHeight - 2, endX - x, 2);
+          if (compMax > 1) context.fillRect(x, channel * laneHeight, endX - x, 2);
+          if (compMin < -1) context.fillRect(x, (channel + 1) * laneHeight - 2, endX - x, 2);
           context.fillStyle = color;
         }
       }
-      finished = column / dpr >= right;
     }
+
+    const finished = column / dpr >= right;
     context.restore();
+
     if (finished) {
       channel += 1;
       column = firstColumn;
-      sample = firstSample;
-      previous = undefined;
       initialized = false;
-      reader = undefined;
+      for (const c of preparedClips) {
+        c.reader = null;
+        c.reading = false;
+      }
     }
     return channel < drawChannels;
   };

@@ -101,15 +101,33 @@ function openView(view) {
   const context = prepareWaveformCanvas(canvas, view.widthPx, view.height, view.dpr);
   if (!context) return null;
   const allocation = waveformRasterBudget.getAllocation(canvas);
-  const paints = view.clips.map((clip) => createWaveformDrawJob(context, {
-    audioBuffer: clip.buffer, pyramid: clip.pyramid, cropStartMs: clip.cropStartMs, cropEndMs: clip.cropEndMs,
-    pixelsPerMs: view.pixelsPerMs, clipLeftPx: clip.clipLeftPx, clipWidthPx: clip.clipWidthPx,
-    surfaceLeftPx: view.leftPx, surfaceWidthPx: view.widthPx, height: view.height, dpr: allocation.dpr,
-    color: clip.color, displayMode: view.displayMode, globalPeakAmplitude: view.globalPeakAmplitude,
-    showRms: view.showRms, showClipping: view.showClipping,
-    requestDetail: (start, end) => waveformService.requestDetail?.(clip.blobId, clip.buffer, start, end),
-    fromColumn: 0, toColumn: canvas.width,
-  }));
+  const isGroup = view.key.startsWith('group:');
+  const paints = isGroup && view.clips.length > 1
+    ? [createWaveformDrawJob(context, {
+        clips: view.clips.map((clip) => ({
+          audioBuffer: clip.buffer,
+          pyramid: clip.pyramid,
+          cropStartMs: clip.cropStartMs,
+          cropEndMs: clip.cropEndMs,
+          clipLeftPx: clip.clipLeftPx,
+          clipWidthPx: clip.clipWidthPx,
+          requestDetail: (start, end) => waveformService.requestDetail?.(clip.blobId, clip.buffer, start, end),
+        })),
+        pixelsPerMs: view.pixelsPerMs,
+        surfaceLeftPx: view.leftPx, surfaceWidthPx: view.widthPx, height: view.height, dpr: allocation.dpr,
+        color: view.clips[0].color, displayMode: view.displayMode, globalPeakAmplitude: view.globalPeakAmplitude,
+        showRms: view.showRms, showClipping: view.showClipping,
+        fromColumn: 0, toColumn: canvas.width,
+      })]
+    : view.clips.map((clip) => createWaveformDrawJob(context, {
+        audioBuffer: clip.buffer, pyramid: clip.pyramid, cropStartMs: clip.cropStartMs, cropEndMs: clip.cropEndMs,
+        pixelsPerMs: view.pixelsPerMs, clipLeftPx: clip.clipLeftPx, clipWidthPx: clip.clipWidthPx,
+        surfaceLeftPx: view.leftPx, surfaceWidthPx: view.widthPx, height: view.height, dpr: allocation.dpr,
+        color: clip.color, displayMode: view.displayMode, globalPeakAmplitude: view.globalPeakAmplitude,
+        showRms: view.showRms, showClipping: view.showClipping,
+        requestDetail: (start, end) => waveformService.requestDetail?.(clip.blobId, clip.buffer, start, end),
+        fromColumn: 0, toColumn: canvas.width,
+      }));
   let index = 0;
   let current = paints[0];
   return {

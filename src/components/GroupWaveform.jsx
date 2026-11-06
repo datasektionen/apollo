@@ -10,7 +10,7 @@ import LegacyWaveform from './LegacyWaveform';
 import { useSurfacePlacement, useWaveformSources, useWaveformViewport } from './Waveform';
 
 const EMPTY_CLIPS = [];
-const ACTIVITY_COLOR = 'rgba(123, 173, 255, 0.55)';
+const ACTIVITY_COLOR = 'rgba(123, 173, 255, 0.75)';
 const MISSING_COLOR = 'rgba(248, 113, 113, 0.55)';
 const flaggedMissing = (ids, id) => Boolean(ids?.has?.(id) || (Array.isArray(ids) && ids.includes(id)));
 const CLIP_FIELDS = ['key', 'blobId', 'startMs', 'durationMs', 'cropStartMs', 'cropEndMs', 'sourceDurationMs'];
@@ -208,7 +208,7 @@ function ModernGroupWaveform({
     };
     const sameSnapshot = (a, b) => a?.audioBuffer === b?.audioBuffer && a?.source?.status === b?.source?.status
       && a?.source?.pyramid === b?.source?.pyramid;
-    // Overlays every clip that crosses the strip; the surface cleared the strip beforehand.
+    // Draws a composite single-pass group envelope across the strip.
     const paint = (context, strip) => {
       const { surfaceLeftPx, fromColumn, toColumn, dpr } = strip;
       const stripLeft = surfaceLeftPx + fromColumn / dpr;
@@ -217,47 +217,65 @@ function ModernGroupWaveform({
         const [start, end] = clipRange(clip);
         return start < stripRight && end > stripLeft;
       });
-      let index = 0;
+
+      const drawState = drawRef.current;
+      const readyClips = [];
+
+      for (let i = 0; i < list.length; i += 1) {
+        const clip = list[i];
+        const { audioBuffer, source } = snapshots.get(clip.blobId) || {};
+        const isMissing = flaggedMissing(drawState.missingMediaBlobIds, clip.blobId) || !audioBuffer;
+        const [start, end] = clipRange(clip);
+        const left = Math.max(start, stripLeft) - surfaceLeftPx;
+        const width = Math.max(0, Math.min(end, stripRight) - surfaceLeftPx - left);
+        if (!audioBuffer) {
+          context.fillStyle = MISSING_COLOR;
+          context.fillRect(left, drawState.height / 2 - 2, width, 4);
+          continue;
+        }
+        const detail = audioBuffer.sampleRate / (1000 * drawState.pixelsPerMs * dpr) <= 1;
+        if (!source?.pyramid && !detail) {
+          context.fillStyle = isMissing ? MISSING_COLOR : 'rgba(148, 163, 184, 0.35)';
+          context.fillRect(left, drawState.height / 2, width, 1);
+          continue;
+        }
+        readyClips.push({
+          audioBuffer,
+          pyramid: source?.pyramid,
+          cropStartMs: clip.cropStartMs,
+          cropEndMs: clip.cropEndMs ?? clip.sourceDurationMs,
+          clipLeftPx: start,
+          clipWidthPx: end - start,
+          requestDetail: (from, to) => waveformService.requestDetail(clip.blobId, audioBuffer, from, to),
+        });
+      }
+
+      if (!readyClips.length) return () => false;
+
       let draw;
       return (budget) => {
-        if (draw) {
-          if (draw(budget)) return true;
-          draw = undefined;
-          index += 1;
-          return index < list.length;
-        }
-        for (; index < list.length; index += 1) {
-          const clip = list[index];
-          const drawState = drawRef.current;
-          const { audioBuffer, source } = snapshots.get(clip.blobId) || {};
-          const isMissing = flaggedMissing(drawState.missingMediaBlobIds, clip.blobId) || !audioBuffer;
-          const [start, end] = clipRange(clip);
-          const left = Math.max(start, stripLeft) - surfaceLeftPx;
-          const width = Math.max(0, Math.min(end, stripRight) - surfaceLeftPx - left);
-          if (!audioBuffer) {
-            context.fillStyle = MISSING_COLOR;
-            context.fillRect(left, drawState.height / 2 - 2, width, 4);
-            continue;
-          }
-          const detail = audioBuffer.sampleRate / (1000 * drawState.pixelsPerMs * dpr) <= 1;
-          if (!source?.pyramid && !detail) {
-            context.fillStyle = isMissing ? MISSING_COLOR : 'rgba(148, 163, 184, 0.35)';
-            context.fillRect(left, drawState.height / 2, width, 1);
-            continue;
-          }
+        if (!draw) {
           draw = createWaveformDrawJob(context, {
-            audioBuffer, pyramid: source?.pyramid, cropStartMs: clip.cropStartMs,
-            cropEndMs: clip.cropEndMs ?? clip.sourceDurationMs,
-            pixelsPerMs: drawState.pixelsPerMs, clipLeftPx: start, clipWidthPx: end - start, ...strip,
+            clips: readyClips,
+            audioBuffer: readyClips[0].audioBuffer,
+            pyramid: readyClips[0].pyramid,
+            cropStartMs: readyClips[0].cropStartMs,
+            cropEndMs: readyClips[0].cropEndMs,
+            pixelsPerMs: drawState.pixelsPerMs,
+            clipLeftPx: Math.min(...readyClips.map((c) => c.clipLeftPx)),
+            clipWidthPx: Math.max(...readyClips.map((c) => c.clipLeftPx + c.clipWidthPx)) - Math.min(...readyClips.map((c) => c.clipLeftPx)),
+            ...strip,
             height: drawState.height,
-            color: isMissing ? MISSING_COLOR : ACTIVITY_COLOR, displayMode: drawState.displayMode,
-            globalPeakAmplitude: drawState.globalPeakAmplitude, showRms: drawState.showRms,
-            showClipping: drawState.showClipping, stereo: drawState.stereo,
-            requestDetail: (from, to) => waveformService.requestDetail(clip.blobId, audioBuffer, from, to),
+            color: drawState.missingMediaBlobIds?.size ? MISSING_COLOR : ACTIVITY_COLOR,
+            displayMode: drawState.displayMode,
+            globalPeakAmplitude: drawState.globalPeakAmplitude,
+            showRms: drawState.showRms,
+            showClipping: drawState.showClipping,
+            stereo: drawState.stereo,
           });
           return true;
         }
-        return false;
+        return draw(budget);
       };
     };
     const statusOf = () => {

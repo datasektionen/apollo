@@ -1031,7 +1031,7 @@ function Timeline({
       display: {
         displayMode, showRms, showClipping, globalPeakAmplitude,
         clipColor: CLIP_WAVEFORM_COLOR, missingColor: MISSING_CLIP_WAVEFORM_COLOR,
-        groupColor: 'rgba(123, 173, 255, 0.55)', groupMissingColor: 'rgba(248, 113, 113, 0.55)',
+        groupColor: 'rgba(123, 173, 255, 0.75)', groupMissingColor: 'rgba(248, 113, 113, 0.55)',
         missingIds: missingMediaBlobIds,
       },
       getBuffer: (id) => audioManager.mediaCache.get(id),
