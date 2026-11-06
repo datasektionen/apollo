@@ -504,4 +504,21 @@ describe('waveform renderer', () => {
       [10, 50, 4, 1],
     ]);
   });
+
+  it('renders a distinct translucent peak envelope and solid RMS core when showRms is true', () => {
+    // 4 samples: peaks at 0.8 / -0.8, RMS is 0.8
+    const { buffer, pyramid } = source([[0.8, -0.8, 0.8, -0.8]]);
+    const ctx = context();
+    const alphas = [];
+    ctx.fillRect.mockImplementation(() => {
+      alphas.push(ctx.globalAlpha);
+    });
+    finish(createWaveformDrawJob(ctx, {
+      audioBuffer: buffer, pyramid, pixelsPerMs: 0.5,
+      clipWidthPx: 2, surfaceLeftPx: 0, surfaceWidthPx: 2, height: 100, showRms: true,
+    }));
+    // For each column, peak is drawn at 0.35, then RMS core is drawn at 1
+    // Initial zero line (1 call) + 2 columns * 2 calls each = 5 calls
+    expect(alphas).toEqual([undefined, 0.35, 1, 0.35, 1]);
+  });
 });

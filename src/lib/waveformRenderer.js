@@ -560,12 +560,14 @@ export function createWaveformDrawJob(context, {
           if (!reader.count) continue;
           const top = y(reader.max);
           const bottom = y(reader.min);
-          context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
           if (showRms) {
             const rms = Math.sqrt(reader.sumSquares / reader.count);
-            context.globalAlpha = 0.35;
-            context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
+            context.globalAlpha = 0.67;
+            context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
             context.globalAlpha = 1;
+            context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
+          } else {
+            context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
           }
           if (showClipping && (reader.max > 1 || reader.min < -1)) {
             context.fillStyle = '#ef4444';
@@ -738,12 +740,14 @@ export function createWaveformDrawJob(context, {
       if (compCount > 0 && Number.isFinite(compMax) && Number.isFinite(compMin)) {
         const top = y(compMax);
         const bottom = y(compMin);
-        context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
         if (showRms) {
           const rms = Math.sqrt(compSumSquares / compCount);
           context.globalAlpha = 0.35;
-          context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
+          context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
           context.globalAlpha = 1;
+          context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
+        } else {
+          context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
         }
         if (showClipping && hasClipping) {
           context.fillStyle = '#ef4444';
