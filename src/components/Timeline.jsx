@@ -727,6 +727,7 @@ function Timeline({
   setLogicalScrollRef.current = setLogicalScroll;
   /** Native scroll events also echo our own writes; only a different position is user navigation. */
   const handleNativeScroll = (element) => {
+    if (pendingZoomAnchorRef.current) return;
     const left = element.scrollLeft;
     const logical = originRef.current + left;
     if (Math.abs(logical - lastLogicalScrollRef.current) > 1) noteUserScrollRef.current();
@@ -1022,6 +1023,13 @@ function Timeline({
     }
     return metrics;
   };
+  const readLivePlayheadMs = () => {
+    if (followingRef.current && typeof audioManager.getCurrentTime === 'function') {
+      const live = Number(audioManager.getCurrentTime());
+      if (Number.isFinite(live)) return live;
+    }
+    return Number.isFinite(timeRef.current) ? timeRef.current : (Number.isFinite(currentTimeMs) ? currentTimeMs : 0);
+  };
   const commitZoom = (metrics) => {
     const anchor = zoomCommitRef.current.anchor;
     pendingZoomAnchorRef.current = anchor;
@@ -1030,8 +1038,20 @@ function Timeline({
       const segment = scrollSegment(targetScroll, metrics.timelineWidth, containerWidth, originRef.current);
       originRef.current = segment.origin;
       lastLogicalScrollRef.current = segment.logical;
+      scrollLeftRef.current = segment.logical;
+      pixelsPerMsRef.current = metrics.ppm;
+      timelineWidthRef.current = metrics.timelineWidth;
       setOriginPx(segment.origin);
       setScrollLeft(segment.logical);
+
+      const liveMs = readLivePlayheadMs();
+      const currentMs = Number.isFinite(liveMs) ? liveMs : 0;
+      const playheadX = currentMs * metrics.ppm - segment.logical;
+      const playheadLeftStr = `${playheadX}px`;
+      playheadHoldRef.current = playheadLeftStr;
+      for (const node of [rulerPlayheadRef.current, tracksPlayheadRef.current, lyricsPlayheadRef.current]) {
+        if (node) node.style.left = playheadLeftStr;
+      }
     }
     setVisibleDurationMs(metrics.durationState);
   };
@@ -1040,7 +1060,7 @@ function Timeline({
     if (dragState || lyricDragRef.current || rulerDragState || loopMarkerDragState || timelineSelectionRef.current) return false;
     const metrics = zoomMetrics(nextVisibleDurationMs);
     const width = containerWidth > 0 ? containerWidth : (tracksScrollRef.current?.clientWidth || 800);
-    const playheadMs = Number.isFinite(currentTimeMs) ? currentTimeMs : 0;
+    const playheadMs = readLivePlayheadMs();
     const anchor = anchorOverride || { timeMs: playheadMs, x: width / 2 };
     ++zoomCommitRef.current.token;
     zoomCommitRef.current.anchor = anchor;
@@ -1048,8 +1068,7 @@ function Timeline({
     cancelZoomRef.current = null;
     const sameZoom = Math.abs(metrics.ppm - pixelsPerMs) <= 1e-4 * Math.max(metrics.ppm, pixelsPerMs);
     if (!(containerWidth > 0) || !(metrics.ppm > 0) || sameZoom) {
-      if (sameZoom) pendingZoomAnchorRef.current = anchor;
-      else commitZoom(metrics);
+      if (!sameZoom) commitZoom(metrics);
       return true;
     }
     commitZoom(metrics);
@@ -1286,13 +1305,6 @@ function Timeline({
       if (Math.abs(target - scrollLeftRef.current) >= 0.5) setLogicalScrollRef.current(target);
     }
   }, [followActive, currentTimeMs, pixelsPerMs, scrollLeft, containerWidth, timelineWidthPx]);
-  const readLivePlayheadMs = () => {
-    if (followingRef.current && typeof audioManager.getCurrentTime === 'function') {
-      const live = Number(audioManager.getCurrentTime());
-      if (Number.isFinite(live)) return live;
-    }
-    return timeRef.current;
-  };
   // The transport publishes time in coarse steps. The playhead paints from the audio clock
   // every frame so it glides instead of jumping by those steps.
   useEffect(() => {
@@ -1365,13 +1377,12 @@ function Timeline({
   const rulerTicks = visibleRulerTicks(scrollLeft, containerWidth, pixelsPerMs, ruler.majorMs, minZoomDurationMs);
   const rulerFractions = visibleRulerTicks(scrollLeft, containerWidth, pixelsPerMs, ruler.subMinorMs, minZoomDurationMs);
   const viewportX = (timeMs) => timeMs * pixelsPerMs - scrollLeft;
-  const playheadLeft = `${viewportX(currentTimeMs)}px`;
-  if (!following || playheadHoldRef.current == null) playheadHoldRef.current = playheadLeft;
+  const playheadLeft = `${viewportX(readLivePlayheadMs())}px`;
+  if (!following || playheadHoldRef.current == null || pendingZoomAnchorRef.current) playheadHoldRef.current = playheadLeft;
   const shownPlayheadLeft = following ? playheadHoldRef.current : playheadLeft;
 
   useLayoutEffect(() => {
     if (!pendingZoomAnchorRef.current) return;
-    pendingZoomAnchorRef.current = null;
     const tracksElement = tracksScrollRef.current;
     if (!tracksElement) return;
 
@@ -1379,7 +1390,8 @@ function Timeline({
     for (const element of [tracksScrollRef.current, rulerScrollRef.current]) {
       if (element && element.scrollLeft !== segment.left) element.scrollLeft = segment.left;
     }
-  }, [pixelsPerMs, timelineWidthPx, containerWidth]);
+    pendingZoomAnchorRef.current = null;
+  }, [pixelsPerMs, timelineWidthPx, containerWidth, scrollLeft]);
 
   useEffect(() => {
     if (visibleDurationMs === null && prevProjectDurationRef.current !== null) {
