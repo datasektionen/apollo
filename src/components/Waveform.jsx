@@ -1,8 +1,6 @@
 import { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { waveformService } from '../lib/waveformService';
 import { waveformScheduler } from '../lib/waveformScheduler';
-import { getWaveformRenderer } from '../lib/waveformFeature';
-import LegacyWaveform from './LegacyWaveform';
 import {
   createWaveformDrawJob, createWaveformSourceObserver, getWaveformWindow, waveformRasterBudget,
 } from '../lib/waveformRenderer';
@@ -116,7 +114,7 @@ export function useSurfacePlacement(surfaceRef, requestRef, viewportLeftPx, retu
   return placementRef;
 }
 
-function ModernWaveform({
+export default function Waveform({
   audioBuffer, blobId, clipId, cropStartMs = 0, cropEndMs, sourceDurationMs,
   height = 80, color = '#4F8EF7', onReady, globalPeakAmplitude = 1,
   pixelsPerMs, clipLeftPx, clipWidthPx, viewportLeftPx, viewportWidthPx, returnViewportLeftPx,
@@ -341,9 +339,4 @@ function ModernWaveform({
       )}
     </div>
   );
-}
-
-export default function Waveform(props) {
-  const Renderer = getWaveformRenderer() === 'legacy' ? LegacyWaveform : ModernWaveform;
-  return <Renderer {...props} />;
 }

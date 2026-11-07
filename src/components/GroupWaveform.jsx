@@ -5,8 +5,6 @@ import { waveformService } from '../lib/waveformService';
 import { createWaveformDrawJob, getWaveformWindow, waveformRasterBudget, WAVEFORM_OVERSCAN_PX } from '../lib/waveformRenderer';
 import { createWaveformSurface, getRetainedWindow, waveformPaintTier } from '../lib/waveformSurface';
 import { hasZoomBitmap, takeZoomBitmap } from '../lib/visibleZoom';
-import { getWaveformRenderer } from '../lib/waveformFeature';
-import LegacyWaveform from './LegacyWaveform';
 import { useSurfacePlacement, useWaveformSources, useWaveformViewport } from './Waveform';
 
 const EMPTY_CLIPS = [];
@@ -77,7 +75,7 @@ function changedClipRanges(previous, next, pixelsPerMs) {
 }
 
 /** Parent supplies mute-filtered/edit-preview clips. Layered source activity is NOT mixed output. */
-function ModernGroupWaveform({
+export default function GroupWaveform({
   clips: clipsProp = EMPTY_CLIPS, pixelsPerMs, viewportLeftPx = 0, viewportWidthPx = 0, returnViewportLeftPx, height = 80,
   globalPeakAmplitude = 1, displayMode = 'linear', showRms = false,
   missingMediaBlobIds, scheduleTier = 0, bitmapKey, stereo = false,
@@ -402,55 +400,4 @@ function ModernGroupWaveform({
       )}
     </div>
   );
-}
-
-function LegacyGroupWaveform({
-  clips = EMPTY_CLIPS, pixelsPerMs, viewportLeftPx = 0, viewportWidthPx = 0,
-  height = 80, globalPeakAmplitude = 1, missingMediaBlobIds,
-}) {
-  const [mediaVersion, setMediaVersion] = useState(0);
-  const visible = pixelsPerMs > 0 ? clips.map((clip) => {
-    const clipLeftPx = clip.startMs * pixelsPerMs;
-    const window = getWaveformWindow({
-      clipLeftPx, clipWidthPx: clip.durationMs * pixelsPerMs, viewportLeftPx, viewportWidthPx,
-    });
-    return { clip, clipLeftPx, ...window };
-  }).filter(({ widthPx }) => widthPx > 0) : EMPTY_CLIPS;
-  useEffect(() => {
-    const ids = new Set(visible.map(({ clip }) => clip.blobId));
-    return audioManager.mediaCache.subscribe?.((event) => {
-      if (event?.blobId == null || ids.has(event.blobId)) setMediaVersion((version) => version + 1);
-    });
-  }, [clips, pixelsPerMs, viewportLeftPx, viewportWidthPx]);
-  const missing = visible.some(({ clip }) => flaggedMissing(missingMediaBlobIds, clip.blobId)
-    || !audioManager.mediaCache.has(clip.blobId));
-  return (
-    <div role="img" aria-label={`Legacy group activity overview (not mixed output)${missing ? ', missing media' : ''}`}
-      style={{ position: 'relative', width: '100%', height, pointerEvents: 'none' }}>
-      {visible.map(({ clip, clipLeftPx, leftPx, widthPx }) => {
-        const audioBuffer = audioManager.mediaCache.get(clip.blobId);
-        const isMissing = flaggedMissing(missingMediaBlobIds, clip.blobId) || !audioBuffer;
-        const cropStartMs = (clip.cropStartMs ?? 0) + leftPx / pixelsPerMs;
-        const cropEndMs = Math.min(
-          clip.cropEndMs ?? clip.sourceDurationMs ?? (audioBuffer ? audioBuffer.length / audioBuffer.sampleRate * 1000 : Infinity),
-          cropStartMs + widthPx / pixelsPerMs,
-        );
-        return (
-          <div key={`${clip.key}:${mediaVersion}`} data-legacy-clip={clip.key}
-            style={{ position: 'absolute', left: clipLeftPx + leftPx, width: widthPx, height,
-              overflow: 'hidden', backgroundColor: isMissing && !audioBuffer ? MISSING_COLOR : undefined }}>
-            {audioBuffer && <LegacyWaveform audioBuffer={audioBuffer} clipId={`group:${clip.key}`}
-              cropStartMs={cropStartMs} cropEndMs={cropEndMs} sourceDurationMs={clip.sourceDurationMs}
-              height={height} color={isMissing ? MISSING_COLOR : ACTIVITY_COLOR}
-              globalPeakAmplitude={globalPeakAmplitude} />}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-export default function GroupWaveform(props) {
-  const Renderer = getWaveformRenderer() === 'legacy' ? LegacyGroupWaveform : ModernGroupWaveform;
-  return <Renderer {...props} />;
 }

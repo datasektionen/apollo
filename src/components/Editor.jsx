@@ -68,7 +68,6 @@ import {
 } from '../lib/mediaEncoding';
 import { loadStemsIntoMediaCache } from '../lib/loadStemAudio';
 import { settleWaveformSources, waveformService } from '../lib/waveformService';
-import { getWaveformRenderer } from '../lib/waveformFeature';
 import { registerAndUploadMediaBlob } from '../lib/mediaUpload';
 import {
   finishLoadProgress,
@@ -305,8 +304,7 @@ function waitForOpenedWaveforms(isCancelled, expectNodes) {
       if (isCancelled()) { resolve(); return; }
       const nodes = [...document.querySelectorAll('[data-waveform-status]')];
       const pending = nodes.some((node) => node.getAttribute('data-waveform-status') === 'loading');
-      const expectPainted = expectNodes && getWaveformRenderer() !== 'legacy';
-      const settled = expectPainted ? nodes.length > 0 && !pending : !pending;
+      const settled = expectNodes ? nodes.length > 0 && !pending : !pending;
       const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started;
       if (settled || elapsed > 20000) { resolve(); return; }
       requestAnimationFrame(tick);

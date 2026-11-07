@@ -6,8 +6,6 @@ import { waveformScheduler } from '../../lib/waveformScheduler';
 import { waveformRasterBudget } from '../../lib/waveformRenderer';
 import * as waveformRenderer from '../../lib/waveformRenderer';
 
-const legacy = vi.hoisted(() => ({ create: vi.fn(), instances: [] }));
-vi.mock('wavesurfer.js', () => ({ default: { create: legacy.create } }));
 const service = vi.hoisted(() => ({ listeners: new Set(), sources: new Map(), ensureSource: vi.fn(), releaseSource: vi.fn(), pinSource: vi.fn(), pins: new Map() }));
 const mediaCache = vi.hoisted(() => {
   const cache = new Map();
@@ -69,16 +67,6 @@ const geometry = { pixelsPerMs: 0.1, clipLeftPx: 0, clipWidthPx: 1e9, viewportLe
 beforeEach(() => {
   originalUrl = window.location.pathname + window.location.search + window.location.hash;
   window.history.replaceState(null, '', window.location.pathname);
-  vi.stubEnv('VITE_WAVEFORM_RENDERER', 'modern');
-  legacy.instances = [];
-  legacy.create.mockReset();
-  legacy.create.mockImplementation((options) => {
-    const instance = { options, destroy: vi.fn(), empty: vi.fn(), on: vi.fn((event, listener) => {
-      if (event === 'ready') instance.ready = listener;
-    }), load: vi.fn(async () => { instance.ready?.(); }) };
-    legacy.instances.push(instance);
-    return instance;
-  });
   roots = []; frames = new Map(); resizeCallbacks = []; mediaListeners = new Set();
   rect = { left: 0, width: 400, right: 400 };
   let id = 0;
@@ -160,7 +148,6 @@ describe('Waveform', () => {
     const view = await mount(<Waveform {...props} />);
     await flush();
     const canvas = view.container.querySelector('canvas');
-    expect(legacy.create).not.toHaveBeenCalled();
     // The left margin is clamped at the clip start.
     expect(canvas.style.left).toBe('0px');
     expect(canvas.style.width).toBe('600px');
@@ -387,92 +374,6 @@ describe('Waveform', () => {
     expect(view.container.querySelector('canvas').width).toBe(0);
     expect(service.ensureSource).not.toHaveBeenCalled();
     expect(service.pinSource).not.toHaveBeenCalled();
-  });
-});
-
-describe('renderer rollout', () => {
-  it('mounts only the recovered legacy renderer for the URL opt-in and filters modern DOM props', async () => {
-    window.history.replaceState(null, '', '?waveformRenderer=legacy');
-    const onReady = vi.fn();
-    const audioBuffer = buffer();
-    const view = await mount(<Waveform audioBuffer={audioBuffer} blobId="blob" clipId="clip"
-      cropStartMs={0} cropEndMs={4096} onReady={onReady} {...geometry}
-      displayMode="db" showRms showSamples />);
-    await flush();
-    expect(legacy.create).toHaveBeenCalledOnce();
-    expect(legacy.instances[0].load).toHaveBeenCalledOnce();
-    expect(onReady).toHaveBeenCalledOnce();
-    expect(service.pinSource).not.toHaveBeenCalled();
-    expect(service.ensureSource).not.toHaveBeenCalled();
-    expect(service.listeners.size).toBe(0);
-    expect(view.container.querySelector('canvas')).toBeNull();
-    for (const name of ['pixelsperms', 'clipleftpx', 'displaymode', 'showrms', 'blobid', 'onready']) {
-      expect(view.container.firstChild.hasAttribute(name)).toBe(false);
-    }
-    await view.render(null);
-    expect(legacy.instances[0].destroy).toHaveBeenCalledOnce();
-    expect(frames.size).toBe(0);
-  });
-
-  it('honors a legacy build and permits the modern URL override', async () => {
-    vi.stubEnv('VITE_WAVEFORM_RENDERER', 'legacy');
-    const props = { audioBuffer: buffer(), cropStartMs: 0, cropEndMs: 4096, ...geometry };
-    const view = await mount(<Waveform {...props} />);
-    await flush();
-    expect(legacy.create).toHaveBeenCalledOnce();
-    expect(service.pinSource).not.toHaveBeenCalled();
-    window.history.replaceState(null, '', '?waveformRenderer=modern');
-    await view.render(<Waveform {...props} />);
-    await flush();
-    expect(legacy.instances[0].destroy).toHaveBeenCalledOnce();
-    expect(legacy.create).toHaveBeenCalledOnce();
-    expect(service.pinSource).toHaveBeenCalledOnce();
-    expect(view.container.querySelectorAll('canvas')).toHaveLength(1);
-    const modernCanvas = view.container.querySelector('canvas');
-    window.history.replaceState(null, '', '?waveformRenderer=legacy');
-    await view.render(<Waveform {...props} />);
-    expect(modernCanvas.width).toBe(0);
-    expect(service.pins.size).toBe(0);
-    expect(service.listeners.size).toBe(0);
-    expect(waveformRasterBudget.getStats().bytes).toBe(0);
-    await flush();
-    expect(legacy.create).toHaveBeenCalledTimes(2);
-  });
-
-  it('culls and positions bounded legacy group children without mounting modern source observers', async () => {
-    window.history.replaceState(null, '', '?waveformRenderer=legacy');
-    mediaCache.set('blob', buffer());
-    const clips = [
-      { key: 'a', blobId: 'blob', startMs: 50, durationMs: 200, cropStartMs: 10, cropEndMs: 210 },
-      { key: 'b', blobId: 'blob', startMs: 1000, durationMs: 100, cropStartMs: 0, cropEndMs: 100 },
-      { key: 'missing', blobId: 'missing', startMs: 110, durationMs: 10, cropStartMs: 0, cropEndMs: 10 },
-    ];
-    const props = { clips, pixelsPerMs: 1, viewportLeftPx: 100, viewportWidthPx: 100, height: 50 };
-    const view = await mount(<GroupWaveform {...props} displayMode="db" showRms />);
-    await flush();
-    expect(legacy.create).toHaveBeenCalledOnce();
-    const a = view.container.querySelector('[data-legacy-clip="a"]');
-    expect(a.style.left).toBe('68px');
-    expect(a.style.width).toBe('164px');
-    expect(legacy.instances[0].load.mock.calls[0][2]).toBeCloseTo(0.164);
-    expect(view.container.querySelector('[data-legacy-clip="b"]')).toBeNull();
-    expect(view.container.firstChild.getAttribute('aria-label')).toContain('missing media');
-    expect(view.container.querySelector('[data-legacy-clip="missing"]').style.backgroundColor).toBe('rgba(248, 113, 113, 0.55)');
-    expect(service.pinSource).not.toHaveBeenCalled();
-    expect(service.listeners.size).toBe(0);
-    expect(waveformRasterBudget.getStats().surfaces).toBe(0);
-    await view.render(<GroupWaveform {...props} viewportLeftPx={1000} />);
-    await flush();
-    expect(legacy.instances[0].destroy).toHaveBeenCalledOnce();
-    expect(view.container.querySelector('[data-legacy-clip="a"]')).toBeNull();
-    expect(view.container.querySelector('[data-legacy-clip="b"]').style.left).toBe('1000px');
-    expect(legacy.create).toHaveBeenCalledTimes(2);
-    await act(async () => {
-      for (const listener of mediaCache.listeners) listener({ type: 'revision', blobId: 'blob' });
-    });
-    await flush();
-    expect(legacy.create).toHaveBeenCalledTimes(3);
-    expect(legacy.instances[1].destroy).toHaveBeenCalledOnce();
   });
 });
 

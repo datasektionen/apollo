@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Plus, VolumeX } from 'lucide-react';
 import {
-  formatTime,
-  msToSeconds,
-  secondsToMs,
   clipGainDbToPosition,
   positionToClipGainDb,
 } from '../utils/audio';
@@ -17,8 +14,6 @@ import {
   mergeZoomBitmaps,
   prepareVisibleZoom,
   releaseStoredZoomBitmaps,
-  releaseZoomBitmaps,
-  storeZoomBitmaps,
   visibleZoomViews,
 } from '../lib/visibleZoom';
 import {
@@ -29,7 +24,6 @@ import {
 import { getEffectiveTrackMix, getGroupDescendantTrackIdsByGroup, getTrackHeight, normalizeTrackTree } from '../utils/trackTree';
 import {
   applyClipPatches,
-  constrainClipMove,
   constrainCropStart,
   constrainCropEnd,
   canAddClip,
