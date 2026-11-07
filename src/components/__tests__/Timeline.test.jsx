@@ -134,7 +134,8 @@ describe('Timeline integration', () => {
     await render({ displayMode: 'normalized', showRms: true });
     expect(state.waveforms.get('clip')).toMatchObject({ displayMode: 'normalized', showRms: true });
   });
-  it('has one wheel owner, normalizes line input and accumulates a burst around the pointer', async () => {
+  it('has one wheel owner, normalizes line input and accumulates a burst centered on the playhead', async () => {
+    await render({ currentTimeMs: 4000 });
     const scroll = tracksElement();
     const e = await event(scroll, 'wheel', { ctrlKey: true, clientX: 200, deltaY: -1, deltaMode: 1 });
     await event(scroll, 'wheel', { ctrlKey: true, clientX: 200, deltaY: -1, deltaMode: 1 });
@@ -142,7 +143,7 @@ describe('Timeline integration', () => {
     await flush();
     const scale = state.waveforms.get('clip').pixelsPerMs;
     expect(scale).toBeCloseTo(0.1 * Math.exp(0.064), 10);
-    expect(scroll.scrollLeft).toBeCloseTo(2000 * scale - 200, 8);
+    expect(scroll.scrollLeft).toBeCloseTo(4000 * scale - 400, 8);
     expect(host.querySelector('.ruler-scrollbar-hidden').scrollLeft).toBeCloseTo(scroll.scrollLeft);
     const normal = await event(scroll, 'wheel', { deltaY: 20 });
     expect(normal.defaultPrevented).toBe(false);
@@ -150,7 +151,7 @@ describe('Timeline integration', () => {
   it('preserves visible playhead screen position for keyboard zoom and fit', async () => {
     await event(window, 'keydown', { key: '+' });
     const scale = state.waveforms.get('clip').pixelsPerMs;
-    expect(tracksElement().scrollLeft).toBeCloseTo(3000 * scale - 300);
+    expect(tracksElement().scrollLeft).toBeCloseTo(3000 * scale - 400);
     await fitProject();
     expect(tracksElement().scrollLeft).toBe(0);
     await zoomToSamples();
@@ -197,7 +198,6 @@ describe('Timeline integration', () => {
     current = project([makeTrack('track', [makeClip('clip', 0, 36_000_000)])]);
     await render({ currentTimeMs: 18_000_000 });
     await fitProject();
-    const previousPlayheadX = 18_000_000 * state.waveforms.get('clip').pixelsPerMs;
     await zoomToSamples();
     const view = state.waveforms.get('clip');
     const ppm = view.pixelsPerMs;
@@ -205,7 +205,7 @@ describe('Timeline integration', () => {
     expect(view.clipWidthPx).toBe(1e6);
     expect(view.cropStartMs).toBeGreaterThan(17_000_000);
     const pointerTime = view.cropStartMs + (view.viewportLeftPx + 400 - view.clipLeftPx) / view.pixelsPerMs;
-    expect(pointerTime).toBeCloseTo(18_000_000 + (400 - previousPlayheadX) / ppm, 5);
+    expect(pointerTime).toBeCloseTo(18_000_000, 5);
     const before = view.cropStartMs + view.viewportLeftPx / view.pixelsPerMs;
     await event(clipElement(), 'mousedown', { button: 0, clientX: 400, clientY: 30 });
     await event(tracksElement(), 'wheel', { shiftKey: true, deltaY: ppm });

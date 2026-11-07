@@ -188,7 +188,7 @@ function ModernGroupWaveform({
     const previous = appliedClipsRef.current;
     const previousBuffers = appliedBuffersRef.current;
     const surface = surfaceRef.current;
-    if (!surface || (previous === clips && [...nextBuffers].every(([id, buffer]) => previousBuffers.get(id) === buffer))) {
+    if (zoomChanged || !surface || (previous === clips && [...nextBuffers].every(([id, buffer]) => previousBuffers.get(id) === buffer))) {
       appliedClipsRef.current = clips;
       appliedBuffersRef.current = nextBuffers;
       return;
@@ -344,7 +344,7 @@ function ModernGroupWaveform({
       if (!ensureSurface()) return false;
       if (update.stale) {
         // Replacements clear stale pixels at once; new summaries repaint only their clips.
-        surface.clear();
+        surface.invalidate(0, drawState.extentPx);
         seenReady = false;
       } else if (update.changed) {
         for (const clip of clipList()) {
@@ -361,9 +361,14 @@ function ModernGroupWaveform({
       if (waveformPaintTier(surface, tierRef.current) !== scheduledTier) { queue(); return false; }
       return true;
     };
-    function queue() {
+    function queue(immediate = false) {
       if (disposed) return;
       scheduledTier = waveformPaintTier(surface, tierRef.current);
+      if (immediate && scheduledTier === 0) {
+        cancel?.();
+        const more = run({ now: () => performance.now(), deadline: performance.now() + 4 });
+        if (!more) return;
+      }
       cancel = waveformScheduler.schedule(key.current, run, { tier: scheduledTier });
     }
     requestRef.current = queue;

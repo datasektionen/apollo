@@ -193,7 +193,7 @@ function addRawCombined(pcm0, pcm1, position, end, total) {
  * detail(sample) may return a finer page { start, length, pyramid } covering that sample; its
  * aligned buckets replace raw reads inside coarse buckets.
  */
-function createWaveformReader(pyramid, channel, audioBuffer, detail, { sumSquares: exactEnergy = true } = {}) {
+function createWaveformReader(pyramid, channel, audioBuffer, detail, { sumSquares: exactEnergy = true, fastOverview = false } = {}) {
   const length = (pyramid || audioBuffer).length;
   const levels = pyramid?.channels[channel]?.levels;
   const base = levels?.[0]?.blockSize;
@@ -220,6 +220,52 @@ function createWaveformReader(pyramid, channel, audioBuffer, detail, { sumSquare
       const valid = !Number.isNaN(start) && !Number.isNaN(end) && end > start;
       position = valid ? Math.max(0, Math.min(length, Math.floor(start))) : 0;
       finish = valid ? Math.max(position, Math.min(length, Math.ceil(end))) : position;
+
+      if (fastOverview && levels && levels.length > 0 && base > 0) {
+        if (!valid || position >= finish) {
+          reader.min = reader.max = 0;
+          reader.sumSquares = 0;
+          reader.count = 0;
+          reader.rawSamples = 0;
+          reader.done = true;
+          return;
+        }
+        const bStart = Math.max(0, Math.min(levels[0].min.length - 1, Math.floor(position / base)));
+        const bEnd = Math.max(0, Math.min(levels[0].min.length - 1, Math.floor(Math.max(position, finish - 1) / base)));
+        let min = Infinity;
+        let max = -Infinity;
+        let sumSquares = 0;
+        let count = 0;
+        const alignedStart = (bStart + 1) * base;
+        const alignedEnd = bEnd * base;
+        if (bStart === bEnd) {
+          min = levels[0].min[bStart];
+          max = levels[0].max[bStart];
+          sumSquares = levels[0].sumSquares[bStart];
+          count = base;
+        } else {
+          min = Math.min(levels[0].min[bStart], levels[0].min[bEnd]);
+          max = Math.max(levels[0].max[bStart], levels[0].max[bEnd]);
+          sumSquares = levels[0].sumSquares[bStart] + levels[0].sumSquares[bEnd];
+          count = 2 * base;
+          if (alignedEnd > alignedStart) {
+            const summaryTotal = { min, max, sumSquares, count };
+            addSummary(levels, length, alignedStart, alignedEnd, summaryTotal);
+            min = summaryTotal.min;
+            max = summaryTotal.max;
+            sumSquares = summaryTotal.sumSquares;
+            count = summaryTotal.count;
+          }
+        }
+        reader.min = min;
+        reader.max = max;
+        reader.sumSquares = sumSquares;
+        reader.count = count;
+        reader.rawSamples = 0;
+        reader.done = true;
+        return;
+      }
+
       edgeEnd = base ? Math.min(finish, Math.ceil(position / base) * base) : finish;
       innerStart = edgeEnd;
       innerEnd = !base || finish === length ? finish : Math.max(edgeEnd, Math.floor(finish / base) * base);
@@ -484,99 +530,107 @@ export function createWaveformDrawJob(context, {
     let reader;
     let reading = false;
     return ({ now = () => performance.now(), deadline = Infinity } = {}) => {
-      const sliceDeadline = Math.min(deadline, now() + 1);
-      const center = (channel + 0.5) * laneHeight;
-      const radius = Math.max(0, laneHeight / 2 - 2);
-      const y = (value) => center - amplitude(value) * radius;
-      context.save();
-      context.beginPath();
-      context.rect(clipLeft, channel * laneHeight, clipRight - clipLeft, laneHeight);
-      context.clip();
-      if (!initialized) {
-        context.fillStyle = 'rgba(148, 163, 184, 0.35)';
-        context.fillRect(clipLeft, center, clipRight - clipLeft, 1 / dpr);
-        initialized = true;
-      }
-      context.strokeStyle = color;
-      context.fillStyle = color;
-      context.lineWidth = 1 / dpr;
-      let finished = false;
-      if (detail) {
-        const pcm0 = entry.audioBuffer.getChannelData(0);
-        const pcm1 = entry.audioBuffer.numberOfChannels > 1 ? entry.audioBuffer.getChannelData(1) : pcm0;
-        const end = Math.min(cropEnd, Math.ceil(sampleAt(clipRight + detailReachPx)) + 1);
-        const stop = Math.min(end, (Math.floor(sample / 64) + 1) * 64);
+      const sliceDeadline = Number.isFinite(deadline) ? deadline : now() + 1;
+      while (channel < drawChannels) {
+        const center = (channel + 0.5) * laneHeight;
+        const radius = Math.max(0, laneHeight / 2 - 2);
+        const y = (value) => center - amplitude(value) * radius;
+        context.save();
         context.beginPath();
-        if (previous) context.moveTo(previous.x, previous.y);
-        for (; sample < stop; sample += 1) {
-          let value;
-          if (!isStereo && entry.audioBuffer.numberOfChannels > 1) {
-            const v0 = finite(pcm0[sample]);
-            const v1 = finite(pcm1[sample]);
-            value = (Math.abs(v0) >= Math.abs(v1) ? v0 : v1) * entryGainScale;
-          } else {
-            const pcm = channel === 1 && entry.audioBuffer.numberOfChannels > 1 ? pcm1 : pcm0;
-            value = finite(pcm[sample]) * entryGainScale;
-          }
-          const x = finite(entry.clipLeftPx, 0) - surfaceLeftPx + (sample - finite(entry.cropStartMs) * sampleRate / 1000) / samplesPerPx;
-          const point = { x, y: y(value) };
-          if (previous) context.lineTo(point.x, point.y);
-          else context.moveTo(point.x, point.y);
-          previous = point;
-          if (showSamples && 1 / samplesPerPx >= 4) context.fillRect(x - 1.5, point.y - 1.5, 3, 3);
+        context.rect(clipLeft, channel * laneHeight, clipRight - clipLeft, laneHeight);
+        context.clip();
+        if (!initialized) {
+          context.fillStyle = 'rgba(148, 163, 184, 0.35)';
+          context.fillRect(clipLeft, center, clipRight - clipLeft, 1 / dpr);
+          initialized = true;
         }
-        context.stroke();
-        finished = sample >= end;
-      } else {
-        let rawRemaining = WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE;
-        let work = 0;
-        if (!reader) {
-          if (!isStereo && (entry.pyramid?.numberOfChannels || 1) > 1) {
-            reader = createWaveformCombinedReader(entry.pyramid, entry.audioBuffer, detailPages, { sumSquares: showRms });
-          } else {
-            reader = createWaveformReader(entry.pyramid, channel, entry.audioBuffer, detailPages, { sumSquares: showRms });
+        context.strokeStyle = color;
+        context.fillStyle = color;
+        context.lineWidth = 1 / dpr;
+        let finished = false;
+        if (detail) {
+          const pcm0 = entry.audioBuffer.getChannelData(0);
+          const pcm1 = entry.audioBuffer.numberOfChannels > 1 ? entry.audioBuffer.getChannelData(1) : pcm0;
+          const end = Math.min(cropEnd, Math.ceil(sampleAt(clipRight + detailReachPx)) + 1);
+          while (sample < end) {
+            const stop = Math.min(end, (Math.floor(sample / 64) + 1) * 64);
+            context.beginPath();
+            if (previous) context.moveTo(previous.x, previous.y);
+            for (; sample < stop; sample += 1) {
+              let value;
+              if (!isStereo && entry.audioBuffer.numberOfChannels > 1) {
+                const v0 = finite(pcm0[sample]);
+                const v1 = finite(pcm1[sample]);
+                value = (Math.abs(v0) >= Math.abs(v1) ? v0 : v1) * entryGainScale;
+              } else {
+                const pcm = channel === 1 && entry.audioBuffer.numberOfChannels > 1 ? pcm1 : pcm0;
+                value = finite(pcm[sample]) * entryGainScale;
+              }
+              const x = finite(entry.clipLeftPx, 0) - surfaceLeftPx + (sample - finite(entry.cropStartMs) * sampleRate / 1000) / samplesPerPx;
+              const point = { x, y: y(value) };
+              if (previous) context.lineTo(point.x, point.y);
+              else context.moveTo(point.x, point.y);
+              previous = point;
+              if (showSamples && 1 / samplesPerPx >= 4) context.fillRect(x - 1.5, point.y - 1.5, 3, 3);
+            }
+            context.stroke();
+            if (sample < end && now() >= sliceDeadline) break;
           }
+          finished = sample >= end;
+        } else {
+          let rawRemaining = WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE;
+          let work = 0;
+          if (!reader) {
+            if (!isStereo && (entry.pyramid?.numberOfChannels || 1) > 1) {
+              reader = createWaveformCombinedReader(entry.pyramid, entry.audioBuffer, detailPages, { sumSquares: showRms });
+            } else {
+              reader = createWaveformReader(entry.pyramid, channel, entry.audioBuffer, detailPages, { sumSquares: showRms });
+            }
+          }
+          for (let i = 0; i < WAVEFORM_DRAW_STEPS_PER_SLICE && column / dpr < clipRight && rawRemaining > 0; i += 1) {
+            if (work >= WAVEFORM_CLOCK_CHECK_WORK) {
+              if (now() >= sliceDeadline) break;
+              work = 0;
+            }
+            const x = Math.max(clipLeft, column / dpr);
+            const endX = Math.min(clipRight, (column + 1) / dpr);
+            if (!reading) {
+              reader.reset(Math.max(cropStart, Math.floor(sampleAt(x))), Math.min(cropEnd, Math.ceil(sampleAt(endX))));
+              reading = true;
+            }
+            reader.step(Math.min(rawRemaining, WAVEFORM_RAW_SAMPLES_PER_SLICE));
+            rawRemaining -= reader.rawSamples;
+            work += 16 + reader.rawSamples;
+            if (!reader.done) continue;
+            reading = false;
+            column += 1;
+            if (!reader.count) continue;
+            const top = y(reader.max * entryGainScale);
+            const bottom = y(reader.min * entryGainScale);
+            if (showRms) {
+              const rms = Math.sqrt(reader.sumSquares / reader.count) * entryGainScale;
+              context.globalAlpha = 0.35;
+              context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
+              context.globalAlpha = 1;
+              context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
+            } else {
+              context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
+            }
+          }
+          finished = column / dpr >= clipRight;
         }
-        for (let i = 0; i < WAVEFORM_DRAW_STEPS_PER_SLICE && column / dpr < clipRight && rawRemaining > 0; i += 1) {
-          if (work >= WAVEFORM_CLOCK_CHECK_WORK) {
-            if (now() >= sliceDeadline) break;
-            work = 0;
-          }
-          const x = Math.max(clipLeft, column / dpr);
-          const endX = Math.min(clipRight, (column + 1) / dpr);
-          if (!reading) {
-            reader.reset(Math.max(cropStart, Math.floor(sampleAt(x))), Math.min(cropEnd, Math.ceil(sampleAt(endX))));
-            reading = true;
-          }
-          reader.step(Math.min(rawRemaining, WAVEFORM_RAW_SAMPLES_PER_SLICE));
-          rawRemaining -= reader.rawSamples;
-          work += 16 + reader.rawSamples;
-          if (!reader.done) continue;
-          reading = false;
-          column += 1;
-          if (!reader.count) continue;
-          const top = y(reader.max * entryGainScale);
-          const bottom = y(reader.min * entryGainScale);
-          if (showRms) {
-            const rms = Math.sqrt(reader.sumSquares / reader.count) * entryGainScale;
-            context.globalAlpha = 0.35;
-            context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
-            context.globalAlpha = 1;
-            context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
-          } else {
-            context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
-          }
+        context.restore();
+        if (finished) {
+          channel += 1;
+          column = firstColumn;
+          sample = firstSample;
+          previous = undefined;
+          initialized = false;
+          reader = undefined;
+        } else {
+          break;
         }
-        finished = column / dpr >= clipRight;
-      }
-      context.restore();
-      if (finished) {
-        channel += 1;
-        column = firstColumn;
-        sample = firstSample;
-        previous = undefined;
-        initialized = false;
-        reader = undefined;
+        if (channel < drawChannels && now() >= sliceDeadline) break;
       }
       return channel < drawChannels;
     };
@@ -628,7 +682,7 @@ export function createWaveformDrawJob(context, {
   let initialized = false;
 
   return ({ now = () => performance.now(), deadline = Infinity } = {}) => {
-    const sliceDeadline = Math.min(deadline, now() + 1);
+    const sliceDeadline = Number.isFinite(deadline) ? deadline : now() + 1;
     const center = (channel + 0.5) * laneHeight;
     const radius = Math.max(0, laneHeight / 2 - 2);
     const y = (value) => center - amplitude(value) * radius;
@@ -655,14 +709,14 @@ export function createWaveformDrawJob(context, {
     for (const c of preparedClips) {
       if (!c.reader) {
         if (!isStereo && (c.entry.pyramid?.numberOfChannels || 1) > 1) {
-          c.reader = createWaveformCombinedReader(c.entry.pyramid, c.entry.audioBuffer, c.detailPages, { sumSquares: showRms });
+          c.reader = createWaveformCombinedReader(c.entry.pyramid, c.entry.audioBuffer, c.detailPages, { sumSquares: showRms, fastOverview: true });
         } else {
-          c.reader = createWaveformReader(c.entry.pyramid, channel, c.entry.audioBuffer, c.detailPages, { sumSquares: showRms });
+          c.reader = createWaveformReader(c.entry.pyramid, channel, c.entry.audioBuffer, c.detailPages, { sumSquares: showRms, fastOverview: true });
         }
       }
     }
 
-    let rawRemaining = WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE;
+    let rawRemaining = WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE * Math.max(1, preparedClips.length);
     let work = 0;
 
     for (let i = 0; i < WAVEFORM_DRAW_STEPS_PER_SLICE && column / dpr < right && rawRemaining > 0; i += 1) {
@@ -676,7 +730,8 @@ export function createWaveformDrawJob(context, {
       const active = [];
       for (let cIdx = 0; cIdx < preparedClips.length; cIdx += 1) {
         const c = preparedClips[cIdx];
-        if (c.clipEndPx > x && c.clipStartPx < endX && c.reader) {
+        if (c.clipStartPx >= endX) break;
+        if (c.clipEndPx > x && c.reader) {
           active.push(c);
         }
       }

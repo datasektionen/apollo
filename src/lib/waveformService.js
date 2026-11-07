@@ -450,7 +450,7 @@ export function createWaveformService({
           || pcm.length !== metadata.length) throw new TypeError('Invalid AudioBuffer channel data');
       }
       for (let startSample = 0; startSample < metadata.length; startSample += WAVEFORM_CHUNK_SAMPLES) {
-        await yieldControl();
+        if (!client) await yieldControl();
         check(entry);
         const chunkSize = Math.min(WAVEFORM_CHUNK_SAMPLES, metadata.length - startSample);
         let samples;

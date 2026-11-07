@@ -111,7 +111,7 @@ export function useSurfacePlacement(surfaceRef, requestRef, viewportLeftPx, retu
     const moved = surface.setViewport(placementRef.current.left);
     const retarget = surface.setReturnViewport(placementRef.current.returnLeft);
     if (replaced || (moved && !surface.presenting())) onMove?.();
-    if (replaced || moved || retarget) requestRef.current?.();
+    if (replaced || moved || retarget) requestRef.current?.(replaced);
   }, [surfaceRef, requestRef, viewportLeftPx, returnViewportLeftPx, onMove, prepareRef, revision]);
   return placementRef;
 }
@@ -247,16 +247,16 @@ function ModernWaveform({
       if (disposed) return false;
       const update = observer.read();
       const buffer = audioRef.current;
+      source = update.snapshots.get(blobId)?.source;
+      const detail = buffer && surface ? (buffer.sampleRate / (1000 * drawRef.current.scale * surface.dpr) <= 1) : false;
       if (update.stale && surface) {
-        surface.clear();
+        surface.invalidate(0, viewRef.current.clipWidthPx);
         ready = false;
-        setStatus('loading');
+        if (!source?.pyramid && !detail) setStatus('loading');
       }
       if (!buffer) { setStatus('missing'); return false; }
       if (!near) return observer.dirty;
-      source = update.snapshots.get(blobId)?.source;
       if (!ensureSurface()) return false;
-      const detail = buffer.sampleRate / (1000 * drawRef.current.scale * surface.dpr) <= 1;
       if (!source?.pyramid && !detail) {
         if (!reused) setStatus(source?.status === 'error' ? 'error' : 'loading');
         return observer.dirty;
@@ -274,9 +274,14 @@ function ModernWaveform({
       if (waveformPaintTier(surface, tierRef.current) !== scheduledTier) { queue(); return false; }
       return true;
     };
-    function queue() {
+    function queue(immediate = false) {
       if (disposed) return;
       scheduledTier = waveformPaintTier(surface, tierRef.current);
+      if (immediate && scheduledTier === 0) {
+        cancel?.();
+        const more = run({ now: () => performance.now(), deadline: performance.now() + 4 });
+        if (!more) return;
+      }
       cancel = waveformScheduler.schedule(key.current, run, { tier: scheduledTier });
     }
     function ensureSurface() {

@@ -427,7 +427,6 @@ export function createWaveformSurface({
         return true;
       }
       if (live.origin !== null) {
-        deviceOp(live, (ctx) => ctx.clearRect(0, 0, live.columns, live.rows));
         live.dirty = [[live.origin, live.origin + live.columns]];
       }
       return true;
@@ -514,7 +513,6 @@ export function createWaveformSurface({
       if (returned) returned.seeded = false;
       if (cleanColumns(shown) > 0 && beginHold({ blank: true, widthPx: shown.widthPx, height: shown.height, dpr: requestedDpr })) return;
       if (live.origin !== null) {
-        deviceOp(live, (ctx) => ctx.clearRect(0, 0, live.columns, live.rows));
         live.dirty = [[live.origin, live.origin + live.columns]];
       }
     },

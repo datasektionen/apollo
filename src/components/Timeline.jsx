@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
 import { Plus, VolumeX } from 'lucide-react';
 import {
   formatTime,
@@ -25,7 +24,7 @@ import {
 import {
   anchoredScroll, boundedRange, centeredScroll, clampDuration, durationFromSlider, easeFollowScroll, followLanding,
   formatRulerLabel, intersectsViewport, normalizeWheel, rowAtY, rowOffsets, RULER_LABEL_HEIGHT, RULER_SEEK_HEIGHT,
-  rulerInterval, rulerScale, scrollSegment, TIMELINE_RULER_HEIGHT, visibleRulerTicks, zoomAnchor,
+  rulerInterval, rulerScale, scrollSegment, TIMELINE_RULER_HEIGHT, visibleRulerTicks,
 } from '../utils/timelineViewport';
 import { getEffectiveTrackMix, getGroupDescendantTrackIdsByGroup, getTrackHeight, normalizeTrackTree } from '../utils/trackTree';
 import {
@@ -746,7 +745,11 @@ function Timeline({
     }),
   ])), [groupTimelinePreviewByNodeId, pixelsPerMs, originPx, segmentWidthPx]);
   useLayoutEffect(() => {
-    setLogicalScroll(Math.min(scrollLeft, Math.max(0, timelineWidthPx - containerWidth)));
+    if (pendingZoomAnchorRef.current) return;
+    const maxScroll = Math.max(0, timelineWidthPx - containerWidth);
+    if (scrollLeft > maxScroll) {
+      setLogicalScroll(maxScroll);
+    }
   }, [timelineWidthPx, containerWidth]);
 
   const beginLyricDrag = (event, line) => {
@@ -1032,12 +1035,14 @@ function Timeline({
     }
     setVisibleDurationMs(metrics.durationState);
   };
-  // The timeline scale stays where it is until the on-screen waveforms for the new scale are painted.
-  const applyZoomDuration = (nextVisibleDurationMs, pointerX, anchorOverride) => {
+  // The timeline scale updates immediately so intermediate zoom steps are fully fluid at 60/120 fps.
+  const applyZoomDuration = (nextVisibleDurationMs, _pointerX, anchorOverride) => {
     if (dragState || lyricDragRef.current || rulerDragState || loopMarkerDragState || timelineSelectionRef.current) return false;
     const metrics = zoomMetrics(nextVisibleDurationMs);
-    const anchor = anchorOverride || zoomAnchor(logicalScrollLeft(), containerWidth, pixelsPerMs, currentTimeMs, pointerX);
-    const token = ++zoomCommitRef.current.token;
+    const width = containerWidth > 0 ? containerWidth : (tracksScrollRef.current?.clientWidth || 800);
+    const playheadMs = Number.isFinite(currentTimeMs) ? currentTimeMs : 0;
+    const anchor = anchorOverride || { timeMs: playheadMs, x: width / 2 };
+    ++zoomCommitRef.current.token;
     zoomCommitRef.current.anchor = anchor;
     cancelZoomRef.current?.();
     cancelZoomRef.current = null;
@@ -1047,31 +1052,7 @@ function Timeline({
       else commitZoom(metrics);
       return true;
     }
-    const targetScroll = anchoredScroll(anchor, metrics.ppm, containerWidth, metrics.timelineWidth);
-    const segment = scrollSegment(targetScroll, metrics.timelineWidth, containerWidth, originRef.current);
-    cancelZoomRef.current = prepareVisibleZoom({
-      rows: timelineRows, rowTops, vertical: verticalViewport, clipsByTrack: renderedClipsByTrackId,
-      groupClipsByNode: groupTimelinePreviewByNodeId, segment, pixelsPerMs: metrics.ppm, viewportWidth: containerWidth,
-      dpr: Math.max(1, globalThis.devicePixelRatio || 1),
-      display: {
-        displayMode, showRms, globalPeakAmplitude,
-        scaleWaveformsByGain,
-        getTrackGain: (tId) => effectiveMix?.statesByTrackId?.get(tId)?.effectiveGain ?? 1,
-        clipColor: CLIP_WAVEFORM_COLOR, missingColor: MISSING_CLIP_WAVEFORM_COLOR,
-        groupColor: 'rgba(123, 173, 255, 0.75)', groupMissingColor: 'rgba(248, 113, 113, 0.55)',
-        missingIds: missingMediaBlobIds,
-      },
-      getBuffer: (id) => audioManager.mediaCache.get(id),
-      onReady: (bitmaps) => {
-        if (zoomCommitRef.current.token !== token) {
-          releaseZoomBitmaps(bitmaps);
-          return;
-        }
-        cancelZoomRef.current = null;
-        storeZoomBitmaps(bitmaps);
-        commitZoom(metrics);
-      },
-    });
+    commitZoom(metrics);
     return true;
   };
   useEffect(() => () => cancelZoomRef.current?.(), []);
@@ -1390,14 +1371,15 @@ function Timeline({
 
   useLayoutEffect(() => {
     if (!pendingZoomAnchorRef.current) return;
+    pendingZoomAnchorRef.current = null;
     const tracksElement = tracksScrollRef.current;
     if (!tracksElement) return;
 
-    const targetScrollLeft = anchoredScroll(pendingZoomAnchorRef.current, pixelsPerMs, containerWidth, timelineWidthPx);
-
-    setLogicalScroll(targetScrollLeft);
-    pendingZoomAnchorRef.current = null;
-  }, [pixelsPerMs, timelineWidthPx, containerWidth, currentTimeMs]);
+    const segment = scrollSegment(scrollLeft, timelineWidthPx, containerWidth, originRef.current);
+    for (const element of [tracksScrollRef.current, rulerScrollRef.current]) {
+      if (element && element.scrollLeft !== segment.left) element.scrollLeft = segment.left;
+    }
+  }, [pixelsPerMs, timelineWidthPx, containerWidth]);
 
   useEffect(() => {
     if (visibleDurationMs === null && prevProjectDurationRef.current !== null) {
@@ -2948,7 +2930,7 @@ function Timeline({
     if (!wheel.pending) wheel.duration = undefined;
     const apply = (zoom) => {
       wheel.pending = false;
-      if (!zoom(wheel.duration, wheel.pointerX)) wheel.duration = undefined;
+      if (!zoom(wheel.duration)) wheel.duration = undefined;
     };
     const flush = () => {
       wheel.frame = null;
@@ -2960,13 +2942,12 @@ function Timeline({
         event.preventDefault();
         event.stopPropagation();
         if (dragState || lyricDragRef.current || rulerDragState || loopMarkerDragState) return;
-        wheel.pointerX = event.clientX - tracksScrollRef.current.getBoundingClientRect().left;
         wheel.duration = clampDuration((wheel.duration ?? clampedVisibleMs) * Math.exp(delta.y * 0.002), maxZoomDurationMs, minZoomDurationMs);
         // Browsers deliver about one wheel event per frame: render it now, as for discrete input,
         // and coalesce any further events in this frame into one update on the next.
         if (wheel.frame != null) wheel.pending = true;
         else {
-          flushSync(() => apply(applyZoomDuration));
+          apply(applyZoomDuration);
           wheel.frame = requestAnimationFrame(flush);
         }
       } else if (event.shiftKey || Math.abs(delta.x) > Math.abs(delta.y)) {
@@ -3431,7 +3412,7 @@ function Timeline({
                   return (
                     <div
                       key={row.nodeId}
-                      className="border-b border-gray-700 relative bg-gray-900/80"
+                      className="border-b border-gray-700 relative bg-gray-900/80 overflow-hidden"
                       onClick={(e) => {
                         e.stopPropagation();
                         if (timelineSelectionSuppressClickRef.current) return;
@@ -3466,14 +3447,16 @@ function Timeline({
                         );
                       })}
 
-                      {measuredRows && (rowOnScreen || rowNear) && <div className="absolute inset-x-0 pointer-events-none" style={{ top: rowPadding }}>
-                        <GroupWaveform clips={groupSurfaceClipsByNodeId.get(row.nodeId)} pixelsPerMs={pixelsPerMs}
-                          bitmapKey={`group:${row.nodeId}`}
-                          viewportLeftPx={scrollLeft - originPx} viewportWidthPx={containerWidth} height={rowInternalHeight}
-                          returnViewportLeftPx={startViewportLeftPx} scheduleTier={rowOnScreen ? 0 : 2}
-                          globalPeakAmplitude={globalPeakAmplitude} displayMode={displayMode}
-                          showRms={showRms} stereo={stereo} missingMediaBlobIds={missingMediaBlobIds} />
-                      </div>}
+                      {measuredRows && (rowOnScreen || rowNear) && (
+                        <div className="absolute inset-x-0 pointer-events-none" style={{ top: rowPadding }}>
+                          <GroupWaveform clips={groupSurfaceClipsByNodeId.get(row.nodeId)} pixelsPerMs={pixelsPerMs}
+                            bitmapKey={`group:${row.nodeId}`}
+                            viewportLeftPx={scrollLeft - originPx} viewportWidthPx={containerWidth} height={rowInternalHeight}
+                            returnViewportLeftPx={startViewportLeftPx} scheduleTier={rowOnScreen ? 0 : 2}
+                            globalPeakAmplitude={globalPeakAmplitude} displayMode={displayMode}
+                            showRms={showRms} stereo={stereo} missingMediaBlobIds={missingMediaBlobIds} />
+                        </div>
+                      )}
 
                     </div>
                   );

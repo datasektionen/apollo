@@ -144,7 +144,8 @@ if (typeof window !== 'undefined') {
   }
 }
 export const waveformScheduler = createWaveformScheduler({
-  idleBudgetMs: 12,
+  budgetMs: 12,
+  idleBudgetMs: 16,
   lastInputAt: () => lastInput,
   inputPending: () => globalThis.navigator?.scheduling?.isInputPending?.() === true,
 });
