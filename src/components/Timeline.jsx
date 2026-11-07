@@ -112,7 +112,6 @@ function Timeline({
   returnToStartToken = 0,
   displayMode = 'linear',
   showRms = false,
-  showClipping = false,
   stereo = false,
   onAddTrack = null,
   onToggleGroupCollapse = null,
@@ -1038,7 +1037,7 @@ function Timeline({
       groupClipsByNode: groupTimelinePreviewByNodeId, segment, pixelsPerMs: metrics.ppm, viewportWidth: containerWidth,
       dpr: Math.max(1, globalThis.devicePixelRatio || 1),
       display: {
-        displayMode, showRms, showClipping, globalPeakAmplitude,
+        displayMode, showRms, globalPeakAmplitude,
         clipColor: CLIP_WAVEFORM_COLOR, missingColor: MISSING_CLIP_WAVEFORM_COLOR,
         groupColor: 'rgba(123, 173, 255, 0.75)', groupMissingColor: 'rgba(248, 113, 113, 0.55)',
         missingIds: missingMediaBlobIds,
@@ -1114,7 +1113,6 @@ function Timeline({
       display: {
         displayMode,
         showRms,
-        showClipping,
         globalPeakAmplitude,
         clipColor: CLIP_WAVEFORM_COLOR,
         missingColor: MISSING_CLIP_WAVEFORM_COLOR,
@@ -1126,7 +1124,7 @@ function Timeline({
     });
 
     return { views, expectedCount };
-  }, [project, containerWidth, pixelsPerMs, scrollLeft, timelineWidthPx, renderedClipsByTrackId, groupTimelinePreviewByNodeId, displayMode, showRms, showClipping, globalPeakAmplitude, missingMediaBlobIds, mediaRevision]);
+  }, [project, containerWidth, pixelsPerMs, scrollLeft, timelineWidthPx, renderedClipsByTrackId, groupTimelinePreviewByNodeId, displayMode, showRms, globalPeakAmplitude, missingMediaBlobIds, mediaRevision]);
 
   const areChildViewsReady = useCallback((childState) => {
     if (!childState) return true;
@@ -3445,7 +3443,7 @@ function Timeline({
                           viewportLeftPx={scrollLeft - originPx} viewportWidthPx={containerWidth} height={rowInternalHeight}
                           returnViewportLeftPx={startViewportLeftPx} scheduleTier={rowOnScreen ? 0 : 2}
                           globalPeakAmplitude={globalPeakAmplitude} displayMode={displayMode}
-                          showRms={showRms} showClipping={showClipping} stereo={stereo} missingMediaBlobIds={missingMediaBlobIds} />
+                          showRms={showRms} stereo={stereo} missingMediaBlobIds={missingMediaBlobIds} />
                       </div>}
 
                     </div>
@@ -3561,7 +3559,6 @@ function Timeline({
                               scheduleTier={waveformTier}
                               displayMode={displayMode}
                               showRms={showRms}
-                              showClipping={showClipping}
                               stereo={stereo}
                               clipId={clip.id}
                               bitmapKey={clip.id}

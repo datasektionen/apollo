@@ -233,7 +233,7 @@ describe('waveform renderer', () => {
         finish(createWaveformDrawJob(ctx, {
           audioBuffer: buffer, pyramid, cropStartMs: 3.1, cropEndMs: 800, pixelsPerMs: 0.05,
           clipLeftPx: 1.3, clipWidthPx: 38, surfaceLeftPx: 0, surfaceWidthPx: 40, height: 40, dpr: 2,
-          showRms: true, showClipping: true, fromColumn, toColumn,
+          showRms: true, fromColumn, toColumn,
         }));
       }
       return calls;
@@ -367,18 +367,6 @@ describe('waveform renderer', () => {
       clipWidthPx: 20, surfaceLeftPx: 0, surfaceWidthPx: 20, height: 40, showSamples: true, showRms: true }));
     expect(ctx.lineTo.mock.calls).toEqual([[5, 11], [10, 20], [15, 29]]);
     expect(ctx.fillRect.mock.calls.filter((call) => call[2] === 3)).toHaveLength(4);
-  });
-
-  it('shows source over-range even when normalization makes the displayed peak smaller', () => {
-    const { buffer, pyramid } = source([[2, -2, 0, 0]]);
-    const ctx = context();
-    const red = [];
-    ctx.fillRect.mockImplementation((...args) => { if (ctx.fillStyle === '#ef4444') red.push(args); });
-    finish(createWaveformDrawJob(ctx, { audioBuffer: buffer, pyramid, pixelsPerMs: 0.25,
-      clipWidthPx: 1, surfaceLeftPx: 0, surfaceWidthPx: 1, height: 40,
-      displayMode: 'normalized', globalPeakAmplitude: 4, showClipping: true, showRms: true }));
-    expect(red).toEqual([[0, 0, 1, 2], [0, 38, 1, 2]]);
-    expect(ctx.fillRect.mock.calls.some((call) => call[1] === 11 && call[3] === 18)).toBe(true);
   });
 
   it('borrows only the visible sample window, not a full source scan or copy', () => {

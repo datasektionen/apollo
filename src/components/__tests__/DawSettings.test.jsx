@@ -20,8 +20,8 @@ afterEach(() => {
 
 describe('DAW view settings', () => {
   it('keeps only the waveform choices and restores them', () => {
-    expect(normalizeDawViewSettings({ displayMode: 'db', showRms: true, showClipping: true, stereo: true, showSamples: true }))
-      .toEqual({ displayMode: 'db', showRms: true, showClipping: true, stereo: true });
+    expect(normalizeDawViewSettings({ displayMode: 'db', showRms: true, stereo: true, showSamples: true }))
+      .toEqual({ displayMode: 'db', showRms: true, stereo: true });
     expect(normalizeDawViewSettings({ displayMode: 'fancy' }).displayMode).toBe('linear');
     expect(normalizeDawViewSettings({}).stereo).toBe(false);
   });
@@ -38,17 +38,14 @@ describe('DAW view settings', () => {
       return <DawSettingsPanel settings={settings} setSettings={setSettings} />;
     }
     await act(async () => { root.render(<Harness />); });
-    expect(current).toEqual({ displayMode: 'normalized', showRms: true, showClipping: false, stereo: false });
+    expect(current).toEqual({ displayMode: 'normalized', showRms: true, stereo: false });
     const select = container.querySelector('select');
     select.value = 'db';
     await act(async () => select.dispatchEvent(new Event('change', { bubbles: true })));
     const stereoInput = [...container.querySelectorAll('label')]
       .find((label) => label.textContent.includes('Stereo waveforms')).querySelector('input');
     await act(async () => stereoInput.click());
-    const clipping = [...container.querySelectorAll('label')]
-      .find((label) => label.textContent.includes('Source over-range')).querySelector('input');
-    await act(async () => clipping.click());
-    expect(current).toEqual({ displayMode: 'db', showRms: true, showClipping: true, stereo: true });
+    expect(current).toEqual({ displayMode: 'db', showRms: true, stereo: true });
     expect(JSON.parse(localStorage.getItem(DAW_VIEW_STORAGE_KEY))).toEqual(current);
     await act(async () => root.unmount());
     container.remove();

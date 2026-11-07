@@ -170,7 +170,7 @@ describe('Waveform', () => {
     expect(onReady).toHaveBeenCalledOnce();
     expect(service.pinSource).toHaveBeenCalledOnce();
     service.ensureSource.mockClear();
-    await view.render(<Waveform {...props} displayMode="normalized" globalPeakAmplitude={0.5} showRms showClipping />);
+    await view.render(<Waveform {...props} displayMode="normalized" globalPeakAmplitude={0.5} showRms />);
     await flush();
     expect(service.ensureSource).not.toHaveBeenCalled();
     expect(service.pinSource).toHaveBeenCalledOnce();
@@ -397,7 +397,7 @@ describe('renderer rollout', () => {
     const audioBuffer = buffer();
     const view = await mount(<Waveform audioBuffer={audioBuffer} blobId="blob" clipId="clip"
       cropStartMs={0} cropEndMs={4096} onReady={onReady} {...geometry}
-      displayMode="db" showRms showClipping showSamples />);
+      displayMode="db" showRms showSamples />);
     await flush();
     expect(legacy.create).toHaveBeenCalledOnce();
     expect(legacy.instances[0].load).toHaveBeenCalledOnce();
@@ -448,7 +448,7 @@ describe('renderer rollout', () => {
       { key: 'missing', blobId: 'missing', startMs: 110, durationMs: 10, cropStartMs: 0, cropEndMs: 10 },
     ];
     const props = { clips, pixelsPerMs: 1, viewportLeftPx: 100, viewportWidthPx: 100, height: 50 };
-    const view = await mount(<GroupWaveform {...props} displayMode="db" showClipping showRms />);
+    const view = await mount(<GroupWaveform {...props} displayMode="db" showRms />);
     await flush();
     expect(legacy.create).toHaveBeenCalledOnce();
     const a = view.container.querySelector('[data-legacy-clip="a"]');

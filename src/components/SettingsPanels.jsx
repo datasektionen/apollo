@@ -277,15 +277,6 @@ export function DawSettingsPanel({ settings, setSettings }) {
         />
         <span>RMS energy</span>
       </label>
-      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
-        <input
-          type="checkbox"
-          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
-          checked={settings.showClipping}
-          onChange={(event) => update({ showClipping: event.target.checked })}
-        />
-        <span>Source over-range indicators</span>
-      </label>
     </div>
   );
 }

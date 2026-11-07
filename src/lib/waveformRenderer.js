@@ -422,7 +422,7 @@ export function createWaveformDrawJob(context, {
   audioBuffer, pyramid, cropStartMs = 0, cropEndMs, pixelsPerMs,
   clipLeftPx = 0, clipWidthPx, surfaceLeftPx, surfaceWidthPx, height,
   dpr = 1, color = '#4F8EF7', displayMode = 'linear', globalPeakAmplitude = 1,
-  showRms = false, showClipping = false, showSamples = false, requestDetail,
+  showRms = false, showSamples = false, requestDetail,
   fromColumn = 0, toColumn = Infinity, stereo, clips,
 }) {
   const clipEntries = Array.isArray(clips) && clips.length > 0
@@ -522,11 +522,6 @@ export function createWaveformDrawJob(context, {
           else context.moveTo(point.x, point.y);
           previous = point;
           if (showSamples && 1 / samplesPerPx >= 4) context.fillRect(x - 1.5, point.y - 1.5, 3, 3);
-          if (showClipping && Math.abs(value) > 1) {
-            context.fillStyle = '#ef4444';
-            context.fillRect(x, value > 0 ? channel * laneHeight : (channel + 1) * laneHeight - 2, 2, 2);
-            context.fillStyle = color;
-          }
         }
         context.stroke();
         finished = sample >= end;
@@ -568,12 +563,6 @@ export function createWaveformDrawJob(context, {
             context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
           } else {
             context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
-          }
-          if (showClipping && (reader.max > 1 || reader.min < -1)) {
-            context.fillStyle = '#ef4444';
-            if (reader.max > 1) context.fillRect(x, channel * laneHeight, endX - x, 2);
-            if (reader.min < -1) context.fillRect(x, (channel + 1) * laneHeight - 2, endX - x, 2);
-            context.fillStyle = color;
           }
         }
         finished = column / dpr >= clipRight;
@@ -725,7 +714,6 @@ export function createWaveformDrawJob(context, {
       let compMin = Infinity;
       let compSumSquares = 0;
       let compCount = 0;
-      let hasClipping = false;
 
       for (let aIdx = 0; aIdx < active.length; aIdx += 1) {
         const r = active[aIdx].reader;
@@ -734,7 +722,6 @@ export function createWaveformDrawJob(context, {
         if (r.min < compMin) compMin = r.min;
         compSumSquares += r.sumSquares;
         compCount += r.count;
-        if (r.max > 1 || r.min < -1) hasClipping = true;
       }
 
       if (compCount > 0 && Number.isFinite(compMax) && Number.isFinite(compMin)) {
@@ -748,12 +735,6 @@ export function createWaveformDrawJob(context, {
           context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));
         } else {
           context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
-        }
-        if (showClipping && hasClipping) {
-          context.fillStyle = '#ef4444';
-          if (compMax > 1) context.fillRect(x, channel * laneHeight, endX - x, 2);
-          if (compMin < -1) context.fillRect(x, (channel + 1) * laneHeight - 2, endX - x, 2);
-          context.fillStyle = color;
         }
       }
     }

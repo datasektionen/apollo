@@ -76,7 +76,7 @@ function changedClipRanges(previous, next, pixelsPerMs) {
 /** Parent supplies mute-filtered/edit-preview clips. Layered source activity is NOT mixed output. */
 function ModernGroupWaveform({
   clips: clipsProp = EMPTY_CLIPS, pixelsPerMs, viewportLeftPx = 0, viewportWidthPx = 0, returnViewportLeftPx, height = 80,
-  globalPeakAmplitude = 1, displayMode = 'linear', showRms = false, showClipping = false,
+  globalPeakAmplitude = 1, displayMode = 'linear', showRms = false,
   missingMediaBlobIds, scheduleTier = 0, bitmapKey, stereo = false,
 }) {
   // Parents rebuild clip lists on unrelated project changes (loop toggles, track tree normalization);
@@ -127,7 +127,7 @@ function ModernGroupWaveform({
   const viewportPx = viewportRef.current;
   const drawRef = useRef(null);
   drawRef.current = {
-    pixelsPerMs, height, globalPeakAmplitude, displayMode, showRms, showClipping, missingMediaBlobIds, extentPx, stereo,
+    pixelsPerMs, height, globalPeakAmplitude, displayMode, showRms, missingMediaBlobIds, extentPx, stereo,
   };
   const localReturn = Number.isFinite(returnViewportLeftPx) ? returnViewportLeftPx : null;
   // Sources are pinned for every clip on the retained canvas, margins included.
@@ -151,7 +151,7 @@ function ModernGroupWaveform({
   const viewRef = useRef(view);
   viewRef.current = view;
   const missingKey = missingMediaBlobIds ? [...missingMediaBlobIds].sort().join(',') : '';
-  const picture = `${zoom}|${height}|${globalPeakAmplitude}|${displayMode}|${showRms}|${showClipping}|${view.dpr}|${missingKey}|${stereo}`;
+  const picture = `${zoom}|${height}|${globalPeakAmplitude}|${displayMode}|${showRms}|${view.dpr}|${missingKey}|${stereo}`;
   const pictureRef = useRef(picture);
   const prepareRef = useRef(() => false);
   prepareRef.current = () => {
@@ -283,7 +283,6 @@ function ModernGroupWaveform({
             displayMode: drawState.displayMode,
             globalPeakAmplitude: drawState.globalPeakAmplitude,
             showRms: drawState.showRms,
-            showClipping: drawState.showClipping,
             stereo: drawState.stereo,
           });
           return true;
@@ -380,7 +379,7 @@ function ModernGroupWaveform({
     // Zoom and display changes retarget the lane. Restarting this effect would blank it and show the loading label.
   }, []);
 
-  const label = `Group activity overview (not mixed output)${status === 'missing' ? ', missing media' : status === 'error' ? ', waveform unavailable' : status === 'limited' ? ', raster memory limit' : status === 'loading' ? ', loading waveforms' : ''}${showClipping ? ', source over-range indicators' : ''}`;
+  const label = `Group activity overview (not mixed output)${status === 'missing' ? ', missing media' : status === 'error' ? ', waveform unavailable' : status === 'limited' ? ', raster memory limit' : status === 'loading' ? ', loading waveforms' : ''}`;
   return (
     <div ref={containerRef} role="img" aria-label={label} aria-busy={status === 'loading'} data-waveform-status={status}
       style={{ position: 'relative', width: '100%', height, pointerEvents: 'none' }}>

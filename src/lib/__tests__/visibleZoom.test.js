@@ -50,7 +50,7 @@ it('holds the zoom until the visible window has been painted', async () => {
   const cancel = prepareVisibleZoom({
     views: [{
       key: 'clip', leftPx: 0, widthPx: 32, height: 8, pixelsPerMs: 1, dpr: 1, cropStartMs: 0,
-      displayMode: 'linear', showRms: false, showClipping: false, globalPeakAmplitude: 1,
+      displayMode: 'linear', showRms: false, globalPeakAmplitude: 1,
       clips: [{
         buffer: { sampleRate: 8000, length: 1024, numberOfChannels: 1, getChannelData: () => pcm },
         pyramid: pyramid.finish(), blobId: 'clip', cropStartMs: 0, cropEndMs: 128,

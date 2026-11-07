@@ -120,7 +120,7 @@ function ModernWaveform({
   audioBuffer, blobId, clipId, cropStartMs = 0, cropEndMs, sourceDurationMs,
   height = 80, color = '#4F8EF7', onReady, globalPeakAmplitude = 1,
   pixelsPerMs, clipLeftPx, clipWidthPx, viewportLeftPx, viewportWidthPx, returnViewportLeftPx,
-  displayMode = 'linear', showRms = false, showClipping = false, showSamples = false,
+  displayMode = 'linear', showRms = false, showSamples = false,
   scheduleTier = 0, bitmapKey, stereo = false,
 }) {
   const containerRef = useRef(null);
@@ -169,7 +169,7 @@ function ModernWaveform({
     }] : [], 1,
   );
   // Appearance and zoom share one picture. A change redraws offscreen instead of rebuilding the canvas.
-  const picture = `${scale}|${height}|${color}|${displayMode}|${globalPeakAmplitude}|${showRms}|${showClipping}|${showSamples}|${view.dpr}|${cropStartMs}|${stereo}`;
+  const picture = `${scale}|${height}|${color}|${displayMode}|${globalPeakAmplitude}|${showRms}|${showSamples}|${view.dpr}|${cropStartMs}|${stereo}`;
   const pictureRef = useRef(picture);
   const prepareRef = useRef(() => false);
   prepareRef.current = () => {
@@ -199,7 +199,7 @@ function ModernWaveform({
   const drawRef = useRef(null);
   drawRef.current = {
     cropStartMs, endMs, scale, clipWidthPx: view.clipWidthPx, height, color, displayMode,
-    globalPeakAmplitude, showRms, showClipping, showSamples, stereo,
+    globalPeakAmplitude, showRms, showSamples, stereo,
   };
   const donorRef = useRef(null);
   if (!donorRef.current) donorRef.current = { read: () => null };
@@ -210,7 +210,7 @@ function ModernWaveform({
     return {
       surface: surfaceRef.current, blobId, cropStartMs: draw.cropStartMs, pixelsPerMs: draw.scale,
       height: draw.height, color: draw.color, displayMode: draw.displayMode,
-      showRms: draw.showRms, showClipping: draw.showClipping, showSamples: draw.showSamples,
+      showRms: draw.showRms, showSamples: draw.showSamples,
       globalPeakAmplitude: draw.globalPeakAmplitude, stereo: draw.stereo, ...bitmap,
     };
   };
@@ -239,7 +239,7 @@ function ModernWaveform({
         pixelsPerMs: draw.scale, clipLeftPx: 0, clipWidthPx: draw.clipWidthPx, ...strip,
         height: draw.height, color: draw.color, displayMode: draw.displayMode,
         globalPeakAmplitude: draw.globalPeakAmplitude, showRms: draw.showRms,
-        showClipping: draw.showClipping, showSamples: draw.showSamples, stereo: draw.stereo,
+        showSamples: draw.showSamples, stereo: draw.stereo,
         requestDetail: (start, end) => waveformService.requestDetail(blobId, audioRef.current, start, end),
       });
     };
@@ -321,7 +321,7 @@ function ModernWaveform({
     // Zoom, crop, color, size and resolution retarget this surface. They must not dispose the picture on screen.
   }, [blobId, clipId, near]);
 
-  const label = status === 'ready' ? `Waveform, ${displayMode} amplitude${displayMode === 'db' ? ', -60 dB floor' : ''}${showClipping ? ', source over-range indicators' : ''}`
+  const label = status === 'ready' ? `Waveform, ${displayMode} amplitude${displayMode === 'db' ? ', -60 dB floor' : ''}`
     : status === 'error' ? 'Waveform unavailable' : status === 'limited' ? 'Waveform hidden: raster memory limit' : status === 'missing' ? 'Audio unavailable' : 'Loading waveform';
   return (
     <div ref={containerRef} className="w-full" draggable={false} onDragStart={(event) => event.preventDefault()}

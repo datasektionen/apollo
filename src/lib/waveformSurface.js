@@ -36,7 +36,7 @@ export function adoptWaveformBitmap(surface, draw) {
     // The two halves share a timeline zoom. Their stored scales can differ by a rounding ulp.
     if (Math.abs(donor.pixelsPerMs - draw.pixelsPerMs) > 1e-4 * donor.pixelsPerMs) continue;
     if (donor.height !== draw.height || donor.color !== draw.color || donor.displayMode !== draw.displayMode) continue;
-    if (donor.showRms !== draw.showRms || donor.showClipping !== draw.showClipping || donor.showSamples !== draw.showSamples) continue;
+    if (donor.showRms !== draw.showRms || donor.showSamples !== draw.showSamples) continue;
     if (donor.globalPeakAmplitude !== draw.globalPeakAmplitude) continue;
     const shiftDevice = (draw.cropStartMs - donor.cropStartMs) * donor.pixelsPerMs * target.dpr;
     if (!(shiftDevice > 0.5)) continue;

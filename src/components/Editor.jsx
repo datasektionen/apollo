@@ -4725,7 +4725,6 @@ function Editor({
           returnToStartToken={returnToStartToken}
           displayMode={dawView.displayMode}
           showRms={dawView.showRms}
-          showClipping={dawView.showClipping}
           stereo={dawView.stereo}
           onAddTrack={structuralEditsAllowed && caps.canCreateTracks ? handleAddEmptyTrack : null}
           onToggleGroupCollapse={handleToggleGroupCollapse}

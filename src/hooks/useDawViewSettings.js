@@ -6,7 +6,6 @@ export const DAW_VIEW_STORAGE_KEY = 'apollo.dawView';
 export const DEFAULT_DAW_VIEW_SETTINGS = {
   displayMode: 'linear',
   showRms: false,
-  showClipping: false,
   stereo: false,
 };
 
@@ -15,7 +14,6 @@ export function normalizeDawViewSettings(value) {
   return {
     displayMode: mode === 'normalized' || mode === 'db' ? mode : 'linear',
     showRms: value?.showRms === true,
-    showClipping: value?.showClipping === true,
     stereo: value?.stereo === true,
   };
 }

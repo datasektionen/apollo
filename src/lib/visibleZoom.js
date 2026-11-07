@@ -40,7 +40,7 @@ export function visibleZoomViews({
     const paint = {
       height, pixelsPerMs, dpr: ratio,
       displayMode: display.displayMode || 'linear', showRms: Boolean(display.showRms),
-      showClipping: Boolean(display.showClipping), globalPeakAmplitude: display.globalPeakAmplitude || 1,
+      globalPeakAmplitude: display.globalPeakAmplitude || 1,
     };
     if (row.kind === 'group') {
       const source = groupClipsByNode?.get(row.nodeId);
@@ -116,7 +116,7 @@ function openView(view) {
         pixelsPerMs: view.pixelsPerMs,
         surfaceLeftPx: view.leftPx, surfaceWidthPx: view.widthPx, height: view.height, dpr: allocation.dpr,
         color: view.clips[0].color, displayMode: view.displayMode, globalPeakAmplitude: view.globalPeakAmplitude,
-        showRms: view.showRms, showClipping: view.showClipping,
+        showRms: view.showRms,
         fromColumn: 0, toColumn: canvas.width,
       })]
     : view.clips.map((clip) => createWaveformDrawJob(context, {
@@ -124,7 +124,7 @@ function openView(view) {
         pixelsPerMs: view.pixelsPerMs, clipLeftPx: clip.clipLeftPx, clipWidthPx: clip.clipWidthPx,
         surfaceLeftPx: view.leftPx, surfaceWidthPx: view.widthPx, height: view.height, dpr: allocation.dpr,
         color: clip.color, displayMode: view.displayMode, globalPeakAmplitude: view.globalPeakAmplitude,
-        showRms: view.showRms, showClipping: view.showClipping,
+        showRms: view.showRms,
         requestDetail: (start, end) => waveformService.requestDetail?.(clip.blobId, clip.buffer, start, end),
         fromColumn: 0, toColumn: canvas.width,
       }));

@@ -106,7 +106,7 @@ describe('Timeline integration', () => {
   it('passes source identity, viewport and fixed-scale defaults to the renderer', () => {
     const view = state.waveforms.get('clip');
     expect(view).toMatchObject({ blobId: 'clip', clipLeftPx: 0, clipWidthPx: 100, viewportLeftPx: 0,
-      viewportWidthPx: 800, pixelsPerMs: 0.1, displayMode: 'linear', showRms: false, showClipping: false });
+      viewportWidthPx: 800, pixelsPerMs: 0.1, displayMode: 'linear', showRms: false });
     expect(host.querySelector('[data-ruler-unit]').dataset.rulerUnit).toBe('clock');
     expect(host.querySelector('[data-ruler-tick="0"] span').textContent).toBe('0:00');
     expect(host.querySelector('[data-playhead="ruler"]').style.left).toBe(host.querySelector('[data-playhead="tracks"]').style.left);
@@ -126,9 +126,9 @@ describe('Timeline integration', () => {
     expect(host.querySelector('[data-waveform]').dataset.loaded).toBe('false');
     expect(pcm).not.toHaveBeenCalled();
   });
-  it('draws with the amplitude scale, RMS and over-range options it is given', async () => {
-    await render({ displayMode: 'normalized', showRms: true, showClipping: true });
-    expect(state.waveforms.get('clip')).toMatchObject({ displayMode: 'normalized', showRms: true, showClipping: true });
+  it('draws with the amplitude scale and RMS options it is given', async () => {
+    await render({ displayMode: 'normalized', showRms: true });
+    expect(state.waveforms.get('clip')).toMatchObject({ displayMode: 'normalized', showRms: true });
   });
   it('has one wheel owner, normalizes line input and accumulates a burst around the pointer', async () => {
     const scroll = tracksElement();
