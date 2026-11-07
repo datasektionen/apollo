@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import {
   ArrowLeft,
   AudioLines,
@@ -28,12 +29,14 @@ import { createTrack, createClip, normalizeExportSettings, TRACK_ROLES } from '.
 import FileImport from './FileImport';
 import TrackList from './TrackList';
 import Timeline from './Timeline';
+import { TIMELINE_RULER_HEIGHT } from '../utils/timelineViewport';
 import ExportDialog from './ExportDialog';
 import CreditsEditorDialog from './CreditsEditorDialog';
 import LyricsEditorDialog from './LyricsEditorDialog';
 import { dbToVolume, volumeToDb } from '../utils/audio';
 import { applyChoirAutoPanToProject } from '../utils/choirAutoPan';
-import { PlaybackDevicesSettingsPanel, ProjectSettingsPanel } from './SettingsPanels';
+import { DawSettingsPanel, PlaybackDevicesSettingsPanel, ProjectSettingsPanel } from './SettingsPanels';
+import { useDawViewSettings } from '../hooks/useDawViewSettings';
 import { measureRecordingRoundTrip } from '../lib/recordingLatencyCalibration';
 import { RECORDING_OFFSET_MODES } from '../utils/playbackOutput';
 import { describeRecordingDevices, resolveRecordingOffset } from '../utils/recordingDevices';
@@ -64,6 +67,7 @@ import {
   SUPPORTED_IMPORT_EXTENSIONS,
 } from '../lib/mediaEncoding';
 import { loadStemsIntoMediaCache } from '../lib/loadStemAudio';
+import { settleWaveformSources, waveformService } from '../lib/waveformService';
 import { registerAndUploadMediaBlob } from '../lib/mediaUpload';
 import {
   finishLoadProgress,
@@ -71,6 +75,7 @@ import {
   logLoadProgress,
   summarizeProjectForLoadLog,
   updateLoadProgress,
+  updateWaveformProgress,
 } from '../lib/loadProgress';
 import {
   GROUP_ROLE_CHOIRS,
@@ -292,6 +297,22 @@ function isNodeInsideGroup(project, groupNodeId, nodeId) {
   return false;
 }
 
+function waitForOpenedWaveforms(isCancelled, expectNodes) {
+  const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (isCancelled()) { resolve(); return; }
+      const nodes = [...document.querySelectorAll('[data-waveform-status]')];
+      const pending = nodes.some((node) => node.getAttribute('data-waveform-status') === 'loading');
+      const settled = expectNodes ? nodes.length > 0 && !pending : !pending;
+      const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started;
+      if (settled || elapsed > 20000) { resolve(); return; }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
 function Editor({
   onBackToDashboard,
   onSwitchToPlayerMode = null,
@@ -318,10 +339,13 @@ function Editor({
   } = useStore();
 
   const [showFileImport, setShowFileImport] = useState(false);
+  // Bumped when stop or playback end sends the playhead back to the start; the timeline follows.
+  const [returnToStartToken, setReturnToStartToken] = useState(0);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showLyricsDialog, setShowLyricsDialog] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState('playback');
+  const [dawView, setDawView] = useDawViewSettings();
   const [masterVolume, setMasterVolume] = useState(() => toFiniteNumber(project?.masterVolume, 100));
   const [masterEditTooltip, setMasterEditTooltip] = useState(null);
   const [masterDragTooltip, setMasterDragTooltip] = useState(null);
@@ -335,6 +359,9 @@ function Editor({
   const masterVolumeRef = useRef(toFiniteNumber(project?.masterVolume, 100));
   const masterAnimationFrameRef = useRef(null);
   const [mediaMap, setMediaMap] = useState(new Map());
+  const [timelineReady, setTimelineReady] = useState(
+    () => getLoadProgress()?.kind !== 'open' || getLoadProgress()?.status !== 'running'
+  );
   const [missingMediaBlobIds, setMissingMediaBlobIds] = useState(() => new Set());
   const reloadingMediaBlobIdsRef = useRef(new Set());
   const [recordingSegments, setRecordingSegments] = useState([]);
@@ -587,13 +614,19 @@ function Editor({
   const rawUpdateProject = useCallback((updater, actionDescription = 'Update', options = {}) => {
     if (!isAdvancedMixSession && !isLocalRecordingSession) {
       storeUpdateProject(updater, actionDescription, options);
-      return;
+    } else {
+      storeUpdateProject(updater, actionDescription, {
+        ...options,
+        skipAutosave: true,
+        skipDirty: true,
+      });
     }
-    storeUpdateProject(updater, actionDescription, {
-      ...options,
-      skipAutosave: true,
-      skipDirty: true,
-    });
+    if (useStore.getState().isPlaying) {
+      const nextProject = useStore.getState().project;
+      if (nextProject) {
+        audioManager.syncProjectClips(nextProject);
+      }
+    }
   }, [isAdvancedMixSession, isLocalRecordingSession, storeUpdateProject]);
 
   // Single chokepoint for every *local* edit (Editor handlers, TrackList,
@@ -1078,6 +1111,7 @@ function Editor({
     const isStale = () => (
       Boolean(options.isCancelled?.())
       || (!isolated && audioLoadGenerationRef.current !== generation)
+      || getLoadProgress()?.status === 'aborted'
     );
     const checkpoint = () => {
       if (!isStale()) return;
@@ -1172,8 +1206,25 @@ function Editor({
       if (!isolated) {
         updateLoadProgress({ current: 'Publishing media map to editor' });
       }
-      if (shouldFinish) {
-        logLoadProgress('Editor audio buffers ready; waveforms may still draw after Close');
+      if (shouldFinish && getLoadProgress()?.kind === 'open' && getLoadProgress()?.status === 'running') {
+        checkpoint();
+        updateLoadProgress({ phase: 'Waveforms', current: 'Preparing waveforms…' });
+        const releasePins = await settleWaveformSources(waveformService, blobIds.map((blobId) => ({
+          blobId,
+          audioBuffer: audioManager.mediaCache.get(blobId),
+        })), {
+          isCancelled: isStale,
+          onProgress: ({ ready, total }) => updateWaveformProgress({ ready, total }),
+        });
+        try {
+          checkpoint();
+          updateLoadProgress({ current: 'Drawing waveforms…' });
+          const expectNodes = blobIds.some((blobId) => audioManager.mediaCache.has(blobId));
+          flushSync(() => setTimelineReady(true));
+          await waitForOpenedWaveforms(isStale, expectNodes);
+        } finally {
+          releasePins();
+        }
       }
     } catch (error) {
       if (error?.name === 'StaleAudioLoad') {
@@ -1469,6 +1520,7 @@ function Editor({
             stop();
             audioManager.stop();
             setCurrentTime(0);
+            setReturnToStartToken((token) => token + 1);
             previousTimeRef.current = 0;
             return;
           }
@@ -1712,6 +1764,11 @@ function Editor({
     () => (viewProject ? normalizeTrackTree(viewProject) : null),
     [viewProject]
   );
+
+  useEffect(() => {
+    if (!isPlaying || !treeProject) return;
+    audioManager.syncProjectClips(treeProject);
+  }, [isPlaying, treeProject]);
   const timelineRows = useMemo(
     () => (treeProject ? getVisibleTimelineRows(treeProject) : []),
     [treeProject]
@@ -2213,6 +2270,7 @@ function Editor({
     const loop = projectRef.current?.loop || {};
     const startTime = loop.enabled ? loop.startMs : 0;
     setCurrentTime(startTime);
+    setReturnToStartToken((token) => token + 1);
   };
 
   /**
@@ -4151,7 +4209,7 @@ function Editor({
   }, [canEditVisibleLyrics, setLyricsLaneVisible, updateProject]);
 
   useKeyboardShortcuts({
-    enabled: !showFileImport,
+    enabled: timelineReady && !showFileImport,
     onPlayPause: handlePlay,
     onRecord: handleRecord,
     onToggleLoop: handleToggleLoop,
@@ -4167,6 +4225,10 @@ function Editor({
     onToggleFold: handleToggleSelectedGroupFold,
     onToggleFoldRecursive: handleToggleSelectedGroupFoldRecursive,
   });
+
+  if (!timelineReady) {
+    return <div className="h-full w-full bg-gray-950" data-editor-preparing="" />;
+  }
 
   return (
     <div
@@ -4669,11 +4731,30 @@ function Editor({
           showLyricsLane={lyricsTrackShown}
           canEditLyrics={canEditSyncedLyrics}
           lyricsSyncActive={lyricsSyncActive}
+          returnToStartToken={returnToStartToken}
+          displayMode={dawView.displayMode}
+          showRms={dawView.showRms}
+          stereo={dawView.stereo}
+          scaleWaveformsByGain={dawView.scaleWaveformsByGain}
+          onAddTrack={structuralEditsAllowed && caps.canCreateTracks ? handleAddEmptyTrack : null}
+          onToggleGroupCollapse={handleToggleGroupCollapse}
         >
-          {({ header, tracks, zoomOverlay, lyricsLane }) => (
-            <div className={`relative grid grid-cols-[384px_1fr] ${lyricsTrackShown ? 'grid-rows-[24px_44px_minmax(0,1fr)]' : 'grid-rows-[24px_minmax(0,1fr)]'} h-full min-h-0 min-w-0`}>
-              <div className="bg-gray-800 border-b border-r border-gray-700" />
-              <div className="relative z-50 overflow-visible min-w-0">{header}</div>
+          {({
+            header,
+            tracks,
+            zoomOverlay,
+            lyricsLane,
+            rulerTools,
+            onToggleGroupCollapse: boundToggleGroup,
+            onPreloadGroupCollapse,
+            pendingGroupCollapseId,
+          }) => (
+            <div
+              className="relative grid h-full min-h-0 min-w-0 grid-cols-[384px_1fr]"
+              style={{ gridTemplateRows: lyricsTrackShown ? `${TIMELINE_RULER_HEIGHT}px 44px minmax(0,1fr)` : `${TIMELINE_RULER_HEIGHT}px minmax(0,1fr)` }}
+            >
+              <div className="flex min-w-0 items-stretch border-b border-r border-gray-700 bg-gray-800">{rulerTools}</div>
+              <div className="relative z-50 min-w-0 overflow-hidden">{header}</div>
               {lyricsTrackShown ? (
                 <>
                   <div
@@ -4739,10 +4820,23 @@ function Editor({
                   ) : null}
                 </>
               ) : null}
-              <div className={`absolute ${lyricsTrackShown ? 'top-[76px]' : 'top-[32px]'} right-3 z-40 pointer-events-auto`}>{zoomOverlay}</div>
+              <div
+                className="pointer-events-auto absolute right-3 z-[60] -translate-y-1/2"
+                style={{ top: `${TIMELINE_RULER_HEIGHT / 2}px` }}
+              >{zoomOverlay}</div>
               <div
                 ref={timelineRowsScrollAreaRef}
-                className="col-span-2 min-h-0 overflow-y-auto scrollbar-hidden relative z-10"
+                className="col-span-2 min-h-0 overflow-y-auto scrollbar-hidden relative z-10 overscroll-none"
+                style={{ overscrollBehavior: 'none', overscrollBehaviorY: 'none' }}
+                onScroll={(e) => {
+                  if (e.currentTarget.scrollTop < 0) {
+                    e.currentTarget.scrollTop = 0;
+                  }
+                  const maxScroll = e.currentTarget.scrollHeight - e.currentTarget.clientHeight;
+                  if (maxScroll > 0 && e.currentTarget.scrollTop > maxScroll) {
+                    e.currentTarget.scrollTop = maxScroll;
+                  }
+                }}
                 onWheel={(e) => {
                   if (e.defaultPrevented) return;
                   if (isPrimaryModifierPressed(e)) return;
@@ -4792,7 +4886,9 @@ function Editor({
                       onCreateGroup={structuralEditsAllowed && caps.canManageGroups ? handleCreateGroup : null}
                       onRenameGroup={structuralEditsAllowed && caps.canManageGroups ? handleRenameGroup : null}
                       onDeleteGroup={structuralEditsAllowed && caps.canManageGroups ? handleDeleteGroup : null}
-                      onToggleGroupCollapse={handleToggleGroupCollapse}
+                      onToggleGroupCollapse={boundToggleGroup || handleToggleGroupCollapse}
+                      onPreloadGroupCollapse={onPreloadGroupCollapse}
+                      pendingGroupCollapseId={pendingGroupCollapseId}
                       advancedMixLocked={isAdvancedMixSession}
                       localSessionMode={isLocalRecordingSession}
                       canSoloTracks={canSoloTracksInProject}
@@ -4919,6 +5015,17 @@ function Editor({
                 >
                   Playback and Devices
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setSettingsTab('daw')}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    settingsTab === 'daw'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  }`}
+                >
+                  DAW
+                </button>
                 {caps.canEditProjectSettings && !isLocalRecordingSession ? (
                   <button
                     type="button"
@@ -4934,7 +5041,20 @@ function Editor({
                 ) : null}
               </div>
 
-              {settingsTab === 'playback' || !caps.canEditProjectSettings || isLocalRecordingSession ? (
+              {settingsTab === 'daw' ? (
+                <DawSettingsPanel settings={dawView} setSettings={setDawView} />
+              ) : settingsTab === 'project' && caps.canEditProjectSettings && !isLocalRecordingSession ? (
+                <ProjectSettingsPanel
+                  project={project}
+                  onSetPublished={handleSetProjectPublished}
+                  onSetAutoPanStrategy={handleSetAutoPanStrategy}
+                  onToggleAutoPanInverted={(enabled) => applyProjectAutoPanSettings(
+                    { inverted: enabled },
+                    'Update inverted auto-pan'
+                  )}
+                  onSetAutoPanManualChoirParts={handleSetAutoPanManualChoirParts}
+                />
+              ) : (
                 <PlaybackDevicesSettingsPanel
                   audioSettings={audioSettings}
                   setAudioSettings={setAudioSettings}
@@ -4947,17 +5067,6 @@ function Editor({
                   measuringRecordingDelay={measuringRecordingDelay}
                   recordingDelayError={recordingDelayError}
                   onMeasureRecordingDelay={startRecordingDelayMeasurement}
-                />
-              ) : (
-                <ProjectSettingsPanel
-                  project={project}
-                  onSetPublished={handleSetProjectPublished}
-                  onSetAutoPanStrategy={handleSetAutoPanStrategy}
-                  onToggleAutoPanInverted={(enabled) => applyProjectAutoPanSettings(
-                    { inverted: enabled },
-                    'Update inverted auto-pan'
-                  )}
-                  onSetAutoPanManualChoirParts={handleSetAutoPanManualChoirParts}
                 />
               )}
             </div>

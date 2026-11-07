@@ -5,6 +5,7 @@ import {
   FileMusic,
   Guitar,
   Headphones,
+  Loader2,
   Metronome,
   Mic,
   User,
@@ -73,6 +74,8 @@ function TrackList({
   onRenameGroup,
   onDeleteGroup,
   onToggleGroupCollapse,
+  onPreloadGroupCollapse = null,
+  pendingGroupCollapseId = null,
   advancedMixFocus = null,
   getAdvancedMixFocusMode = defaultGetAdvancedMixFocusMode,
   onToggleAdvancedTrackFocus = null,
@@ -962,12 +965,21 @@ function TrackList({
     const dragState = reorderDragRef.current;
     if (!dragState) return;
     dragState.lastY = e.clientY;
-    const deltaY = e.clientY - dragState.startY;
+    let deltaY = e.clientY - dragState.startY;
     if (!dragState.moved && Math.abs(deltaY) < 4) return;
     if (!dragState.moved) {
       setGlobalDragCursor(true);
     }
     dragState.moved = true;
+    if (dragState.rowMeta?.length) {
+      const firstRowTop = dragState.rowMeta[0].top;
+      const lastRowBottom = dragState.rowMeta[dragState.rowMeta.length - 1].bottom;
+      const originalTop = dragState.rowMeta[dragState.fromIndex]?.top ?? dragState.startY;
+      const originalBottom = originalTop + dragState.rowHeight;
+      const minDeltaY = firstRowTop - originalTop;
+      const maxDeltaY = lastRowBottom - originalBottom;
+      deltaY = Math.max(minDeltaY, Math.min(maxDeltaY, deltaY));
+    }
     const dropTarget = getDropTarget(dragState.rowMeta, dragState.fromIndex, e.clientY);
     if (!dropTarget) return;
     dragState.lastDropTarget = dropTarget;
@@ -1389,10 +1401,32 @@ function TrackList({
                           onSelectRow?.(row);
                           onToggleGroupCollapse?.(row.nodeId);
                         }}
+                        onMouseEnter={() => {
+                          if (groupCollapsed) {
+                            onPreloadGroupCollapse?.(row.nodeId);
+                          }
+                        }}
+                        onMouseMove={() => {
+                          if (groupCollapsed) {
+                            onPreloadGroupCollapse?.(row.nodeId);
+                          }
+                        }}
+                        onFocus={() => {
+                          if (groupCollapsed) {
+                            onPreloadGroupCollapse?.(row.nodeId);
+                          }
+                        }}
                         className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-600 transition-colors bg-gray-800 hover:bg-gray-600 text-gray-300"
                         title={groupCollapsed ? 'Expand group' : 'Collapse group'}
+                        aria-busy={pendingGroupCollapseId === row.nodeId}
                       >
-                        {groupCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                        {pendingGroupCollapseId === row.nodeId ? (
+                          <Loader2 size={16} className="animate-spin text-blue-400" />
+                        ) : groupCollapsed ? (
+                          <ChevronRight size={16} />
+                        ) : (
+                          <ChevronDown size={16} />
+                        )}
                       </button>
                     </div>
 

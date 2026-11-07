@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import useStore from './store/useStore';
 import Editor from './components/Editor';
 import HostedLogin from './components/HostedLogin';
@@ -136,6 +136,8 @@ function AdminAccessDenied({ onBack, onLogout }) {
 
 function App() {
   const [view, setView] = useState('player'); // 'player' | 'daw' | 'editor'
+  const openAttemptRef = useRef(0);
+  const openReturnViewRef = useRef('player');
   const [currentPath, setCurrentPath] = useState(getBrowserPath);
   const [serverSession, setServerSession] = useState(loadServerSession());
   const [authBootstrapping, setAuthBootstrapping] = useState(true);
@@ -271,13 +273,25 @@ function App() {
     }
   };
 
+  const abandonOpen = (attempt) => {
+    if (openAttemptRef.current !== attempt) return;
+    openAttemptRef.current += 1;
+    setServerLoading(false);
+    setRemoteEditorSession(null);
+    setAdvancedMixSession(null);
+    setView(openReturnViewRef.current || 'player');
+  };
+
   const handleOpenServerProject = async (projectMeta) => {
     setServerError('');
     setServerLoading(true);
+    const attempt = ++openAttemptRef.current;
+    openReturnViewRef.current = view;
     const progressId = startLoadProgress({
       kind: 'open',
       title: projectMeta?.name || 'Project',
       detail: `DAW open · ${projectMeta?.id || 'unknown id'}`,
+      onAbort: () => abandonOpen(attempt),
     });
     try {
       updateLoadProgress({ phase: 'Snapshot', current: 'Fetching project snapshot…' });
@@ -311,13 +325,15 @@ function App() {
         projectAccess: payload?.access || null,
       });
       setAdvancedMixSession(null);
+      if (openAttemptRef.current !== attempt) return;
       updateLoadProgress({
         phase: 'Audio',
-        current: 'Opening editor; loading stem audio…',
+        current: 'Loading audio…',
       });
-      logLoadProgress('Editor view opening; stem audio load continues in the editor');
+      logLoadProgress('Editor mounting under the open screen to load stems and waveforms');
       setView('editor');
     } catch (error) {
+      if (openAttemptRef.current !== attempt) return;
       setServerError(error.message || 'Failed to open project');
       finishLoadProgress(error, progressId);
     } finally {
@@ -330,10 +346,13 @@ function App() {
     if (!projectId || !mix?.id) return;
     setServerError('');
     setServerLoading(true);
+    const attempt = ++openAttemptRef.current;
+    openReturnViewRef.current = view;
     const progressId = startLoadProgress({
       kind: 'open',
       title: mix?.name || 'Advanced mix',
       detail: `Mix editor open · ${mix.id}`,
+      onAbort: () => abandonOpen(attempt),
     });
     try {
       updateLoadProgress({ phase: 'Snapshot', current: 'Fetching mix source snapshot…' });
@@ -378,13 +397,15 @@ function App() {
         sourceProjectId: projectId,
         initialControls: mixWithAdvancedState.editableMixSource.controls || null,
       });
+      if (openAttemptRef.current !== attempt) return;
       updateLoadProgress({
         phase: 'Audio',
-        current: 'Opening mix editor; loading stem audio…',
+        current: 'Loading audio…',
       });
-      logLoadProgress('Mix editor view opening; stem audio load continues in the editor');
+      logLoadProgress('Mix editor mounting under the open screen to load stems and waveforms');
       setView('editor');
     } catch (error) {
+      if (openAttemptRef.current !== attempt) return;
       setServerError(error.message || 'Failed to open mix editor');
       finishLoadProgress(error, progressId);
     } finally {

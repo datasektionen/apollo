@@ -304,9 +304,10 @@ input[type="range"].practice-diff-slider::-moz-range-thumb:hover {
 .zoom-minimal-overlay {
   display: flex;
   align-items: center;
-  padding: 4px 3px;
+  padding: 3px 2px;
   border-radius: 7px;
-  background: #1f2937;
+  background: #2b3544;
+  border: 1px solid rgba(0, 0, 0, 0.4);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
 }
 

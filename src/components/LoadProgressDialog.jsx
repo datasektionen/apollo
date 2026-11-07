@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Loader2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Loader2, X } from 'lucide-react';
 import {
+  abortLoadProgress,
   dismissLoadProgress,
   formatLoadBytes,
   formatLoadDuration,
@@ -62,11 +63,136 @@ function ProgressCount({
   );
 }
 
+function StemMeters({ stems, now }) {
+  const inCache = blobsInCache(stems);
+  const pipeline = readServerPipeline(stems, now);
+  return (
+    <>
+      <ProgressCount
+        label="Audio sources"
+        done={inCache}
+        total={stems.total || 0}
+        size="main"
+      />
+      <div className="space-y-3 border-l border-gray-800 pl-3">
+        {stems.cached > 0 ? (
+          <ProgressCount
+            label="Already loaded"
+            done={stems.cached}
+            total={stems.cached}
+          />
+        ) : null}
+        {stems.classified && stems.idbTotal > 0 ? (
+          <ProgressCount
+            label="Loaded from local database"
+            done={stems.idbLoaded || 0}
+            total={stems.idbTotal}
+          />
+        ) : null}
+        {stems.classified && stems.fetchTotal > 0 ? (
+          <div className="space-y-3">
+            <ProgressCount
+              label="Loaded from server"
+              done={stems.serverCached || 0}
+              total={stems.fetchTotal}
+            />
+            <div className="space-y-3 border-l border-gray-800 pl-3">
+              <ProgressCount
+                label="Downloaded"
+                done={stems.fetched || 0}
+                total={stems.fetchTotal}
+                tone="step"
+              />
+              <ProgressCount
+                label="Converted"
+                done={stems.converted || 0}
+                total={stems.fetchTotal}
+                tone="step"
+              />
+              {pipeline ? (
+                <p className="text-xs text-gray-500">
+                  Download busy {formatLoadDuration(pipeline.downloadBusyMs)}
+                  {' · '}
+                  Convert busy {formatLoadDuration(pipeline.convertBusyMs)}
+                  {' · '}
+                  Convert idle {formatLoadDuration(pipeline.convertIdleMs)}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {!stems.classified && stems.pendingTotal > 0 ? (
+          <ProgressCount
+            label="Loading"
+            done={stems.pendingLoaded || 0}
+            total={stems.pendingTotal}
+          />
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function OpenLoadPage({ state, now }) {
+  const elapsedMs = (state.endedAt || now) - state.startedAt;
+  const stems = state.stems || {};
+  const waveforms = state.waveforms || { ready: 0, total: 0 };
+  const running = state.status === 'running';
+  return (
+    <div className="fixed inset-0 z-[80] bg-gray-950 text-white">
+      <button
+        type="button"
+        className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-gray-200 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        onClick={() => abortLoadProgress()}
+        aria-label="Back"
+      >
+        <ArrowLeft size={16} />
+        Back
+      </button>
+      <div className="flex h-full items-center justify-center px-6">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="open-progress-title"
+          className="w-full max-w-lg space-y-5"
+        >
+          <div>
+            <div className="text-xs uppercase tracking-wide text-gray-500">
+              {state.status === 'error' ? 'Could not open project' : 'Opening project'}
+            </div>
+            <h2 id="open-progress-title" className="mt-1 truncate text-2xl font-semibold">
+              {state.title}
+            </h2>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-300">
+            {running ? <Loader2 size={16} className="animate-spin text-sky-300" /> : null}
+            <span>{state.current || 'Preparing project…'}</span>
+          </div>
+          {(stems.total > 0) ? <StemMeters stems={stems} now={now} /> : null}
+          {waveforms.total > 0 ? (
+            <ProgressCount
+              label="Waveforms"
+              done={waveforms.ready}
+              total={waveforms.total}
+              size="main"
+              tone="step"
+            />
+          ) : null}
+          {state.error ? (
+            <p className="text-sm text-red-300">{state.error}</p>
+          ) : null}
+          <div className="text-xs text-gray-500">
+            Elapsed {formatLoadDuration(elapsedMs)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PlayLoadBars({ state, now }) {
   const elapsedMs = (state.endedAt || now) - state.startedAt;
   const stems = state.stems || {};
-  const inCache = blobsInCache(stems);
-  const pipeline = readServerPipeline(stems, now);
 
   return (
     <div
@@ -104,67 +230,7 @@ function PlayLoadBars({ state, now }) {
         </div>
 
         <div className="space-y-4 px-5 py-4">
-          <ProgressCount
-            label="Audio sources"
-            done={inCache}
-            total={stems.total || 0}
-            size="main"
-          />
-          <div className="space-y-3 border-l border-gray-800 pl-3">
-            {stems.cached > 0 ? (
-              <ProgressCount
-                label="Already loaded"
-                done={stems.cached}
-                total={stems.cached}
-              />
-            ) : null}
-            {stems.classified && stems.idbTotal > 0 ? (
-              <ProgressCount
-                label="Loaded from local database"
-                done={stems.idbLoaded || 0}
-                total={stems.idbTotal}
-              />
-            ) : null}
-            {stems.classified && stems.fetchTotal > 0 ? (
-              <div className="space-y-3">
-                <ProgressCount
-                  label="Loaded from server"
-                  done={stems.serverCached || 0}
-                  total={stems.fetchTotal}
-                />
-                <div className="space-y-3 border-l border-gray-800 pl-3">
-                  <ProgressCount
-                    label="Downloaded"
-                    done={stems.fetched || 0}
-                    total={stems.fetchTotal}
-                    tone="step"
-                  />
-                  <ProgressCount
-                    label="Converted"
-                    done={stems.converted || 0}
-                    total={stems.fetchTotal}
-                    tone="step"
-                  />
-                  {pipeline ? (
-                    <p className="text-xs text-gray-500">
-                      Download busy {formatLoadDuration(pipeline.downloadBusyMs)}
-                      {' · '}
-                      Convert busy {formatLoadDuration(pipeline.convertBusyMs)}
-                      {' · '}
-                      Convert idle {formatLoadDuration(pipeline.convertIdleMs)}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-            {!stems.classified && stems.pendingTotal > 0 ? (
-              <ProgressCount
-                label="Loading"
-                done={stems.pendingLoaded || 0}
-                total={stems.pendingTotal}
-              />
-            ) : null}
-          </div>
+          <StemMeters stems={stems} now={now} />
           {state.error ? (
             <p className="text-sm text-red-300">{state.error}</p>
           ) : null}
@@ -228,6 +294,10 @@ export default function LoadProgressDialog() {
   }
 
   if (!state?.visible) return null;
+
+  if (state.presentation === 'bars' && state.kind === 'open') {
+    return <OpenLoadPage state={state} now={now} />;
+  }
 
   if (state.presentation === 'bars') {
     return <PlayLoadBars state={state} now={now} />;

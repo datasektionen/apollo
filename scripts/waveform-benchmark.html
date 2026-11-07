@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Apollo real-browser waveform benchmark</title>
+    <style>
+      #benchmark-header { height: 64px; padding: 8px 16px; color: #d1d5db; font: 13px system-ui; }
+      #benchmark-host { display: flex; flex-direction: column; width: 100%; height: calc(100vh - 64px); min-width: 0; }
+      #root { overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <header id="benchmark-header">Apollo waveform benchmark — <span id="benchmark-status">waiting for CDP runner</span><br />Synthetic audio, real Timeline / worker / Canvas 2D. Group previews are activity, not mixed output.</header>
+      <main id="benchmark-host"></main>
+    </div>
+    <script type="module" src="/scripts/waveform-benchmark.jsx"></script>
+  </body>
+</html>

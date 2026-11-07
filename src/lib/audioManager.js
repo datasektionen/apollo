@@ -25,6 +25,8 @@ import {
   prefersSoftwareFlacDecode,
 } from './mediaEncoding';
 import { logLoadProgress, shortLoadId, withLoadStep } from './loadProgress';
+import { MediaBufferCache, mediaWaveformRevision, rememberMediaRevision } from './mediaBufferCache';
+import { waveformService } from './waveformService';
 
 const MASTER_LIMITER_THRESHOLD_DB = -1;
 const MASTER_LIMITER_KNEE_DB = 0;
@@ -68,7 +70,11 @@ export class AudioManager {
     this.masterLimiterNode = null;
     this.masterCeilingNode = null;
     this.masterOutputNode = null;
-    this.mediaCache = new Map(); // blobId -> AudioBuffer
+    this.mediaCache = new MediaBufferCache({
+          onSet: (blobId, buffer, options) => waveformService.ensureSource(blobId, buffer, options),
+          onDelete: (blobId, buffer) => waveformService.releaseSource(blobId, buffer),
+          onClear: () => waveformService.clear(),
+        });
     this.activeSources = new Map(); // trackId -> { source, gainNode, panNode }
     this.isPlaying = false;
     this.startTime = 0;
@@ -96,6 +102,7 @@ export class AudioManager {
     this.boundContextStateChange = null;
     this.boundContextSinkChange = null;
     this.boundDeviceChange = null;
+    this.currentPlayOptions = null;
   }
 
   /**
@@ -234,7 +241,7 @@ export class AudioManager {
   /**
    * Load audio buffer from blob (with caching)
    */
-  async loadAudioBuffer(blobId, blob) {
+  async loadAudioBuffer(blobId, blob, media = null) {
     // Check cache
     if (this.mediaCache.has(blobId)) {
       logLoadProgress(`AudioBuffer already in RAM (${shortLoadId(blobId)})`, {
@@ -282,6 +289,7 @@ export class AudioManager {
       );
     }
 
+    rememberMediaRevision(audioBuffer, mediaWaveformRevision(media));
     this.mediaCache.set(blobId, audioBuffer);
 
     return audioBuffer;
@@ -294,6 +302,7 @@ export class AudioManager {
     const playbackRequestId = ++this.playbackRequestId;
     this.isInitializingPlayback = true;
     this.initializingPlaybackRequestId = playbackRequestId;
+    this.currentPlayOptions = options || {};
     this.stopActiveSources('Failed to replace an active audio source.', 'audio:replace-source');
 
     try {
@@ -337,6 +346,10 @@ export class AudioManager {
     if (!this.isPlaying || !this.audioContext) {
       this.pauseTime = seekMs;
       return null;
+    }
+
+    if (options && Object.keys(options).length > 0) {
+      this.currentPlayOptions = options;
     }
 
     const playbackRequestId = ++this.playbackRequestId;
@@ -463,16 +476,23 @@ export class AudioManager {
     const gainNode = this.audioContext.createGain();
     const panNode = this.audioContext.createStereoPanner();
     const nodes = {
+      clipId: clip?.id,
+      trackId: track?.id,
+      clipGainDb: Number(clip?.gainDb) || 0,
+      timelineStartMs: Number(clip?.timelineStartMs) || 0,
+      cropStartMs: Number(clip?.cropStartMs) || 0,
+      cropEndMs: Number(clip?.cropEndMs) || 0,
+      blobId: clip?.blobId,
       source: null,
       gainNode,
       panNode,
       baseGain: Number.isFinite(effectiveState?.effectiveGain)
         ? effectiveState.effectiveGain
-        : volumeToGain(track.volume),
+        : volumeToGain(track?.volume),
       clipGain: Math.pow(10, (Number(clip?.gainDb) || 0) / 20),
       effectivePan: Number.isFinite(effectiveState?.effectivePan)
         ? effectiveState.effectivePan
-        : track.pan,
+        : (track?.pan != null ? track.pan : 0),
     };
     this.applyNodeMix(nodes);
     gainNode.connect(panNode);
@@ -537,7 +557,7 @@ export class AudioManager {
     source.onended = () => {
       const current = this.activeSources.get(sourceKey);
       if (current && current.source === source) {
-        current.source = null;
+        this.disposeClipNodes(current);
         this.activeSources.delete(sourceKey);
       }
     };
@@ -577,6 +597,22 @@ export class AudioManager {
         let nodes = reuseMixNodes ? this.activeSources.get(sourceKey) : null;
         if (!nodes?.gainNode || !nodes?.panNode) {
           nodes = this.createClipMixNodes(track, clip, effectiveState);
+        } else {
+          nodes.clipId = clip.id;
+          nodes.trackId = track.id;
+          nodes.clipGainDb = Number(clip?.gainDb) || 0;
+          nodes.timelineStartMs = Number(clip?.timelineStartMs) || 0;
+          nodes.cropStartMs = Number(clip?.cropStartMs) || 0;
+          nodes.cropEndMs = Number(clip?.cropEndMs) || 0;
+          nodes.blobId = clip.blobId;
+          nodes.baseGain = Number.isFinite(effectiveState?.effectiveGain)
+            ? effectiveState.effectiveGain
+            : volumeToGain(track?.volume);
+          nodes.clipGain = Math.pow(10, (Number(clip?.gainDb) || 0) / 20);
+          nodes.effectivePan = Number.isFinite(effectiveState?.effectivePan)
+            ? effectiveState.effectivePan
+            : (track?.pan != null ? track.pan : 0);
+          this.applyNodeMix(nodes);
         }
         this.activeSources.set(sourceKey, nodes);
         if (!this.startClipSource(sourceKey, nodes, clip, schedule, at, playbackRequestId)) {
@@ -596,6 +632,156 @@ export class AudioManager {
   }
 
   /**
+   * Update clip gain in real-time without restarting playback
+   */
+  updateClipGain(trackId, clipId, gainDb) {
+    const db = Number(gainDb) || 0;
+    if (trackId && clipId) {
+      const sourceKey = this.getClipSourceKey(trackId, clipId);
+      const nodes = this.activeSources.get(sourceKey);
+      if (nodes) {
+        nodes.clipGainDb = db;
+        nodes.clipGain = Math.pow(10, db / 20);
+        this.applyNodeMix(nodes);
+        return;
+      }
+    }
+    const targetClipId = clipId || trackId;
+    for (const [sourceKey, nodes] of this.activeSources.entries()) {
+      if (nodes.clipId === targetClipId || sourceKey.endsWith(`-${targetClipId}`)) {
+        nodes.clipGainDb = db;
+        nodes.clipGain = Math.pow(10, db / 20);
+        this.applyNodeMix(nodes);
+      }
+    }
+  }
+
+  /**
+   * Synchronize active playback sources and mix nodes with the current project snapshot.
+   * Handles clip gain changes without restarting playback, stops muted/deleted clips,
+   * schedules unmuted/added clips, and reschedules retimed/cropped clips.
+   */
+  syncProjectClips(project, options = {}) {
+    if (!this.isPlaying || this.isInitializingPlayback || !this.audioContext) return;
+
+    if (!project?.tracks?.length) {
+      this.stopActiveSources('Failed to stop sources for empty project.', 'audio:sync-empty');
+      return;
+    }
+
+    const at = this.audioContext.currentTime;
+    const timeMs = Math.max(0, (at - this.startTime) * 1000);
+    const mix = getEffectiveTrackMix(project);
+    const effectiveOptions = options && Object.keys(options).length > 0
+      ? options
+      : (this.currentPlayOptions || {});
+    const liveMixableTrackIds = effectiveOptions?.liveMixableTrackIds
+      ? (effectiveOptions.liveMixableTrackIds instanceof Set
+        ? effectiveOptions.liveMixableTrackIds
+        : new Set(effectiveOptions.liveMixableTrackIds))
+      : null;
+
+    const neededKeys = new Set();
+
+    for (const track of project.tracks) {
+      const effectiveState = getPlaybackTrackState(
+        track,
+        mix.statesByTrackId.get(track.id),
+        liveMixableTrackIds
+      );
+      if (effectiveState?.schedule === false) {
+        continue;
+      }
+
+      for (const clip of track.clips || []) {
+        const sourceKey = this.getClipSourceKey(track.id, clip.id);
+        const existingNodes = this.activeSources.get(sourceKey);
+
+        if (clip.muted) {
+          if (existingNodes) {
+            this.disposeClipNodes(existingNodes, at, 'Failed to stop muted clip.', 'audio:mute-clip');
+            this.activeSources.delete(sourceKey);
+          }
+          continue;
+        }
+
+        const schedule = this.getClipSchedule(clip, timeMs);
+        if (!schedule) {
+          if (existingNodes) {
+            this.disposeClipNodes(existingNodes, at, 'Failed to stop ended clip.', 'audio:ended-clip');
+            this.activeSources.delete(sourceKey);
+          }
+          continue;
+        }
+
+        const clipTimelineStartMs = Number(clip.timelineStartMs) || 0;
+        const clipCropStartMs = Number(clip.cropStartMs) || 0;
+        const clipCropEndMs = Number(clip.cropEndMs) || 0;
+        const clipGainDb = Number(clip.gainDb) || 0;
+        const clipBlobId = clip.blobId;
+
+        const baseGain = Number.isFinite(effectiveState?.effectiveGain)
+          ? effectiveState.effectiveGain
+          : volumeToGain(track?.volume);
+        const effectivePan = Number.isFinite(effectiveState?.effectivePan)
+          ? effectiveState.effectivePan
+          : (track?.pan != null ? track.pan : 0);
+
+        if (existingNodes && existingNodes.source) {
+          const timingChanged =
+            existingNodes.timelineStartMs !== clipTimelineStartMs ||
+            existingNodes.cropStartMs !== clipCropStartMs ||
+            existingNodes.cropEndMs !== clipCropEndMs ||
+            existingNodes.blobId !== clipBlobId;
+
+          if (!timingChanged) {
+            existingNodes.clipGainDb = clipGainDb;
+            existingNodes.clipGain = Math.pow(10, clipGainDb / 20);
+            existingNodes.baseGain = baseGain;
+            existingNodes.effectivePan = effectivePan;
+            this.applyNodeMix(existingNodes);
+            neededKeys.add(sourceKey);
+            continue;
+          }
+
+          this.stopClipSource(existingNodes, at, 'Failed to stop retimed clip.', 'audio:retime-clip');
+        }
+
+        let nodes = existingNodes;
+        if (!nodes?.gainNode || !nodes?.panNode) {
+          nodes = this.createClipMixNodes(track, clip, effectiveState);
+        } else {
+          nodes.clipId = clip.id;
+          nodes.trackId = track.id;
+          nodes.clipGainDb = clipGainDb;
+          nodes.timelineStartMs = clipTimelineStartMs;
+          nodes.cropStartMs = clipCropStartMs;
+          nodes.cropEndMs = clipCropEndMs;
+          nodes.blobId = clipBlobId;
+          nodes.baseGain = baseGain;
+          nodes.clipGain = Math.pow(10, clipGainDb / 20);
+          nodes.effectivePan = effectivePan;
+          this.applyNodeMix(nodes);
+        }
+
+        this.activeSources.set(sourceKey, nodes);
+        if (this.startClipSource(sourceKey, nodes, clip, schedule, at, this.playbackRequestId)) {
+          neededKeys.add(sourceKey);
+        } else {
+          this.disposeClipNodes(nodes, at, 'Failed to start clip source.', 'audio:sync-clip-source');
+          this.activeSources.delete(sourceKey);
+        }
+      }
+    }
+
+    for (const [sourceKey, nodes] of Array.from(this.activeSources.entries())) {
+      if (neededKeys.has(sourceKey)) continue;
+      this.disposeClipNodes(nodes, at, 'Failed to discard removed audio source.', 'audio:sync-discard-source');
+      this.activeSources.delete(sourceKey);
+    }
+  }
+
+  /**
    * Stop playback
    */
   stop() {
@@ -604,6 +790,7 @@ export class AudioManager {
     this.pauseTime = 0;
     this.isInitializingPlayback = false;
     this.initializingPlaybackRequestId = null;
+    this.currentPlayOptions = null;
     this.stopActiveSources('Failed to stop an active audio source.', 'audio:stop-source');
   }
 
@@ -628,6 +815,7 @@ export class AudioManager {
     this.pauseTime = currentTimeMs;
     this.isInitializingPlayback = false;
     this.initializingPlaybackRequestId = null;
+    this.currentPlayOptions = null;
     this.stopActiveSources('Failed to pause an active audio source.', 'audio:pause-source');
   }
 
