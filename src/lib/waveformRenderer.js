@@ -562,7 +562,7 @@ export function createWaveformDrawJob(context, {
           const bottom = y(reader.min);
           if (showRms) {
             const rms = Math.sqrt(reader.sumSquares / reader.count);
-            context.globalAlpha = 0.67;
+            context.globalAlpha = 0.35;
             context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
             context.globalAlpha = 1;
             context.fillRect(x, y(rms), endX - x, Math.max(1 / dpr, y(-rms) - y(rms)));

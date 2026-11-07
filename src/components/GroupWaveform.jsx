@@ -4,7 +4,7 @@ import { waveformScheduler } from '../lib/waveformScheduler';
 import { waveformService } from '../lib/waveformService';
 import { createWaveformDrawJob, getWaveformWindow, waveformRasterBudget, WAVEFORM_OVERSCAN_PX } from '../lib/waveformRenderer';
 import { createWaveformSurface, getRetainedWindow, waveformPaintTier } from '../lib/waveformSurface';
-import { takeZoomBitmap } from '../lib/visibleZoom';
+import { hasZoomBitmap, takeZoomBitmap } from '../lib/visibleZoom';
 import { getWaveformRenderer } from '../lib/waveformFeature';
 import LegacyWaveform from './LegacyWaveform';
 import { useSurfacePlacement, useWaveformSources, useWaveformViewport } from './Waveform';
@@ -94,7 +94,20 @@ function ModernGroupWaveform({
     buffersRef.current = buffers;
   }
   const mediaBuffers = buffersRef.current;
-  const [status, setStatus] = useState('loading');
+  const [status, setStatus] = useState(() => (
+    (bitmapKey && hasZoomBitmap(bitmapKey, pixelsPerMs)) ? 'ready' : 'loading'
+  ));
+  const [showLoadingPlaceholder, setShowLoadingPlaceholder] = useState(false);
+  useEffect(() => {
+    if (status !== 'loading') {
+      setShowLoadingPlaceholder(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setShowLoadingPlaceholder(true);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [status]);
   const view = useWaveformViewport(containerRef, {
     clipLeftPx: 0, clipWidthPx: Math.max(0, viewportLeftPx + viewportWidthPx + WAVEFORM_OVERSCAN_PX),
     viewportLeftPx, viewportWidthPx,
@@ -191,7 +204,7 @@ function ModernGroupWaveform({
       requestRef.current?.();
     }
   }, [clips, mediaBuffers, pixelsPerMs]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     let cancel;
     let disposed = false;
     let surface = null;
@@ -278,6 +291,30 @@ function ModernGroupWaveform({
         return draw(budget);
       };
     };
+    function ensureSurface() {
+      if (surface || !canvas) return Boolean(surface);
+      const drawState = drawRef.current;
+      const measured = viewRef.current;
+      if (!(drawState.extentPx > 0)) return false;
+      surface = createWaveformSurface({
+        canvas, extentPx: drawState.extentPx, viewportWidthPx: measured.viewportWidthPx, height: drawState.height, dpr: measured.dpr, paint,
+      });
+      rasterBlocked = !surface;
+      if (!surface) { setStatus('limited'); return false; }
+      surfaceRef.current = surface;
+      surface.setViewport(placementRef.current.left);
+      surface.setReturnViewport(placementRef.current.returnLeft);
+      const prepared = takeZoomBitmap(bitmapKey, drawRef.current.pixelsPerMs);
+      if (prepared) {
+        surface.showPrepared({
+          extentPx: drawState.extentPx, viewportWidthPx: measured.viewportWidthPx,
+          height: drawState.height, dpr: measured.dpr, bitmap: prepared,
+        });
+        waveformRasterBudget.release(prepared.canvas);
+        seenReady = true;
+      }
+      return true;
+    }
     const statusOf = () => {
       let pending = false;
       let failed = false;
@@ -301,25 +338,8 @@ function ModernGroupWaveform({
       const update = observer.read();
       const drawState = drawRef.current;
       if (!(drawState.extentPx > 0)) { setStatus('ready'); return observer.dirty; }
-      if (!surface) {
-        const measured = viewRef.current;
-        surface = createWaveformSurface({
-          canvas, extentPx: drawState.extentPx, viewportWidthPx: measured.viewportWidthPx, height: drawState.height, dpr: measured.dpr, paint,
-        });
-        rasterBlocked = !surface;
-        if (!surface) { setStatus('limited'); return false; }
-        surfaceRef.current = surface;
-        surface.setViewport(placementRef.current.left);
-        surface.setReturnViewport(placementRef.current.returnLeft);
-        const prepared = takeZoomBitmap(bitmapKey, drawRef.current.pixelsPerMs);
-        if (prepared) {
-          surface.showPrepared({
-            extentPx: drawState.extentPx, viewportWidthPx: measured.viewportWidthPx,
-            height: drawState.height, dpr: measured.dpr, bitmap: prepared,
-          });
-          waveformRasterBudget.release(prepared.canvas);
-        }
-      } else if (update.stale) {
+      if (!ensureSurface()) return false;
+      if (update.stale) {
         // Replacements clear stale pixels at once; new summaries repaint only their clips.
         surface.clear();
         seenReady = false;
@@ -346,7 +366,8 @@ function ModernGroupWaveform({
     requestRef.current = queue;
     const unsubscribeRaster = waveformRasterBudget.subscribe(() => { if (rasterBlocked) queue(); });
     observer.invalidate();
-    setStatus('loading');
+    if (ensureSurface() && seenReady) setStatus('ready');
+    else setStatus('loading');
     queue();
     return () => {
       disposed = true;
@@ -365,10 +386,12 @@ function ModernGroupWaveform({
       style={{ position: 'relative', width: '100%', height, pointerEvents: 'none' }}>
       <canvas ref={canvasRef} width={0} height={0} aria-hidden="true" draggable={false}
         style={{ position: 'absolute', height, WebkitUserDrag: 'none' }} />
-      {(status === 'loading' || status === 'error' || status === 'limited') && view.widthPx > 0 && <span aria-hidden="true"
-        style={{ position: 'absolute', left: view.leftPx, width: view.widthPx, overflow: 'hidden', fontSize: 10, opacity: 0.65 }}>
-        {status === 'error' ? 'Group waveform unavailable' : status === 'limited' ? 'Group waveform hidden: raster memory limit' : 'Loading group activity'}
-      </span>}
+      {((status === 'error' || status === 'limited') || (status === 'loading' && showLoadingPlaceholder)) && view.widthPx > 0 && (
+        <span aria-hidden="true"
+          style={{ position: 'absolute', left: view.leftPx, width: view.widthPx, overflow: 'hidden', fontSize: 10, opacity: 0.65 }}>
+          {status === 'error' ? 'Group waveform unavailable' : status === 'limited' ? 'Group waveform hidden: raster memory limit' : 'Loading group activity'}
+        </span>
+      )}
     </div>
   );
 }

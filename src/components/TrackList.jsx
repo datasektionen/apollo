@@ -5,6 +5,7 @@ import {
   FileMusic,
   Guitar,
   Headphones,
+  Loader2,
   Metronome,
   Mic,
   User,
@@ -73,6 +74,8 @@ function TrackList({
   onRenameGroup,
   onDeleteGroup,
   onToggleGroupCollapse,
+  onPreloadGroupCollapse = null,
+  pendingGroupCollapseId = null,
   advancedMixFocus = null,
   getAdvancedMixFocusMode = defaultGetAdvancedMixFocusMode,
   onToggleAdvancedTrackFocus = null,
@@ -1389,10 +1392,32 @@ function TrackList({
                           onSelectRow?.(row);
                           onToggleGroupCollapse?.(row.nodeId);
                         }}
+                        onMouseEnter={() => {
+                          if (groupCollapsed) {
+                            onPreloadGroupCollapse?.(row.nodeId);
+                          }
+                        }}
+                        onMouseMove={() => {
+                          if (groupCollapsed) {
+                            onPreloadGroupCollapse?.(row.nodeId);
+                          }
+                        }}
+                        onFocus={() => {
+                          if (groupCollapsed) {
+                            onPreloadGroupCollapse?.(row.nodeId);
+                          }
+                        }}
                         className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-600 transition-colors bg-gray-800 hover:bg-gray-600 text-gray-300"
                         title={groupCollapsed ? 'Expand group' : 'Collapse group'}
+                        aria-busy={pendingGroupCollapseId === row.nodeId}
                       >
-                        {groupCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                        {pendingGroupCollapseId === row.nodeId ? (
+                          <Loader2 size={16} className="animate-spin text-blue-400" />
+                        ) : groupCollapsed ? (
+                          <ChevronRight size={16} />
+                        ) : (
+                          <ChevronDown size={16} />
+                        )}
                       </button>
                     </div>
 

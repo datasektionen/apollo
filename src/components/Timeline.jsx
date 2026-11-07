@@ -13,7 +13,15 @@ import Waveform from './Waveform';
 import GroupWaveform from './GroupWaveform';
 import RecordingWaveform from './RecordingWaveform';
 import { waveformService } from '../lib/waveformService';
-import { prepareVisibleZoom, releaseStoredZoomBitmaps, releaseZoomBitmaps, storeZoomBitmaps } from '../lib/visibleZoom';
+import {
+  hasZoomBitmap,
+  mergeZoomBitmaps,
+  prepareVisibleZoom,
+  releaseStoredZoomBitmaps,
+  releaseZoomBitmaps,
+  storeZoomBitmaps,
+  visibleZoomViews,
+} from '../lib/visibleZoom';
 import {
   anchoredScroll, boundedRange, centeredScroll, clampDuration, durationFromSlider, easeFollowScroll, followLanding,
   formatRulerLabel, intersectsViewport, normalizeWheel, rowAtY, rowOffsets, RULER_LABEL_HEIGHT, RULER_SEEK_HEIGHT,
@@ -107,6 +115,7 @@ function Timeline({
   showClipping = false,
   stereo = false,
   onAddTrack = null,
+  onToggleGroupCollapse = null,
   children,
 }) {
   const timelineRef = useRef(null);
@@ -1049,6 +1058,199 @@ function Timeline({
   };
   useEffect(() => () => cancelZoomRef.current?.(), []);
   useEffect(() => () => releaseStoredZoomBitmaps(), [pixelsPerMs]);
+
+  const [pendingGroupCollapseId, setPendingGroupCollapseId] = useState(null);
+  const pendingGroupCollapseIdRef = useRef(null);
+  const activePreloadRef = useRef(null);
+  const pendingTimeoutRef = useRef(null);
+
+  const getChildViewsForGroup = useCallback((groupNodeId) => {
+    if (!project?.trackTree || !project?.tracks || !(containerWidth > 0) || !(pixelsPerMs > 0)) {
+      return { views: [], expectedCount: 0 };
+    }
+    const descendantIds = getGroupDescendantTrackIdsByGroup(project).get(groupNodeId) || [];
+    if (!descendantIds.length) return { views: [], expectedCount: 0 };
+    const trackMap = new Map((project.tracks || []).map((t) => [t.id, t]));
+    const childRows = descendantIds
+      .map((tId) => trackMap.get(tId))
+      .filter(Boolean)
+      .map((track) => ({
+        kind: 'track',
+        trackId: track.id,
+        track,
+        height: getTrackHeight(track),
+      }));
+    if (!childRows.length) return { views: [], expectedCount: 0 };
+
+    const segment = scrollSegment(scrollLeft, timelineWidthPx, containerWidth, originRef.current);
+    const dpr = Math.max(1, globalThis.devicePixelRatio || 1);
+
+    let expectedCount = 0;
+    for (const row of childRows) {
+      const clips = renderedClipsByTrackId.get(row.trackId) || row.track.clips || [];
+      for (const clip of clips) {
+        const durationMs = Math.max(0, (clip.cropEndMs || 0) - (clip.cropStartMs || 0));
+        const logicalLeft = (clip.timelineStartMs || 0) * pixelsPerMs;
+        if (intersectsViewport(logicalLeft, durationMs * pixelsPerMs, segment.logical, containerWidth, 0)) {
+          expectedCount += 1;
+        }
+      }
+    }
+
+    const groupNode = (project.trackTree || []).find((node) => node.kind === 'group' && node.id === groupNodeId);
+    const groupRows = groupNode ? [{ kind: 'group', nodeId: groupNodeId, height: 80 }] : [];
+    const allRows = [...groupRows, ...childRows];
+
+    const views = visibleZoomViews({
+      rows: allRows,
+      rowTops: allRows.map((_, i) => i * 100),
+      vertical: { top: 0, height: 100000 },
+      clipsByTrack: renderedClipsByTrackId,
+      groupClipsByNode: groupTimelinePreviewByNodeId,
+      segment,
+      pixelsPerMs,
+      viewportWidth: containerWidth,
+      dpr,
+      display: {
+        displayMode,
+        showRms,
+        showClipping,
+        globalPeakAmplitude,
+        clipColor: CLIP_WAVEFORM_COLOR,
+        missingColor: MISSING_CLIP_WAVEFORM_COLOR,
+        groupColor: 'rgba(123, 173, 255, 0.75)',
+        groupMissingColor: 'rgba(248, 113, 113, 0.55)',
+        missingIds: missingMediaBlobIds,
+      },
+      getBuffer: (id) => audioManager.mediaCache.get(id),
+    });
+
+    return { views, expectedCount };
+  }, [project, containerWidth, pixelsPerMs, scrollLeft, timelineWidthPx, renderedClipsByTrackId, groupTimelinePreviewByNodeId, displayMode, showRms, showClipping, globalPeakAmplitude, missingMediaBlobIds, mediaRevision]);
+
+  const areChildViewsReady = useCallback((childState) => {
+    if (!childState) return true;
+    const { views = [], expectedCount = 0 } = Array.isArray(childState)
+      ? { views: childState, expectedCount: childState.length }
+      : childState;
+    if (expectedCount > 0 && views.length < expectedCount) return false;
+    if (!views.length) return true;
+    return views.every((v) => hasZoomBitmap(v.key, pixelsPerMs, v.cropStartMs));
+  }, [pixelsPerMs]);
+
+  const handlePreloadGroupCollapse = useCallback((groupNodeId, onDone) => {
+    const childState = getChildViewsForGroup(groupNodeId);
+    if (areChildViewsReady(childState)) {
+      onDone?.();
+      return () => {};
+    }
+    const views = childState?.views || [];
+    if (!views.length) {
+      return () => {};
+    }
+
+    if (activePreloadRef.current?.groupNodeId === groupNodeId) {
+      if (onDone) {
+        activePreloadRef.current.callbacks.add(onDone);
+      }
+      return () => {
+        if (onDone) activePreloadRef.current?.callbacks?.delete(onDone);
+      };
+    }
+
+    activePreloadRef.current?.cancel?.();
+
+    const callbacks = new Set();
+    if (onDone) callbacks.add(onDone);
+
+    const cancel = prepareVisibleZoom({
+      views,
+      tier: 0,
+      priority: 5,
+      onReady: (bitmaps) => {
+        if (bitmaps) mergeZoomBitmaps(bitmaps);
+        if (activePreloadRef.current?.cancel === cancel) {
+          activePreloadRef.current = null;
+        }
+        callbacks.forEach((cb) => {
+          try { cb(); } catch (err) { console.error(err); }
+        });
+      },
+    });
+
+    activePreloadRef.current = { groupNodeId, cancel, callbacks };
+    return () => {
+      if (onDone) callbacks.delete(onDone);
+    };
+  }, [getChildViewsForGroup, areChildViewsReady]);
+
+  const handleToggleGroupCollapseWithPreload = useCallback((groupNodeId) => {
+    const targetGroup = (project?.trackTree || []).find(
+      (node) => node.kind === 'group' && node.id === groupNodeId
+    );
+    const willCollapse = !Boolean(targetGroup?.collapsed);
+    if (willCollapse) {
+      if (pendingGroupCollapseIdRef.current === groupNodeId) {
+        pendingGroupCollapseIdRef.current = null;
+        setPendingGroupCollapseId(null);
+        clearTimeout(pendingTimeoutRef.current);
+      }
+      onToggleGroupCollapse?.(groupNodeId);
+      // Immediately queue background preload of child views so the next expand is preloaded and instant!
+      handlePreloadGroupCollapse(groupNodeId);
+      return;
+    }
+
+    if (pendingGroupCollapseIdRef.current === groupNodeId) {
+      // A click is already pending expand for this group; do not reset timeout or cancel running job
+      return;
+    }
+
+    const childState = getChildViewsForGroup(groupNodeId);
+    if (areChildViewsReady(childState)) {
+      pendingGroupCollapseIdRef.current = null;
+      setPendingGroupCollapseId(null);
+      clearTimeout(pendingTimeoutRef.current);
+      onToggleGroupCollapse?.(groupNodeId);
+      return;
+    }
+
+    pendingGroupCollapseIdRef.current = groupNodeId;
+    setPendingGroupCollapseId(groupNodeId);
+    clearTimeout(pendingTimeoutRef.current);
+    pendingTimeoutRef.current = setTimeout(() => {
+      if (pendingGroupCollapseIdRef.current === groupNodeId) {
+        pendingGroupCollapseIdRef.current = null;
+        setPendingGroupCollapseId(null);
+        onToggleGroupCollapse?.(groupNodeId);
+      }
+    }, 1500);
+
+    handlePreloadGroupCollapse(groupNodeId, () => {
+      if (pendingGroupCollapseIdRef.current === groupNodeId) {
+        clearTimeout(pendingTimeoutRef.current);
+        pendingGroupCollapseIdRef.current = null;
+        setPendingGroupCollapseId(null);
+        onToggleGroupCollapse?.(groupNodeId);
+      }
+    });
+  }, [project, onToggleGroupCollapse, getChildViewsForGroup, areChildViewsReady, handlePreloadGroupCollapse]);
+
+  useEffect(() => {
+    if (!pendingGroupCollapseId) return;
+    const childState = getChildViewsForGroup(pendingGroupCollapseId);
+    if (areChildViewsReady(childState)) {
+      clearTimeout(pendingTimeoutRef.current);
+      pendingGroupCollapseIdRef.current = null;
+      setPendingGroupCollapseId(null);
+      onToggleGroupCollapse?.(pendingGroupCollapseId);
+    }
+  }, [pendingGroupCollapseId, getChildViewsForGroup, areChildViewsReady, onToggleGroupCollapse]);
+
+  useEffect(() => () => {
+    clearTimeout(pendingTimeoutRef.current);
+    activePreloadRef.current?.cancel?.();
+  }, []);
   const applyZoomRef = useRef(applyZoomDuration);
   applyZoomRef.current = applyZoomDuration;
   const wheelZoomRef = useRef({ frame: null, duration: undefined, pointerX: 0, pending: false });
@@ -3460,7 +3662,16 @@ function Timeline({
   );
 
   if (typeof children === 'function') {
-    return children({ header, tracks, zoomOverlay, lyricsLane, rulerTools });
+    return children({
+      header,
+      tracks,
+      zoomOverlay,
+      lyricsLane,
+      rulerTools,
+      onToggleGroupCollapse: handleToggleGroupCollapseWithPreload,
+      onPreloadGroupCollapse: handlePreloadGroupCollapse,
+      pendingGroupCollapseId,
+    });
   }
 
   return (

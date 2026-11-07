@@ -7,7 +7,7 @@ import {
   createWaveformDrawJob, createWaveformSourceObserver, getWaveformWindow, waveformRasterBudget,
 } from '../lib/waveformRenderer';
 import { adoptWaveformBitmap, createWaveformSurface, getRetainedWindow, registerWaveformBitmap, waveformPaintTier } from '../lib/waveformSurface';
-import { takeZoomBitmap } from '../lib/visibleZoom';
+import { hasZoomBitmap, takeZoomBitmap } from '../lib/visibleZoom';
 
 /** Legacy callers can omit geometry. Only this compatibility path measures ancestors. */
 export function useWaveformViewport(containerRef, geometry) {
@@ -130,7 +130,20 @@ function ModernWaveform({
   const readyRef = useRef(null);
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
-  const [status, setStatus] = useState('loading');
+  const [status, setStatus] = useState(() => (
+    hasZoomBitmap(bitmapKey || clipId, pixelsPerMs, cropStartMs) ? 'ready' : 'loading'
+  ));
+  const [showLoadingPlaceholder, setShowLoadingPlaceholder] = useState(false);
+  useEffect(() => {
+    if (status !== 'loading') {
+      setShowLoadingPlaceholder(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setShowLoadingPlaceholder(true);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [status]);
   const view = useWaveformViewport(containerRef, { clipLeftPx, clipWidthPx, viewportLeftPx, viewportWidthPx });
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -317,8 +330,10 @@ function ModernWaveform({
       {/* The retained surface positions and sizes the canvas; React must not reset left/width on scroll. */}
       <canvas ref={canvasRef} width={0} height={0} aria-hidden="true" draggable={false}
         style={{ position: 'absolute', height, WebkitUserDrag: 'none' }} />
-      {status !== 'ready' && view.widthPx > 0 && <span aria-hidden="true"
-        style={{ position: 'absolute', left: view.leftPx, width: view.widthPx, overflow: 'hidden', fontSize: 10, opacity: 0.65 }}>{label}</span>}
+      {status !== 'ready' && view.widthPx > 0 && (status !== 'loading' || showLoadingPlaceholder) && (
+        <span aria-hidden="true"
+          style={{ position: 'absolute', left: view.leftPx, width: view.widthPx, overflow: 'hidden', fontSize: 10, opacity: 0.65 }}>{label}</span>
+      )}
     </div>
   );
 }

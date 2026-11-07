@@ -12,6 +12,7 @@ vi.mock('../../lib/audioManager', () => ({ audioManager: { mediaCache: Object.as
 vi.mock('../../lib/waveformService', () => ({ waveformService: {
   subscribe: (listener) => { state.sourceListeners.add(listener); return () => state.sourceListeners.delete(listener); },
   getSourceStats: state.stats,
+  getSource: vi.fn(),
 } }));
 vi.mock('../Waveform', () => ({ default: (props) => {
   state.waveforms.set(props.clipId, props);
@@ -27,6 +28,7 @@ vi.mock('../RecordingWaveform', () => ({ default: (props) => {
 } }));
 import { getWaveformWindow } from '../../lib/waveformRenderer';
 import { audioManager } from '../../lib/audioManager';
+import { waveformService } from '../../lib/waveformService';
 import Timeline from '../Timeline';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -537,5 +539,88 @@ describe('Timeline gesture completion', () => {
     await event(clipElement(), 'keydown', { key: 'ArrowRight', altKey: true });
     expect(current.tracks[0].clips[0].cropStartMs).toBe(1);
     expect(current.tracks[0].clips[0].timelineStartMs).toBe(2);
+  });
+
+  it('preloads child tracks on hover and delays expand until child tracks are ready', async () => {
+    const onToggleGroupCollapse = vi.fn();
+    const childClip = makeClip('child-clip', 0, 5000);
+    const childTrack = makeTrack('child-track', [childClip]);
+    const groupNode = { id: 'group-1', kind: 'group', name: 'Group 1', collapsed: true, parentId: null };
+    const trackNode = { id: 'track-node-1', kind: 'track', trackId: 'child-track', parentId: 'group-1' };
+    const fakeBuffer = { sampleRate: 1000, length: 5000, numberOfChannels: 1, getChannelData: () => new Float32Array(5000) };
+    state.cache.set('child-clip', fakeBuffer);
+    vi.spyOn(waveformService, 'getSource').mockReturnValue({ status: 'ready', pyramid: { numberOfChannels: 1, length: 5000, sampleRate: 1000, channels: [] } });
+
+    current = {
+      projectId: 'project',
+      tracks: [childTrack],
+      trackTree: [groupNode, trackNode],
+      loop: {},
+      lyrics: { lines: [] },
+    };
+
+    let renderProps;
+    await act(async () => {
+      root.render(
+        <Timeline
+          {...props}
+          project={current}
+          onToggleGroupCollapse={onToggleGroupCollapse}
+        >
+          {(injected) => {
+            renderProps = injected;
+            return <div>{injected.tracks}</div>;
+          }}
+        </Timeline>
+      );
+    });
+
+    expect(renderProps).toBeDefined();
+    expect(renderProps.onToggleGroupCollapse).toBeTypeOf('function');
+    expect(renderProps.onPreloadGroupCollapse).toBeTypeOf('function');
+    expect(renderProps.pendingGroupCollapseId).toBeNull();
+
+    // Fast click before preloading completes: it should NOT call onToggleGroupCollapse yet, but set pendingGroupCollapseId
+    await act(async () => {
+      renderProps.onToggleGroupCollapse('group-1');
+    });
+
+    expect(renderProps.pendingGroupCollapseId).toBe('group-1');
+    expect(onToggleGroupCollapse).not.toHaveBeenCalled();
+
+    // Clicking multiple times while already pending does not duplicate or restart
+    await act(async () => {
+      renderProps.onToggleGroupCollapse('group-1');
+      renderProps.onToggleGroupCollapse('group-1');
+    });
+    expect(renderProps.pendingGroupCollapseId).toBe('group-1');
+    expect(onToggleGroupCollapse).not.toHaveBeenCalled();
+
+    // When preloading completes, it should expand
+    // Now simulate an already-expanded group being collapsed:
+    current = {
+      ...current,
+      trackTree: [{ ...groupNode, collapsed: false }, trackNode],
+    };
+    await act(async () => {
+      root.render(
+        <Timeline
+          {...props}
+          project={current}
+          onToggleGroupCollapse={onToggleGroupCollapse}
+        >
+          {(injected) => {
+            renderProps = injected;
+            return <div>{injected.tracks}</div>;
+          }}
+        </Timeline>
+      );
+    });
+
+    // Clicking collapse on the expanded group should collapse immediately and trigger preload
+    await act(async () => {
+      renderProps.onToggleGroupCollapse('group-1');
+    });
+    expect(onToggleGroupCollapse).toHaveBeenCalledWith('group-1');
   });
 });

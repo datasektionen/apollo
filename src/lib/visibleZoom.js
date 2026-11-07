@@ -192,7 +192,10 @@ export function prepareVisibleZoom(model) {
       return false;
     }
   };
-  const cancelSchedule = waveformScheduler.schedule({}, run, { tier: 0, priority: 4 });
+  const cancelSchedule = waveformScheduler.schedule({}, run, {
+    tier: model?.tier ?? 0,
+    priority: model?.priority ?? 4,
+  });
   return () => {
     if (settled) return;
     cancelled = true;
@@ -214,6 +217,25 @@ export function storeZoomBitmaps(bitmaps) {
   stored.clear();
   if (!bitmaps) return;
   for (const [key, bitmap] of bitmaps) stored.set(key, bitmap);
+}
+
+export function mergeZoomBitmaps(bitmaps) {
+  if (!bitmaps) return;
+  for (const [key, bitmap] of bitmaps) {
+    if (stored.has(key)) {
+      waveformRasterBudget.release(stored.get(key)?.canvas);
+    }
+    stored.set(key, bitmap);
+  }
+}
+
+export function hasZoomBitmap(key, pixelsPerMs, cropStartMs) {
+  const bitmap = stored.get(key);
+  if (!bitmap) return false;
+  const scale = Math.max(bitmap.pixelsPerMs, pixelsPerMs || 0);
+  const scaleOk = pixelsPerMs > 0 && Math.abs(bitmap.pixelsPerMs - pixelsPerMs) <= 1e-4 * scale;
+  const cropOk = cropStartMs == null || bitmap.cropStartMs == null || Math.abs(bitmap.cropStartMs - cropStartMs) <= 0.05;
+  return scaleOk && cropOk;
 }
 
 export function releaseStoredZoomBitmaps() {

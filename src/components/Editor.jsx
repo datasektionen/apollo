@@ -4728,8 +4728,18 @@ function Editor({
           showClipping={dawView.showClipping}
           stereo={dawView.stereo}
           onAddTrack={structuralEditsAllowed && caps.canCreateTracks ? handleAddEmptyTrack : null}
+          onToggleGroupCollapse={handleToggleGroupCollapse}
         >
-          {({ header, tracks, zoomOverlay, lyricsLane, rulerTools }) => (
+          {({
+            header,
+            tracks,
+            zoomOverlay,
+            lyricsLane,
+            rulerTools,
+            onToggleGroupCollapse: boundToggleGroup,
+            onPreloadGroupCollapse,
+            pendingGroupCollapseId,
+          }) => (
             <div
               className="relative grid h-full min-h-0 min-w-0 grid-cols-[384px_1fr]"
               style={{ gridTemplateRows: lyricsTrackShown ? `${TIMELINE_RULER_HEIGHT}px 44px minmax(0,1fr)` : `${TIMELINE_RULER_HEIGHT}px minmax(0,1fr)` }}
@@ -4857,7 +4867,9 @@ function Editor({
                       onCreateGroup={structuralEditsAllowed && caps.canManageGroups ? handleCreateGroup : null}
                       onRenameGroup={structuralEditsAllowed && caps.canManageGroups ? handleRenameGroup : null}
                       onDeleteGroup={structuralEditsAllowed && caps.canManageGroups ? handleDeleteGroup : null}
-                      onToggleGroupCollapse={handleToggleGroupCollapse}
+                      onToggleGroupCollapse={boundToggleGroup || handleToggleGroupCollapse}
+                      onPreloadGroupCollapse={onPreloadGroupCollapse}
+                      pendingGroupCollapseId={pendingGroupCollapseId}
                       advancedMixLocked={isAdvancedMixSession}
                       localSessionMode={isLocalRecordingSession}
                       canSoloTracks={canSoloTracksInProject}
