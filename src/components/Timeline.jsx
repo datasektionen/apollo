@@ -113,6 +113,7 @@ function Timeline({
   displayMode = 'linear',
   showRms = false,
   stereo = false,
+  scaleWaveformsByGain = true,
   onAddTrack = null,
   onToggleGroupCollapse = null,
   children,
@@ -622,6 +623,10 @@ function Timeline({
           if (clip?.muted) continue;
           const durationMs = Math.max(0, (clip.cropEndMs || 0) - (clip.cropStartMs || 0));
           if (durationMs <= 0) continue;
+          const trackGain = scaleWaveformsByGain
+            ? (effectiveMix?.statesByTrackId?.get(trackId)?.effectiveGain ?? 1)
+            : 1;
+          const clipGain = scaleWaveformsByGain ? Math.pow(10, (clip.gainDb || 0) / 20) : 1;
           clips.push({
             key: `${trackId}:${clip.id}`,
             startMs: clip.timelineStartMs,
@@ -630,6 +635,7 @@ function Timeline({
             cropEndMs: clip.cropEndMs,
             sourceDurationMs: clip.sourceDurationMs,
             blobId: clip.blobId,
+            gainScale: trackGain * clipGain,
           });
         }
       }
@@ -655,7 +661,7 @@ function Timeline({
     }
 
     return byGroupNodeId;
-  }, [project, renderedClipsByTrackId]);
+  }, [project, renderedClipsByTrackId, scaleWaveformsByGain, effectiveMix]);
 
   // Calculate total timeline duration (in ms) based on furthest clip endpoint
   const rawProjectDurationMs = project.tracks.reduce((max, track) => {
@@ -1038,6 +1044,8 @@ function Timeline({
       dpr: Math.max(1, globalThis.devicePixelRatio || 1),
       display: {
         displayMode, showRms, globalPeakAmplitude,
+        scaleWaveformsByGain,
+        getTrackGain: (tId) => effectiveMix?.statesByTrackId?.get(tId)?.effectiveGain ?? 1,
         clipColor: CLIP_WAVEFORM_COLOR, missingColor: MISSING_CLIP_WAVEFORM_COLOR,
         groupColor: 'rgba(123, 173, 255, 0.75)', groupMissingColor: 'rgba(248, 113, 113, 0.55)',
         missingIds: missingMediaBlobIds,
@@ -1114,6 +1122,8 @@ function Timeline({
         displayMode,
         showRms,
         globalPeakAmplitude,
+        scaleWaveformsByGain,
+        getTrackGain: (tId) => effectiveMix?.statesByTrackId?.get(tId)?.effectiveGain ?? 1,
         clipColor: CLIP_WAVEFORM_COLOR,
         missingColor: MISSING_CLIP_WAVEFORM_COLOR,
         groupColor: 'rgba(123, 173, 255, 0.75)',
@@ -1124,7 +1134,7 @@ function Timeline({
     });
 
     return { views, expectedCount };
-  }, [project, containerWidth, pixelsPerMs, scrollLeft, timelineWidthPx, renderedClipsByTrackId, groupTimelinePreviewByNodeId, displayMode, showRms, globalPeakAmplitude, missingMediaBlobIds, mediaRevision]);
+  }, [project, containerWidth, pixelsPerMs, scrollLeft, timelineWidthPx, renderedClipsByTrackId, groupTimelinePreviewByNodeId, displayMode, showRms, globalPeakAmplitude, missingMediaBlobIds, mediaRevision, scaleWaveformsByGain, effectiveMix]);
 
   const areChildViewsReady = useCallback((childState) => {
     if (!childState) return true;
@@ -3359,8 +3369,8 @@ function Timeline({
         }}
         data-timeline-scroll="true"
         aria-label="Timeline tracks"
-        className={`${sharedVerticalScroll ? 'h-full overflow-x-auto overflow-y-hidden' : 'absolute inset-0 overflow-auto'} scrollbar-hidden w-full min-w-0 overscroll-none`}
-        style={{ overscrollBehavior: 'none', overscrollBehaviorY: 'none' }}
+        className={`${sharedVerticalScroll ? 'h-full overflow-x-auto overflow-y-hidden' : 'absolute inset-0 overflow-auto'} scrollbar-hidden w-full min-w-0 overscroll-x-none`}
+        style={{ overscrollBehaviorX: 'none' }}
         onScroll={(event) => {
           if (event.currentTarget.scrollTop < 0) {
             event.currentTarget.scrollTop = 0;
@@ -3501,6 +3511,12 @@ function Timeline({
                       const clipOnScreen = rowOnScreen && intersectsViewport(clipLeftPx, clipWidthPx, scrollLeft, containerWidth, 0);
                       const clipSide = intersectsViewport(clipLeftPx, clipWidthPx, scrollLeft, containerWidth, containerWidth);
                       const waveformTier = clipOnScreen ? 0 : rowOnScreen && clipSide ? 1 : clipSide ? 2 : 3;
+                      const trackGain = scaleWaveformsByGain
+                        ? (effectiveMix?.statesByTrackId?.get(track.id)?.effectiveGain ?? 1)
+                        : 1;
+                      const clipGainMultiplier = scaleWaveformsByGain ? Math.pow(10, (clip.gainDb || 0) / 20) : 1;
+                      const clipGainScale = trackGain * clipGainMultiplier;
+                      const clipBitmapKey = scaleWaveformsByGain ? `${clip.id}:${clipGainScale.toFixed(3)}` : clip.id;
 
                       return (
                         <div
@@ -3561,7 +3577,8 @@ function Timeline({
                               showRms={showRms}
                               stereo={stereo}
                               clipId={clip.id}
-                              bitmapKey={clip.id}
+                              bitmapKey={clipBitmapKey}
+                              gainScale={clipGainScale}
                               cropStartMs={drawCropStartMs}
                               cropEndMs={drawCropStartMs + shell.width / drawScale}
                               sourceDurationMs={clip.sourceDurationMs}

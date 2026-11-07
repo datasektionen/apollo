@@ -7,6 +7,7 @@ export const DEFAULT_DAW_VIEW_SETTINGS = {
   displayMode: 'linear',
   showRms: false,
   stereo: false,
+  scaleWaveformsByGain: true,
 };
 
 export function normalizeDawViewSettings(value) {
@@ -15,6 +16,7 @@ export function normalizeDawViewSettings(value) {
     displayMode: mode === 'normalized' || mode === 'db' ? mode : 'linear',
     showRms: value?.showRms === true,
     stereo: value?.stereo === true,
+    scaleWaveformsByGain: value?.scaleWaveformsByGain !== false,
   };
 }
 

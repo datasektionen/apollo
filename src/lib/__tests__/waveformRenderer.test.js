@@ -509,4 +509,23 @@ describe('waveform renderer', () => {
     // Initial zero line (1 call) + 2 columns * 2 calls each = 5 calls
     expect(alphas).toEqual([undefined, 0.35, 1, 0.35, 1]);
   });
+
+  it('scales waveform peaks and detail by gainScale', () => {
+    const { buffer, pyramid } = source([[0.5, -0.5, 0.5, -0.5]]);
+    const ctx1 = context();
+    finish(createWaveformDrawJob(ctx1, {
+      audioBuffer: buffer, pyramid, pixelsPerMs: 0.5,
+      clipWidthPx: 2, surfaceLeftPx: 0, surfaceWidthPx: 2, height: 100, gainScale: 1,
+    }));
+    const ctxHalf = context();
+    finish(createWaveformDrawJob(ctxHalf, {
+      audioBuffer: buffer, pyramid, pixelsPerMs: 0.5,
+      clipWidthPx: 2, surfaceLeftPx: 0, surfaceWidthPx: 2, height: 100, gainScale: 0.5,
+    }));
+    // Height is 100, center is 50.
+    const rects1 = ctx1.fillRect.mock.calls.filter((call) => call[3] > 1);
+    const rectsHalf = ctxHalf.fillRect.mock.calls.filter((call) => call[3] > 1);
+    expect(rects1[0][3]).toBe(48);
+    expect(rectsHalf[0][3]).toBe(24);
+  });
 });

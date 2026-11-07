@@ -59,6 +59,7 @@ export function visibleZoomViews({
         lane.push({
           ...audio, blobId: clip.blobId, cropStartMs: placed.cropStartMs, cropEndMs: placed.cropEndMs,
           clipLeftPx: placed.shellLeft, clipWidthPx: placed.shellWidth,
+          gainScale: clip.gainScale ?? 1,
           color: missing(clip.blobId) ? (display.groupMissingColor || display.missingColor) : display.groupColor,
         });
       }
@@ -83,11 +84,16 @@ export function visibleZoomViews({
         viewportLeftPx: segment.left - placed.shellLeft, viewportWidthPx: viewportWidth,
       });
       if (!(window.widthPx > 0)) continue;
+      const trackGain = display.scaleWaveformsByGain !== false && display.getTrackGain ? display.getTrackGain(track.id) : 1;
+      const clipGain = display.scaleWaveformsByGain !== false ? Math.pow(10, (clip.gainDb || 0) / 20) : 1;
+      const gainScale = trackGain * clipGain;
+      const viewKey = clip.bitmapKey || (display.scaleWaveformsByGain !== false ? `${clip.id}:${gainScale.toFixed(3)}` : clip.id);
       views.push({
-        ...paint, key: clip.id, leftPx: window.leftPx, widthPx: window.widthPx, cropStartMs: placed.cropStartMs,
+        ...paint, key: viewKey, leftPx: window.leftPx, widthPx: window.widthPx, cropStartMs: placed.cropStartMs,
         clips: [{
           ...audio, blobId: clip.blobId, cropStartMs: placed.cropStartMs, cropEndMs: placed.cropEndMs,
           clipLeftPx: 0, clipWidthPx: placed.shellWidth,
+          gainScale,
           color: missing(clip.blobId) ? display.missingColor : display.clipColor,
         }],
       });
@@ -111,6 +117,7 @@ function openView(view) {
           cropEndMs: clip.cropEndMs,
           clipLeftPx: clip.clipLeftPx,
           clipWidthPx: clip.clipWidthPx,
+          gainScale: clip.gainScale ?? 1,
           requestDetail: (start, end) => waveformService.requestDetail?.(clip.blobId, clip.buffer, start, end),
         })),
         pixelsPerMs: view.pixelsPerMs,
@@ -125,6 +132,7 @@ function openView(view) {
         surfaceLeftPx: view.leftPx, surfaceWidthPx: view.widthPx, height: view.height, dpr: allocation.dpr,
         color: clip.color, displayMode: view.displayMode, globalPeakAmplitude: view.globalPeakAmplitude,
         showRms: view.showRms,
+        gainScale: clip.gainScale ?? 1,
         requestDetail: (start, end) => waveformService.requestDetail?.(clip.blobId, clip.buffer, start, end),
         fromColumn: 0, toColumn: canvas.width,
       }));

@@ -13,12 +13,15 @@ const EMPTY_CLIPS = [];
 const ACTIVITY_COLOR = 'rgba(123, 173, 255, 0.75)';
 const MISSING_COLOR = 'rgba(248, 113, 113, 0.55)';
 const flaggedMissing = (ids, id) => Boolean(ids?.has?.(id) || (Array.isArray(ids) && ids.includes(id)));
-const CLIP_FIELDS = ['key', 'blobId', 'startMs', 'durationMs', 'cropStartMs', 'cropEndMs', 'sourceDurationMs'];
+const CLIP_FIELDS = ['key', 'blobId', 'startMs', 'durationMs', 'cropStartMs', 'cropEndMs', 'sourceDurationMs', 'gainScale'];
 // Segment clipping divides by the zoom, so equal clips are not always bit-identical.
 const closeMs = (a, b) => Math.abs((a || 0) - (b || 0)) < 0.05 || (a == null && b == null);
-const sameClip = (a, b) => CLIP_FIELDS.every((field) => (
-  field === 'key' || field === 'blobId' ? a[field] === b[field] : closeMs(a[field], b[field])
-));
+const closeGain = (a, b) => Math.abs((a ?? 1) - (b ?? 1)) < 1e-3;
+const sameClip = (a, b) => CLIP_FIELDS.every((field) => {
+  if (field === 'key' || field === 'blobId') return a[field] === b[field];
+  if (field === 'gainScale') return closeGain(a[field], b[field]);
+  return closeMs(a[field], b[field]);
+});
 const sameClips = (a, b) => a.length === b.length && a.every((clip, index) => sameClip(clip, b[index]));
 
 /** CSS px that a clip-list edit must repaint. A pure split or its undo keeps the lane. */
@@ -259,6 +262,7 @@ function ModernGroupWaveform({
           cropEndMs: clip.cropEndMs ?? clip.sourceDurationMs,
           clipLeftPx: start,
           clipWidthPx: end - start,
+          gainScale: clip.gainScale ?? 1,
           requestDetail: (from, to) => waveformService.requestDetail(clip.blobId, audioBuffer, from, to),
         });
       }

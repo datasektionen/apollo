@@ -4726,6 +4726,7 @@ function Editor({
           displayMode={dawView.displayMode}
           showRms={dawView.showRms}
           stereo={dawView.stereo}
+          scaleWaveformsByGain={dawView.scaleWaveformsByGain}
           onAddTrack={structuralEditsAllowed && caps.canCreateTracks ? handleAddEmptyTrack : null}
           onToggleGroupCollapse={handleToggleGroupCollapse}
         >
@@ -4835,32 +4836,6 @@ function Editor({
                     if (scrollElement && scrollElement.scrollWidth > scrollElement.clientWidth) {
                       e.preventDefault();
                       scrollElement.scrollLeft += e.shiftKey ? e.deltaY * 3 : e.deltaX;
-                    }
-                    return;
-                  }
-                  if (e.deltaY < 0) {
-                    if (e.currentTarget.scrollTop <= 0) {
-                      e.preventDefault();
-                      e.currentTarget.scrollTop = 0;
-                      return;
-                    }
-                    if (e.currentTarget.scrollTop + e.deltaY <= 0) {
-                      e.preventDefault();
-                      e.currentTarget.scrollTop = 0;
-                      return;
-                    }
-                  }
-                  const maxScrollTop = e.currentTarget.scrollHeight - e.currentTarget.clientHeight;
-                  if (maxScrollTop > 0 && e.deltaY > 0) {
-                    if (e.currentTarget.scrollTop >= maxScrollTop) {
-                      e.preventDefault();
-                      e.currentTarget.scrollTop = maxScrollTop;
-                      return;
-                    }
-                    if (e.currentTarget.scrollTop + e.deltaY >= maxScrollTop) {
-                      e.preventDefault();
-                      e.currentTarget.scrollTop = maxScrollTop;
-                      return;
                     }
                   }
                 }}

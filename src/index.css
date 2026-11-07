@@ -73,8 +73,6 @@ video {
 .scrollbar-hidden {
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* IE and Edge */
-  overscroll-behavior: none;
-  overscroll-behavior-y: none;
 }
 
 .scrollbar-hidden::-webkit-scrollbar {

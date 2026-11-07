@@ -38,6 +38,7 @@ export function adoptWaveformBitmap(surface, draw) {
     if (donor.height !== draw.height || donor.color !== draw.color || donor.displayMode !== draw.displayMode) continue;
     if (donor.showRms !== draw.showRms || donor.showSamples !== draw.showSamples) continue;
     if (donor.globalPeakAmplitude !== draw.globalPeakAmplitude) continue;
+    if ((donor.gainScale ?? 1) !== (draw.gainScale ?? 1)) continue;
     const shiftDevice = (draw.cropStartMs - donor.cropStartMs) * donor.pixelsPerMs * target.dpr;
     if (!(shiftDevice > 0.5)) continue;
     const shift = Math.round(shiftDevice);

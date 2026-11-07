@@ -423,7 +423,7 @@ export function createWaveformDrawJob(context, {
   clipLeftPx = 0, clipWidthPx, surfaceLeftPx, surfaceWidthPx, height,
   dpr = 1, color = '#4F8EF7', displayMode = 'linear', globalPeakAmplitude = 1,
   showRms = false, showSamples = false, requestDetail,
-  fromColumn = 0, toColumn = Infinity, stereo, clips,
+  fromColumn = 0, toColumn = Infinity, stereo, clips, gainScale = 1,
 }) {
   const clipEntries = Array.isArray(clips) && clips.length > 0
     ? clips
@@ -435,6 +435,7 @@ export function createWaveformDrawJob(context, {
         clipLeftPx,
         clipWidthPx,
         requestDetail,
+        gainScale,
       }] : []);
 
   if (!clipEntries.length) return () => false;
@@ -474,6 +475,7 @@ export function createWaveformDrawJob(context, {
     const firstSample = detail
       ? Math.max(cropStart, Math.floor(sampleAt(clipLeft - detailReachPx)) - 1)
       : Math.max(cropStart, Math.floor(sampleAt(clipLeft)));
+    const entryGainScale = finite(entry.gainScale, gainScale);
     let channel = 0;
     let column = firstColumn;
     let sample = firstSample;
@@ -511,10 +513,10 @@ export function createWaveformDrawJob(context, {
           if (!isStereo && entry.audioBuffer.numberOfChannels > 1) {
             const v0 = finite(pcm0[sample]);
             const v1 = finite(pcm1[sample]);
-            value = Math.abs(v0) >= Math.abs(v1) ? v0 : v1;
+            value = (Math.abs(v0) >= Math.abs(v1) ? v0 : v1) * entryGainScale;
           } else {
             const pcm = channel === 1 && entry.audioBuffer.numberOfChannels > 1 ? pcm1 : pcm0;
-            value = finite(pcm[sample]);
+            value = finite(pcm[sample]) * entryGainScale;
           }
           const x = finite(entry.clipLeftPx, 0) - surfaceLeftPx + (sample - finite(entry.cropStartMs) * sampleRate / 1000) / samplesPerPx;
           const point = { x, y: y(value) };
@@ -553,10 +555,10 @@ export function createWaveformDrawJob(context, {
           reading = false;
           column += 1;
           if (!reader.count) continue;
-          const top = y(reader.max);
-          const bottom = y(reader.min);
+          const top = y(reader.max * entryGainScale);
+          const bottom = y(reader.min * entryGainScale);
           if (showRms) {
-            const rms = Math.sqrt(reader.sumSquares / reader.count);
+            const rms = Math.sqrt(reader.sumSquares / reader.count) * entryGainScale;
             context.globalAlpha = 0.35;
             context.fillRect(x, top, endX - x, Math.max(1 / dpr, bottom - top));
             context.globalAlpha = 1;
@@ -716,11 +718,15 @@ export function createWaveformDrawJob(context, {
       let compCount = 0;
 
       for (let aIdx = 0; aIdx < active.length; aIdx += 1) {
-        const r = active[aIdx].reader;
+        const a = active[aIdx];
+        const r = a.reader;
         if (!r.count) continue;
-        if (r.max > compMax) compMax = r.max;
-        if (r.min < compMin) compMin = r.min;
-        compSumSquares += r.sumSquares;
+        const g = finite(a.entry?.gainScale, gainScale);
+        const maxVal = r.max * g;
+        const minVal = r.min * g;
+        if (maxVal > compMax) compMax = maxVal;
+        if (minVal < compMin) compMin = minVal;
+        compSumSquares += r.sumSquares * g * g;
         compCount += r.count;
       }
 
