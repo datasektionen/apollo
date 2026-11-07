@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createWaveformPersistence, normalizeWaveformRevision, validatePersistedWaveform } from '../waveformPersistence';
 import { waveformByteLength } from '../waveformData';
-import { buildPyramid, generatedBuffer } from './waveformFixtures';
+import { buildPyramid, generatedBuffer } from './helpers/waveformFixtures';
 
 const fingerprint = 'a'.repeat(64);
 function fixture() {

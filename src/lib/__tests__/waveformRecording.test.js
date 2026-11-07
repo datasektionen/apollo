@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWaveformBuilder, queryWaveformRange, validateWaveformPyramid } from '../waveformData';
 import { createWaveformService } from '../waveformService';
 import { createWaveformPersistence, validatePersistedWaveform } from '../waveformPersistence';
-import { audioBuffer, buildPyramid, generatedBuffer, referenceRange } from './waveformFixtures';
+import { audioBuffer, buildPyramid, generatedBuffer, referenceRange } from './helpers/waveformFixtures';
 
 const services = [];
 function makeService(options = {}) {

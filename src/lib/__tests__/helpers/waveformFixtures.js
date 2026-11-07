@@ -1,4 +1,4 @@
-import { createWaveformBuilder, WAVEFORM_CHUNK_SAMPLES } from '../waveformData';
+import { createWaveformBuilder, WAVEFORM_CHUNK_SAMPLES } from '../../waveformData';
 
 export function audioBuffer(channels, sampleRate = 48000) {
   const pcm = channels.map((channel) => new Float32Array(channel));

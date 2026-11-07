@@ -2,7 +2,7 @@ import { createWaveformBuilder, estimateWaveformBytes, queryWaveformRange, WAVEF
 import { waveformAmplitude } from './waveformRenderer';
 
 export const RECORDING_SUMMARY_SAMPLES_PER_TASK = 1024;
-export const RECORDING_SUMMARY_BYTES = 16 * 1024 * 1024;
+const RECORDING_SUMMARY_BYTES = 16 * 1024 * 1024;
 const empty = () => ({ min: 0, max: 0, sumSquares: 0, count: 0 });
 const finite = (value) => Number.isFinite(value) ? value : 0;
 

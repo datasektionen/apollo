@@ -1,7 +1,7 @@
 import { WAVEFORM_BASE_BLOCK_SIZE } from './waveformData';
 
 export const WAVEFORM_OVERSCAN_PX = 32;
-export const WAVEFORM_DB_FLOOR = -60;
+const WAVEFORM_DB_FLOOR = -60;
 const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
 
 /** All geometry is in timeline CSS pixels; the returned offset is local to the clip. */
@@ -28,7 +28,7 @@ export const WAVEFORM_RASTER_BYTES = 192 * 1024 * 1024;
 export const WAVEFORM_RAW_SAMPLES_PER_SLICE = 256;
 /** Per-slice ceilings when the clock does not advance; the clock normally ends a slice first. */
 export const WAVEFORM_DRAW_RAW_SAMPLES_PER_SLICE = 65536;
-export const WAVEFORM_DRAW_STEPS_PER_SLICE = 4096;
+const WAVEFORM_DRAW_STEPS_PER_SLICE = 4096;
 /** Estimated work (raw samples, plus 16 per query step) between draw-slice clock reads. */
 export const WAVEFORM_CLOCK_CHECK_WORK = 1024;
 
@@ -336,7 +336,7 @@ function createWaveformReader(pyramid, channel, audioBuffer, detail, { sumSquare
   return reader;
 }
 
-export function createWaveformCombinedReader(pyramid, audioBuffer, detail, options) {
+function createWaveformCombinedReader(pyramid, audioBuffer, detail, options) {
   const reader0 = createWaveformReader(pyramid, 0, audioBuffer, detail, options);
   const reader1 = createWaveformReader(pyramid, 1, audioBuffer, detail, options);
   const reader = {

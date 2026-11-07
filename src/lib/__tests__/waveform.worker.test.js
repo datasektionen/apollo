@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { webcrypto } from 'node:crypto';
 import { createWaveformWorkerHandler } from '../waveform.worker';
 import { createWaveformFingerprint, WAVEFORM_CHUNK_SAMPLES } from '../waveformData';
-import { buildPyramid, generatedBuffer } from './waveformFixtures';
+import { buildPyramid, generatedBuffer } from './helpers/waveformFixtures';
 
 describe('waveform worker protocol', () => {
   it('uses exactly the fallback math and canonical fingerprint, transferring only result arrays', async () => {

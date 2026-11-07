@@ -3,7 +3,7 @@ import {
 } from './db';
 import { WAVEFORM_SCHEMA_VERSION, validateWaveformPyramid, waveformByteLength, yieldWaveformTask } from './waveformData';
 
-export const DEFAULT_WAVEFORM_DISK_BYTES = 128 * 1024 * 1024;
+const DEFAULT_WAVEFORM_DISK_BYTES = 128 * 1024 * 1024;
 
 const validFingerprint = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const cacheKey = (fingerprint, baseBlockSize) => `waveform:${WAVEFORM_SCHEMA_VERSION}:${baseBlockSize}:${fingerprint}`;

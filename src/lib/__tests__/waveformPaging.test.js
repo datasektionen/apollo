@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWaveformService } from '../waveformService';
 import { createWaveformDrawJob, createWaveformRangeQuery } from '../waveformRenderer';
 import { estimateWaveformBytes } from '../waveformData';
-import { buildPyramid, generatedBuffer, referenceRange } from './waveformFixtures';
+import { buildPyramid, generatedBuffer, referenceRange } from './helpers/waveformFixtures';
 
 const services = [];
 const PAGE = 1024;

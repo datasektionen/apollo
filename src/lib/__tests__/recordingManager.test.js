@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildPyramid } from './waveformFixtures';
+import { buildPyramid } from './helpers/waveformFixtures';
 
 const SAMPLE_RATE = 48000;
 

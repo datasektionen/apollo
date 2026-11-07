@@ -3,7 +3,7 @@ import { prepareWaveformCanvas, waveformRasterBudget, WAVEFORM_OVERSCAN_PX } fro
 /** Device columns per painted strip; visible work is re-prioritized between strips. */
 export const WAVEFORM_STRIP_COLUMNS = 512;
 /** Device columns moved per scratch copy when a canvas shifts onto itself. */
-export const WAVEFORM_SHIFT_CHUNK_COLUMNS = 256;
+const WAVEFORM_SHIFT_CHUNK_COLUMNS = 256;
 
 const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
 const bitmapDonors = new Set();

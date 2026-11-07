@@ -3,7 +3,7 @@ import { webcrypto } from 'node:crypto';
 import { createWaveformService } from '../waveformService';
 import { createWaveformPersistence } from '../waveformPersistence';
 import { queryWaveformRange } from '../waveformData';
-import { buildPyramid, generatedBuffer, referenceRange } from './waveformFixtures';
+import { buildPyramid, generatedBuffer, referenceRange } from './helpers/waveformFixtures';
 
 const services = [];
 const revision = (token = 'media-v1') => ({ waveformRevision: token, blobSize: 123456, blobType: 'audio/wav' });

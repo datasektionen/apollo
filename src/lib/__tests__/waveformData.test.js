@@ -4,7 +4,7 @@ import {
   createWaveformBuilder, createWaveformFingerprint, queryWaveformRange, validateWaveformPyramid,
   chooseWaveformBlockSize, waveformByteLength, estimateWaveformBytes, WAVEFORM_CHUNK_SAMPLES, yieldWaveformTask,
 } from '../waveformData';
-import { audioBuffer, buildPyramid, generatedBuffer, referenceRange } from './waveformFixtures';
+import { audioBuffer, buildPyramid, generatedBuffer, referenceRange } from './helpers/waveformFixtures';
 
 function expectRange(actual, expected) {
   expect(actual.min).toBe(expected.min);

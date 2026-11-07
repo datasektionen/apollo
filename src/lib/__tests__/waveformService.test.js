@@ -4,7 +4,7 @@ import { createWaveformService, settleWaveformSources } from '../waveformService
 import { createWaveformWorkerHandler } from '../waveform.worker';
 import { createWaveformPersistence } from '../waveformPersistence';
 import { WAVEFORM_CHUNK_SAMPLES } from '../waveformData';
-import { audioBuffer, buildPyramid, generatedBuffer } from './waveformFixtures';
+import { audioBuffer, buildPyramid, generatedBuffer } from './helpers/waveformFixtures';
 
 const services = [];
 const makeService = (options = {}) => {

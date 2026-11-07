@@ -1,5 +1,5 @@
-export const VIEWPORT_OVERSCAN_PX = 128;
-export const MAX_SCROLL_SEGMENT_PX = 1_000_000;
+const VIEWPORT_OVERSCAN_PX = 128;
+const MAX_SCROLL_SEGMENT_PX = 1_000_000;
 
 // Rebase the native rail, not the time scale. The rail covers one segment;
 // fit/zoom can navigate globally without exceeding browser CSS dimensions.
@@ -39,11 +39,11 @@ export function anchoredScroll(anchor, pixelsPerMs, width, timelineWidth) {
   return Math.max(0, Math.min(Math.max(0, timelineWidth - width), anchor.timeMs * pixelsPerMs - anchor.x));
 }
 
-export const FOLLOW_LEAD = 0.1;
+const FOLLOW_LEAD = 0.1;
 // Per second. A small offset takes a couple of seconds to settle.
-export const FOLLOW_EASE_RATE = 0.6;
+const FOLLOW_EASE_RATE = 0.6;
 // Caps the centering speed. A playhead farther from the center takes longer to arrive.
-export const FOLLOW_MAX_CATCHUP_PX_PER_SEC = 48;
+const FOLLOW_MAX_CATCHUP_PX_PER_SEC = 48;
 
 /** The logical scroll that puts the playhead FOLLOW_LEAD into the viewport. Used when playback stops. */
 export function followLanding(playheadPx, width, timelineWidth) {
