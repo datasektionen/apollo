@@ -616,13 +616,19 @@ function Editor({
   const rawUpdateProject = useCallback((updater, actionDescription = 'Update', options = {}) => {
     if (!isAdvancedMixSession && !isLocalRecordingSession) {
       storeUpdateProject(updater, actionDescription, options);
-      return;
+    } else {
+      storeUpdateProject(updater, actionDescription, {
+        ...options,
+        skipAutosave: true,
+        skipDirty: true,
+      });
     }
-    storeUpdateProject(updater, actionDescription, {
-      ...options,
-      skipAutosave: true,
-      skipDirty: true,
-    });
+    if (useStore.getState().isPlaying) {
+      const nextProject = useStore.getState().project;
+      if (nextProject) {
+        audioManager.syncProjectClips(nextProject);
+      }
+    }
   }, [isAdvancedMixSession, isLocalRecordingSession, storeUpdateProject]);
 
   // Single chokepoint for every *local* edit (Editor handlers, TrackList,
@@ -1760,6 +1766,11 @@ function Editor({
     () => (viewProject ? normalizeTrackTree(viewProject) : null),
     [viewProject]
   );
+
+  useEffect(() => {
+    if (!isPlaying || !treeProject) return;
+    audioManager.syncProjectClips(treeProject);
+  }, [isPlaying, treeProject]);
   const timelineRows = useMemo(
     () => (treeProject ? getVisibleTimelineRows(treeProject) : []),
     [treeProject]

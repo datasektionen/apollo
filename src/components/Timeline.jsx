@@ -153,6 +153,10 @@ function Timeline({
   const [originPx, setOriginPx] = useState(0);
   const originRef = useRef(0);
   const [dragState, setDragState] = useState(null);
+  const dragStateRef = useRef(null);
+  useEffect(() => {
+    dragStateRef.current = dragState;
+  }, [dragState]);
   const [dragPreview, setDragPreview] = useState(null);
   const [selectedClipIds, setSelectedClipIds] = useState([]);
   const [selectedClipHistory, setSelectedClipHistory] = useState([]);
@@ -191,6 +195,13 @@ function Timeline({
   const clipAnimationFrameRef = useRef(null);
   const selectedClipIdSet = useMemo(() => new Set(selectedClipIds), [selectedClipIds]);
   const cancelGestures = useCallback(() => {
+    if (dragStateRef.current?.type === 'gain' && dragStateRef.current.initialByClipId && typeof audioManager.updateClipGain === 'function') {
+      Object.entries(dragStateRef.current.initialByClipId).forEach(([clipId, initial]) => {
+        if (initial && typeof initial.gainDb === 'number') {
+          audioManager.updateClipGain(initial.trackId, clipId, initial.gainDb);
+        }
+      });
+    }
     cancelledGestureRef.current = true;
     if (dragMoveRafRef.current !== null) cancelAnimationFrame(dragMoveRafRef.current);
     if (timelineSelectionRafRef.current !== null) cancelAnimationFrame(timelineSelectionRafRef.current);
@@ -2125,6 +2136,14 @@ function Timeline({
       if (!preview) return;
       dragPreviewRef.current = preview;
       setDragPreview(preview);
+      if (dragState.type === 'gain' && preview.clipPatchesById && typeof audioManager.updateClipGain === 'function') {
+        Object.entries(preview.clipPatchesById).forEach(([clipId, patch]) => {
+          if (patch && typeof patch.gainDb === 'number') {
+            const trackId = preview.targetTrackIdByClipId?.[clipId] || dragState.trackId;
+            audioManager.updateClipGain(trackId, clipId, patch.gainDb);
+          }
+        });
+      }
     };
 
     const handleMouseMove = (e) => {

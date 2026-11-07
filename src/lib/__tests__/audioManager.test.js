@@ -632,4 +632,220 @@ describe('AudioManager playback requests', () => {
     warnSpy.mockRestore();
     infoSpy.mockRestore();
   });
+
+  it('updates clip gain in real time without restarting the buffer source', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    const project = makeProject();
+    await manager.play(project, 0);
+
+    const nodes = manager.activeSources.get('track-1-clip-1');
+    expect(nodes).toBeDefined();
+    const source = nodes.source;
+    expect(source).toBeDefined();
+    const initialGain = nodes.gainNode.gain.value;
+
+    manager.updateClipGain('track-1', 'clip-1', -6);
+    expect(nodes.gainNode.gain.value).toBeCloseTo(initialGain * Math.pow(10, -6 / 20), 4);
+    expect(source.stop).not.toHaveBeenCalled();
+    expect(nodes.source).toBe(source);
+  });
+
+  it('synchronizes clip gain changes during playback without restarting source', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    const project = makeProject();
+    await manager.play(project, 0);
+
+    const nodes = manager.activeSources.get('track-1-clip-1');
+    const source = nodes.source;
+    const initialGain = nodes.gainNode.gain.value;
+
+    const updatedProject = {
+      ...project,
+      tracks: [
+        {
+          ...project.tracks[0],
+          clips: [
+            {
+              ...project.tracks[0].clips[0],
+              gainDb: -10,
+            },
+          ],
+        },
+      ],
+    };
+
+    manager.syncProjectClips(updatedProject);
+    expect(nodes.gainNode.gain.value).toBeCloseTo(initialGain * Math.pow(10, -10 / 20), 4);
+    expect(source.stop).not.toHaveBeenCalled();
+    expect(nodes.source).toBe(source);
+  });
+
+  it('stops active source and mix nodes when clip is muted during playback', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    const project = makeProject();
+    await manager.play(project, 0);
+
+    const nodes = manager.activeSources.get('track-1-clip-1');
+    const source = nodes.source;
+
+    const mutedProject = {
+      ...project,
+      tracks: [
+        {
+          ...project.tracks[0],
+          clips: [
+            {
+              ...project.tracks[0].clips[0],
+              muted: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    manager.syncProjectClips(mutedProject);
+    expect(source.stop).toHaveBeenCalled();
+    expect(manager.activeSources.has('track-1-clip-1')).toBe(false);
+  });
+
+  it('starts buffer source when clip is unmuted during playback', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    const project = makeProject();
+    project.tracks[0].clips[0].muted = true;
+    await manager.play(project, 0);
+
+    expect(manager.activeSources.has('track-1-clip-1')).toBe(false);
+
+    const unmutedProject = {
+      ...project,
+      tracks: [
+        {
+          ...project.tracks[0],
+          clips: [
+            {
+              ...project.tracks[0].clips[0],
+              muted: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    manager.syncProjectClips(unmutedProject);
+    expect(manager.activeSources.has('track-1-clip-1')).toBe(true);
+    const nodes = manager.activeSources.get('track-1-clip-1');
+    expect(nodes.source).toBeDefined();
+    expect(nodes.source.start).toHaveBeenCalled();
+  });
+
+  it('stops active source and mix nodes when clip is deleted during playback', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+
+    const project = makeProject();
+    await manager.play(project, 0);
+
+    const nodes = manager.activeSources.get('track-1-clip-1');
+    const source = nodes.source;
+
+    const deletedClipProject = {
+      ...project,
+      tracks: [
+        {
+          ...project.tracks[0],
+          clips: [],
+        },
+      ],
+    };
+
+    manager.syncProjectClips(deletedClipProject);
+    expect(source.stop).toHaveBeenCalled();
+    expect(manager.activeSources.has('track-1-clip-1')).toBe(false);
+  });
+
+  it('re-schedules buffer source when clip timing or crop changes during playback', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 5 });
+
+    const project = makeProject();
+    project.tracks[0].clips[0].cropEndMs = 5000;
+    await manager.play(project, 0);
+
+    const oldNodes = manager.activeSources.get('track-1-clip-1');
+    const oldSource = oldNodes.source;
+
+    const retimedProject = {
+      ...project,
+      tracks: [
+        {
+          ...project.tracks[0],
+          clips: [
+            {
+              ...project.tracks[0].clips[0],
+              cropStartMs: 1000,
+            },
+          ],
+        },
+      ],
+    };
+
+    manager.syncProjectClips(retimedProject);
+    expect(oldSource.stop).toHaveBeenCalled();
+    const currentNodes = manager.activeSources.get('track-1-clip-1');
+    expect(currentNodes.source).toBeDefined();
+    expect(currentNodes.source).not.toBe(oldSource);
+    expect(currentNodes.cropStartMs).toBe(1000);
+  });
+
+  it('starts source when a new clip is added during playback', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 2 });
+    manager.mediaCache.set('blob-2', { duration: 3 });
+
+    const project = makeProject();
+    await manager.play(project, 0);
+
+    const addedClipProject = {
+      ...project,
+      tracks: [
+        {
+          ...project.tracks[0],
+          clips: [
+            ...project.tracks[0].clips,
+            {
+              id: 'clip-2',
+              blobId: 'blob-2',
+              timelineStartMs: 0,
+              cropStartMs: 0,
+              cropEndMs: 3000,
+              gainDb: 0,
+              muted: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    manager.syncProjectClips(addedClipProject);
+    expect(manager.activeSources.has('track-1-clip-1')).toBe(true);
+    expect(manager.activeSources.has('track-1-clip-2')).toBe(true);
+    const clip2Nodes = manager.activeSources.get('track-1-clip-2');
+    expect(clip2Nodes.source).toBeDefined();
+    expect(clip2Nodes.source.start).toHaveBeenCalled();
+  });
 });

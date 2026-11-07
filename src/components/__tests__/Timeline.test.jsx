@@ -6,9 +6,13 @@ const state = vi.hoisted(() => ({
   cache: new Map(), mediaListeners: new Set(), sourceListeners: new Set(), waveforms: new Map(), groups: [], recordings: [],
   stats: vi.fn(() => ({ sourcePeak: 2 })),
 }));
-vi.mock('../../lib/audioManager', () => ({ audioManager: { mediaCache: Object.assign(state.cache, {
-  subscribe: (listener) => { state.mediaListeners.add(listener); return () => state.mediaListeners.delete(listener); },
-}) } }));
+vi.mock('../../lib/audioManager', () => ({ audioManager: {
+  mediaCache: Object.assign(state.cache, {
+    subscribe: (listener) => { state.mediaListeners.add(listener); return () => state.mediaListeners.delete(listener); },
+  }),
+  updateClipGain: vi.fn(),
+  syncProjectClips: vi.fn(),
+} }));
 vi.mock('../../lib/waveformService', () => ({ waveformService: {
   subscribe: (listener) => { state.sourceListeners.add(listener); return () => state.sourceListeners.delete(listener); },
   getSourceStats: state.stats,
