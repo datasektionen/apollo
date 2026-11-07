@@ -3154,7 +3154,7 @@ function Timeline({
         <div
           ref={lyricsPlayheadRef}
           data-playhead="lyrics"
-          className="pointer-events-none absolute top-0 z-20 h-full w-px bg-red-500"
+          className="pointer-events-none absolute top-0 z-20 h-full w-px bg-gray-200"
           style={{ left: shownPlayheadLeft }}
         />
     </div>
@@ -3266,9 +3266,34 @@ function Timeline({
       <div
         ref={rulerPlayheadRef}
         data-playhead="ruler"
-        className="pointer-events-none absolute top-0 z-10 w-px bg-red-500"
-        style={{ left: shownPlayheadLeft, height: TIMELINE_RULER_HEIGHT }}
-      />
+        className="pointer-events-none absolute z-10 w-px"
+        style={{
+          left: shownPlayheadLeft,
+          top: RULER_LABEL_HEIGHT,
+          height: RULER_SEEK_HEIGHT,
+        }}
+      >
+        <div
+          className="pointer-events-none absolute top-0 -translate-x-1/2"
+          style={{ left: '0.5px', width: 15, height: 16 }}
+        >
+          <svg
+            width="15"
+            height="16"
+            viewBox="0 0 15 16"
+            style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))' }}
+          >
+            <polygon
+              points="0.5,0.5 14.5,0.5 14.5,8.5 7.5,15.5 0.5,8.5"
+              fill="#e5e7eb"
+              stroke="#374151"
+              strokeWidth="1"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+        <div className="h-full w-px bg-gray-200" />
+      </div>
       <div
         data-ruler-labels
         data-ruler-unit={ruler.unit}
@@ -3336,8 +3361,12 @@ function Timeline({
         }}
         data-timeline-scroll="true"
         aria-label="Timeline tracks"
-        className={`${sharedVerticalScroll ? 'h-full overflow-x-auto overflow-y-hidden' : 'absolute inset-0 overflow-auto'} scrollbar-hidden w-full min-w-0`}
+        className={`${sharedVerticalScroll ? 'h-full overflow-x-auto overflow-y-hidden' : 'absolute inset-0 overflow-auto'} scrollbar-hidden w-full min-w-0 overscroll-none`}
+        style={{ overscrollBehavior: 'none', overscrollBehaviorY: 'none' }}
         onScroll={(event) => {
+          if (event.currentTarget.scrollTop < 0) {
+            event.currentTarget.scrollTop = 0;
+          }
           handleNativeScroll(event.currentTarget);
           if (!sharedVerticalScroll) onVerticalScroll?.(event.currentTarget.scrollTop);
         }}
@@ -3654,7 +3683,7 @@ function Timeline({
         <div
           ref={tracksPlayheadRef}
           data-playhead="tracks"
-          className="absolute top-0 bottom-0 w-px bg-red-500"
+          className="absolute top-0 bottom-0 w-px bg-gray-200"
           style={{ left: shownPlayheadLeft }}
         />
       </div>
@@ -3676,7 +3705,7 @@ function Timeline({
 
   return (
     <div className={`${sharedVerticalScroll ? '' : 'flex-1'} flex flex-col bg-gray-900 ${sharedVerticalScroll ? '' : 'overflow-hidden'} relative`} style={{ minWidth: 0 }}>
-      <div className="absolute right-3 z-50" style={{ top: TIMELINE_RULER_HEIGHT + 12 }}>{zoomOverlay}</div>
+      <div className="absolute right-3 z-50 -translate-y-1/2" style={{ top: `${TIMELINE_RULER_HEIGHT / 2}px` }}>{zoomOverlay}</div>
       {header}
       {lyricsLane}
       {tracks}

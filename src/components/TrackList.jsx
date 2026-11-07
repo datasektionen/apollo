@@ -965,12 +965,21 @@ function TrackList({
     const dragState = reorderDragRef.current;
     if (!dragState) return;
     dragState.lastY = e.clientY;
-    const deltaY = e.clientY - dragState.startY;
+    let deltaY = e.clientY - dragState.startY;
     if (!dragState.moved && Math.abs(deltaY) < 4) return;
     if (!dragState.moved) {
       setGlobalDragCursor(true);
     }
     dragState.moved = true;
+    if (dragState.rowMeta?.length) {
+      const firstRowTop = dragState.rowMeta[0].top;
+      const lastRowBottom = dragState.rowMeta[dragState.rowMeta.length - 1].bottom;
+      const originalTop = dragState.rowMeta[dragState.fromIndex]?.top ?? dragState.startY;
+      const originalBottom = originalTop + dragState.rowHeight;
+      const minDeltaY = firstRowTop - originalTop;
+      const maxDeltaY = lastRowBottom - originalBottom;
+      deltaY = Math.max(minDeltaY, Math.min(maxDeltaY, deltaY));
+    }
     const dropTarget = getDropTarget(dragState.rowMeta, dragState.fromIndex, e.clientY);
     if (!dropTarget) return;
     dragState.lastDropTarget = dropTarget;

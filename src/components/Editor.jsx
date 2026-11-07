@@ -4812,12 +4812,22 @@ function Editor({
                 </>
               ) : null}
               <div
-                className="pointer-events-auto absolute right-3 z-40"
-                style={{ top: (lyricsTrackShown ? TIMELINE_RULER_HEIGHT + 44 : TIMELINE_RULER_HEIGHT) + 8 }}
+                className="pointer-events-auto absolute right-3 z-[60] -translate-y-1/2"
+                style={{ top: `${TIMELINE_RULER_HEIGHT / 2}px` }}
               >{zoomOverlay}</div>
               <div
                 ref={timelineRowsScrollAreaRef}
-                className="col-span-2 min-h-0 overflow-y-auto scrollbar-hidden relative z-10"
+                className="col-span-2 min-h-0 overflow-y-auto scrollbar-hidden relative z-10 overscroll-none"
+                style={{ overscrollBehavior: 'none', overscrollBehaviorY: 'none' }}
+                onScroll={(e) => {
+                  if (e.currentTarget.scrollTop < 0) {
+                    e.currentTarget.scrollTop = 0;
+                  }
+                  const maxScroll = e.currentTarget.scrollHeight - e.currentTarget.clientHeight;
+                  if (maxScroll > 0 && e.currentTarget.scrollTop > maxScroll) {
+                    e.currentTarget.scrollTop = maxScroll;
+                  }
+                }}
                 onWheel={(e) => {
                   if (e.defaultPrevented) return;
                   if (isPrimaryModifierPressed(e)) return;
@@ -4826,6 +4836,32 @@ function Editor({
                     if (scrollElement && scrollElement.scrollWidth > scrollElement.clientWidth) {
                       e.preventDefault();
                       scrollElement.scrollLeft += e.shiftKey ? e.deltaY * 3 : e.deltaX;
+                    }
+                    return;
+                  }
+                  if (e.deltaY < 0) {
+                    if (e.currentTarget.scrollTop <= 0) {
+                      e.preventDefault();
+                      e.currentTarget.scrollTop = 0;
+                      return;
+                    }
+                    if (e.currentTarget.scrollTop + e.deltaY <= 0) {
+                      e.preventDefault();
+                      e.currentTarget.scrollTop = 0;
+                      return;
+                    }
+                  }
+                  const maxScrollTop = e.currentTarget.scrollHeight - e.currentTarget.clientHeight;
+                  if (maxScrollTop > 0 && e.deltaY > 0) {
+                    if (e.currentTarget.scrollTop >= maxScrollTop) {
+                      e.preventDefault();
+                      e.currentTarget.scrollTop = maxScrollTop;
+                      return;
+                    }
+                    if (e.currentTarget.scrollTop + e.deltaY >= maxScrollTop) {
+                      e.preventDefault();
+                      e.currentTarget.scrollTop = maxScrollTop;
+                      return;
                     }
                   }
                 }}
