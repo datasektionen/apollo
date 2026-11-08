@@ -24,6 +24,12 @@ import {
 import { BrandWordmark } from './BrandLogo';
 import { PlayerSearchBar, PlayerSearchResults, usePlayerSearchResults } from './PlayerSearch';
 import { PlayerLibrarySidebar } from './PlayerLibrarySidebar';
+import { PlayerControlsSidebar } from './PlayerControlsSidebar';
+import {
+  formatPlaybackSpeed,
+  getNextPlaybackSpeed,
+  parsePlaybackSpeedInput,
+} from '../utils/playerControlsSidebar';
 import PlayerLyricsView from './PlayerLyricsView';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
 import {
@@ -566,6 +572,7 @@ function PlayerDashboard({
   const [practiceFocusControl, setPracticeFocusControl] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.practiceFocusControl);
   const [hasRealtimeMetronome, setHasRealtimeMetronome] = useState(false);
   const [metronomeVolume, setMetronomeVolume] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeVolume);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mainPanelView, setMainPanelView] = useState('library');
   const [lyricsViewOpen, setLyricsViewOpen] = useState(false);
@@ -1027,6 +1034,9 @@ function PlayerDashboard({
       next = Math.max(min, Math.min(max, next));
       if (step >= 1) {
         next = Math.round(next);
+      } else if (step > 0) {
+        const factor = Math.round(1 / step);
+        next = Math.round(next * factor) / factor;
       }
       if (Math.abs(next - sliderDragRef.current.lastValue) < 1e-6) {
         if (kind === 'focus') {
@@ -1048,6 +1058,8 @@ function PlayerDashboard({
         return;
       } else if (kind === 'pan') {
         setPracticePanRange(next);
+      } else if (kind === 'speed') {
+        setPlaybackSpeed(next);
       }
       setSliderDragTooltip({ kind, value: next });
     };
@@ -1702,6 +1714,11 @@ function PlayerDashboard({
     setPracticePanRange(distToMax >= distToMin ? 200 : 0);
   }, [isRendering, practicePanRange]);
 
+  const handleTogglePlaybackSpeed = useCallback(() => {
+    if (isRendering) return;
+    setPlaybackSpeed((previous) => getNextPlaybackSpeed(previous));
+  }, [isRendering]);
+
   const beginSliderDrag = useCallback((event, config) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -1738,6 +1755,9 @@ function PlayerDashboard({
     if (kind === 'master' || kind === 'metronome') {
       return `${Math.round(Math.max(0, Math.min(100, value)))}`;
     }
+    if (kind === 'speed') {
+      return formatPlaybackSpeed(value);
+    }
     if (kind === 'focus') {
       const step = getPracticeFocusStep(value);
       if (step === 'omitted') return 'Omitted';
@@ -1749,6 +1769,9 @@ function PlayerDashboard({
 
   const parseSliderInput = useCallback((kind, rawText) => {
     const text = String(rawText || '').trim();
+    if (kind === 'speed') {
+      return parsePlaybackSpeedInput(text);
+    }
     if (kind === 'master' || kind === 'metronome') {
       if (!text) return null;
       const parsed = Number.parseFloat(text);
@@ -1794,6 +1817,7 @@ function PlayerDashboard({
       if (sliderEditTooltip.kind === 'metronome') setMetronomeVolume(nextValue);
       if (sliderEditTooltip.kind === 'focus') setPracticeFocusControl(nextValue);
       if (sliderEditTooltip.kind === 'pan') setPracticePanRange(nextValue);
+      if (sliderEditTooltip.kind === 'speed') setPlaybackSpeed(nextValue);
     }
     setSliderEditTooltip(null);
   }, [parseSliderInput, sliderEditTooltip]);
@@ -2157,11 +2181,21 @@ function PlayerDashboard({
   const isMuted = volume <= 0;
   const isMetronomeMuted = metronomeVolume <= 0;
   const VolumeIcon = isMuted ? VolumeX : Volume2;
-  const practiceControlItem = realtimePlaybackRef.current?.item;
-  const practiceControlsEnabled = isPracticePresetId(practiceControlItem?.presetId)
-    || isAdvancedMixPreset(practiceControlItem?.presetId)
-    || isGroupMixPresetId(practiceControlItem?.presetId);
-  const metronomeControlsEnabled = hasRealtimeMetronome;
+  const hasActiveSong = Boolean(
+    (activeQueueItems.length > 0 && activeIndex >= 0 && activeQueueItem)
+    || realtimePlaybackRef.current?.item
+    || nowPlayingLabel
+  );
+  const practiceControlItem = realtimePlaybackRef.current?.item || activeQueueItem;
+  const practiceControlsEnabled = Boolean(
+    hasActiveSong && (
+      isPracticePresetId(practiceControlItem?.presetId)
+      || isAdvancedMixPreset(practiceControlItem?.presetId)
+      || isGroupMixPresetId(practiceControlItem?.presetId)
+    )
+  );
+  const metronomeControlsEnabled = Boolean(hasActiveSong && hasRealtimeMetronome);
+  const speedControlsEnabled = Boolean(hasActiveSong);
   const focusControlDisabled = !practiceControlsEnabled || isRendering;
   const focusStep = getPracticeFocusStep(practiceFocusControl);
   const focusSliderPosition = getPracticeFocusSliderPosition(practiceFocusControl);
@@ -2202,6 +2236,23 @@ function PlayerDashboard({
   const FocusIcon = focusStep === 'omitted'
     ? HeadphoneOff
     : (focusStep === 'solo' ? Headphones : Scale);
+
+  const handleFocusSliderClick = useCallback((event) => {
+    if (focusControlDisabled) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relative = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
+    const clamped = Math.max(0, Math.min(100, relative));
+    const nextFocusIndex = resolvePracticeFocusIndexFromSlider(clamped);
+    setPracticeFocusControl(nextFocusIndex);
+    beginSliderDrag(event, {
+      kind: 'focus',
+      value: getPracticeFocusSliderPosition(nextFocusIndex),
+      min: 0,
+      max: 100,
+      step: 1,
+      disabled: false,
+    });
+  }, [beginSliderDrag, focusControlDisabled, getPracticeFocusSliderPosition, resolvePracticeFocusIndexFromSlider]);
 
   useEffect(() => {
     if (panControlDisabled && sliderDragTooltip?.kind === 'pan') {
@@ -3158,6 +3209,39 @@ function PlayerDashboard({
                 </>
               )}
             </div>
+
+            <PlayerControlsSidebar
+              speedControlsEnabled={speedControlsEnabled}
+              playbackSpeed={playbackSpeed}
+              onToggleSpeed={handleTogglePlaybackSpeed}
+              metronomeControlsEnabled={metronomeControlsEnabled}
+              metronomeVolume={metronomeVolume}
+              isMetronomeMuted={isMetronomeMuted}
+              onToggleMetronomeMute={handleToggleMetronomeMute}
+              practiceControlsEnabled={practiceControlsEnabled}
+              practiceFocusControl={practiceFocusControl}
+              focusControlDisabled={focusControlDisabled}
+              focusStep={focusStep}
+              focusSliderPosition={focusSliderPosition}
+              onTogglePracticeFocus={handleTogglePracticeFocus}
+              onFocusSliderClick={handleFocusSliderClick}
+              practicePanRange={practicePanRange}
+              panControlDisabled={panControlDisabled}
+              showPanRangeHighlight={showPanRangeHighlight}
+              practicePanHighlightPixel={practicePanHighlightPixel}
+              practicePanKnobPixel={practicePanKnobPixel}
+              showPanFocusAxisMarker={showPanFocusAxisMarker}
+              practicePanFocusAxisPixel={practicePanFocusAxisPixel}
+              onTogglePracticePanRange={handleTogglePracticePanRange}
+              isRendering={isRendering}
+              sliderDragTooltip={sliderDragTooltip}
+              sliderEditTooltip={sliderEditTooltip}
+              beginSliderDrag={beginSliderDrag}
+              openSliderEdit={openSliderEdit}
+              commitSliderEdit={commitSliderEdit}
+              setSliderEditTooltip={setSliderEditTooltip}
+              formatSliderValue={formatSliderValue}
+            />
           </div>
         </div>
       </div>
@@ -3546,14 +3630,14 @@ function PlayerDashboard({
       ) : null}
 
       <div className="bg-gray-850 px-6 pt-1 pb-3">
-        <div className="grid min-h-[127px] grid-cols-[minmax(0,1fr)_minmax(380px,760px)_minmax(0,1fr)] items-center gap-4">
+        <div className="grid min-h-[92px] grid-cols-[minmax(0,1fr)_minmax(380px,760px)_minmax(0,1fr)] items-center gap-4">
           <div className="min-w-0 text-lg font-semibold text-gray-200">
             <div className="truncate" title={nowPlayingLabel || activeQueueItem?.name || ''}>
               {nowPlayingLabel || activeQueueItem?.name || ''}
             </div>
           </div>
 
-	          <div className="flex min-h-[127px] w-full flex-col justify-center">
+	          <div className="flex min-h-[92px] w-full flex-col justify-center">
 	            <div className="flex items-center justify-center gap-4 flex-wrap">
 	              <div className="flex items-center justify-center gap-3">
 	                <button
@@ -3617,7 +3701,7 @@ function PlayerDashboard({
             </div>
           </div>
 
-          <div className="flex min-h-[127px] items-center justify-end gap-4">
+          <div className="flex items-center justify-end gap-4">
             <button
               type="button"
               onClick={handleToggleLyricsView}
@@ -3629,9 +3713,9 @@ function PlayerDashboard({
             >
               <MicVocal size={20} />
             </button>
-            <div className="flex min-h-[127px] flex-col items-end justify-center gap-[5px]">
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={handleToggleMute}
                 className="text-gray-400 hover:text-gray-200 transition-colors"
                 title={isMuted ? 'Unmute' : 'Mute'}
@@ -3676,262 +3760,20 @@ function PlayerDashboard({
                     onFocus={(event) => event.target.select()}
                     onBlur={commitSliderEdit}
                     onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      event.currentTarget.blur();
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        event.currentTarget.blur();
                       } else if (event.key === 'Escape') {
                         event.preventDefault();
-                      setSliderEditTooltip(null);
-                    }
-                  }}
+                        setSliderEditTooltip(null);
+                      }
+                    }}
                     className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
                     style={{ marginBottom: '1px' }}
                     autoFocus
                   />
                 )}
               </div>
-            </div>
-
-            {metronomeControlsEnabled ? (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleToggleMetronomeMute}
-                  disabled={isRendering}
-                  className={`text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 ${
-                    isMetronomeMuted ? 'text-gray-500' : ''
-                  }`}
-                  title={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
-                >
-                  <Metronome size={20} />
-                </button>
-                <div className="relative w-40 h-7">
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={metronomeVolume}
-                    readOnly
-                    onMouseDown={(event) => beginSliderDrag(event, {
-                      kind: 'metronome',
-                      value: metronomeVolume,
-                      min: 0,
-                      max: 100,
-                      step: 1,
-                      disabled: isRendering,
-                    })}
-                    onDoubleClick={() => openSliderEdit('metronome', metronomeVolume, isRendering)}
-                    className="w-40 h-7 volume-slider volume-slider-lg cursor-pointer block"
-                    title="Metronome level (double-click for numeric input)"
-                  />
-                  {sliderDragTooltip?.kind === 'metronome' && (
-                    <div
-                      className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
-                      style={{ marginBottom: '1px' }}
-                    >
-                      {formatSliderValue('metronome', Number(sliderDragTooltip.value))}
-                    </div>
-                  )}
-                  {sliderEditTooltip?.kind === 'metronome' && (
-                    <input
-                      type="text"
-                      value={sliderEditTooltip.text}
-                      onChange={(event) => setSliderEditTooltip((previous) => (
-                        previous ? { ...previous, text: event.target.value } : previous
-                      ))}
-                      onFocus={(event) => event.target.select()}
-                      onBlur={commitSliderEdit}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                        } else if (event.key === 'Escape') {
-                          event.preventDefault();
-                          setSliderEditTooltip(null);
-                        }
-                      }}
-                      className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
-                      style={{ marginBottom: '1px' }}
-                      autoFocus
-                    />
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            {practiceControlsEnabled ? (
-              <>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleTogglePracticeFocus}
-                        disabled={focusControlDisabled}
-                        className="text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Cycle practice focus: stored dB → Solo → Omitted"
-                      >
-                        <FocusIcon size={20} />
-                      </button>
-                      <div
-                        className={`relative w-40 h-7 ${focusControlDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-                        onMouseDown={(event) => {
-                          if (event.detail > 1) return;
-                          if (focusControlDisabled) return;
-                          const rect = event.currentTarget.getBoundingClientRect();
-                          const relative = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
-                          const clamped = Math.max(0, Math.min(100, relative));
-                          const nextFocusIndex = resolvePracticeFocusIndexFromSlider(clamped);
-                          setPracticeFocusControl(nextFocusIndex);
-                          beginSliderDrag(event, {
-                            kind: 'focus',
-                            value: getPracticeFocusSliderPosition(nextFocusIndex),
-                            min: 0,
-                            max: 100,
-                            step: 1,
-                            disabled: false,
-                          });
-                        }}
-                        onDoubleClick={() => openSliderEdit('focus', practiceFocusControl, focusControlDisabled)}
-                        title="Practice focus"
-                      >
-                        <div className="absolute left-[13px] right-[13px] top-1/2 -translate-y-1/2 h-[26px] rounded-full bg-gray-800 border border-gray-600 pointer-events-none z-0" />
-                        <div
-                          className={`absolute left-0 top-1/2 -translate-y-1/2 h-[26px] w-[26px] rounded-full bg-gray-800 border pointer-events-none z-10 ${
-                            focusStep === 'omitted' ? 'border-blue-400' : 'border-gray-600'
-                          }`}
-                        />
-                        <div
-                          className={`absolute right-0 top-1/2 -translate-y-1/2 h-[26px] w-[26px] rounded-full bg-gray-800 border pointer-events-none z-10 ${
-                            focusStep === 'solo' ? 'border-blue-400' : 'border-gray-600'
-                          }`}
-                        />
-                        <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none z-20">
-                          <div
-                            className="absolute top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-gray-600"
-                            style={{ left: `${focusSliderPosition}%` }}
-                          />
-                        </div>
-                        {sliderDragTooltip?.kind === 'focus' && (
-                          <div
-                            className="absolute bottom-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
-                            style={{ marginBottom: '1px' }}
-                          >
-                            {formatSliderValue('focus', Number(sliderDragTooltip.value))}
-                          </div>
-                        )}
-                        {sliderEditTooltip?.kind === 'focus' && (
-                          <input
-                            type="text"
-                            value={sliderEditTooltip.text}
-                            onChange={(event) => setSliderEditTooltip((previous) => (
-                              previous ? { ...previous, text: event.target.value } : previous
-                            ))}
-                            onFocus={(event) => event.target.select()}
-                            onBlur={commitSliderEdit}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                event.currentTarget.blur();
-                              } else if (event.key === 'Escape') {
-                                event.preventDefault();
-                                setSliderEditTooltip(null);
-                              }
-                            }}
-                            className="absolute bottom-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
-                            style={{ marginBottom: '1px' }}
-                            autoFocus
-                          />
-                        )}
-                      </div>
-                    </div>
-
-                    <div className={`flex items-center gap-2 ${panControlDisabled ? 'opacity-40' : ''}`}>
-                      <button
-                        type="button"
-                        onClick={handleTogglePracticePanRange}
-                        disabled={!practiceControlsEnabled || isRendering}
-                        className="text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Jump transformed pan range to the farthest extreme"
-                      >
-                        <ChevronsLeftRightEllipsis size={20} />
-                      </button>
-                      <div
-                        className={`relative w-40 h-7 ${panControlDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                        onMouseDown={(event) => {
-                          if (event.detail > 1) return;
-                          if (panControlDisabled) return;
-                          beginSliderDrag(event, {
-                            kind: 'pan',
-                            value: practicePanRange,
-                            min: 0,
-                            max: 200,
-                            step: 1,
-                            disabled: false,
-                          });
-                        }}
-                        onDoubleClick={() => openSliderEdit('pan', practicePanRange, panControlDisabled)}
-                        title={panControlDisabled ? 'Transformed pan range disabled for Omitted/Solo focus' : 'Transformed pan range'}
-                      >
-                        <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[26px] rounded-full bg-gray-800 border border-gray-600 overflow-hidden pointer-events-none">
-                        </div>
-                        <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[26px] rounded-full overflow-hidden pointer-events-none">
-                          <div
-                            className={`absolute left-0 top-0 bottom-0 bg-gray-600 ${showPanRangeHighlight ? 'opacity-70' : 'opacity-0'}`}
-                            style={{ width: `${practicePanHighlightPixel}px` }}
-                          />
-                        </div>
-                        <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none">
-                          <div
-                            className="absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-gray-600 z-20"
-                            style={{ left: `${practicePanKnobPixel - 12}px` }}
-                          />
-                          {showPanFocusAxisMarker ? (
-                            <div
-                              className="absolute h-[10px] w-[10px] rounded-full bg-gray-200 z-30 pointer-events-none"
-                              style={{
-                                left: `${practicePanFocusAxisPixel}px`,
-                                top: '50%',
-                                transform: 'translate3d(-50%, -50%, 0)',
-                                backfaceVisibility: 'hidden',
-                                willChange: 'left',
-                              }}
-                            />
-                          ) : null}
-                        </div>
-                        {sliderDragTooltip?.kind === 'pan' && (
-                          <div
-                            className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
-                            style={{ marginBottom: '1px' }}
-                          >
-                            {formatSliderValue('pan', Number(sliderDragTooltip.value))}
-                          </div>
-                        )}
-                        {sliderEditTooltip?.kind === 'pan' && (
-                          <input
-                            type="text"
-                            value={sliderEditTooltip.text}
-                            onChange={(event) => setSliderEditTooltip((previous) => (
-                              previous ? { ...previous, text: event.target.value } : previous
-                            ))}
-                            onFocus={(event) => event.target.select()}
-                            onBlur={commitSliderEdit}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                event.currentTarget.blur();
-                              } else if (event.key === 'Escape') {
-                                event.preventDefault();
-                                setSliderEditTooltip(null);
-                              }
-                            }}
-                            className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
-                            style={{ marginBottom: '1px' }}
-                            autoFocus
-                          />
-                        )}
-                      </div>
-                    </div>
-              </>
-                ) : null}
             </div>
           </div>
         </div>
