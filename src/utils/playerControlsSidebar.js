@@ -169,7 +169,7 @@ export const PLAYBACK_SPEED_SEQUENCE = [
   1,
   1.05,
   1.1,
-  1.3,
+  1.25,
   1.5,
 ];
 
