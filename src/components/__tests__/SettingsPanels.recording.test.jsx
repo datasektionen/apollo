@@ -147,4 +147,47 @@ describe('PlaybackDevicesSettingsPanel recording delay', () => {
     expect(hover.textContent).toContain('use wired devices');
     expect(view.container.textContent.replace(hover.textContent, '')).not.toContain('Wireless device detected');
   });
+
+  it('renders and updates playback speed settings when showPlaybackSpeedSettings is true', async () => {
+    const view = await renderPanel({}, { showPlaybackSpeedSettings: true });
+    expect(view.container.textContent).toContain('Pitch Preservation Engine (SignalsmithStretch)');
+
+    // Process per track stem checkbox
+    const targetCheckbox = view.container.querySelector('input[type="checkbox"][aria-label="Process per track stem"]');
+    expect(targetCheckbox).toBeTruthy();
+    expect(targetCheckbox.checked).toBe(false);
+
+    // Switch to per-track stems
+    await act(async () => {
+      targetCheckbox.click();
+    });
+    expect(view.getSettings().playbackSpeedSettings.stretchPerTrack).toBe(true);
+
+    // Formant compensation checkbox
+    const formantCheckbox = view.container.querySelector('input[type="checkbox"][aria-label="Enable vocal formant compensation"]');
+    expect(formantCheckbox.checked).toBe(false);
+    await act(async () => {
+      formantCheckbox.click();
+    });
+    expect(view.getSettings().playbackSpeedSettings.formantCompensation).toBe(true);
+
+    // Block length slider
+    const blockSlider = view.container.querySelector('input[type="range"][aria-label="block (ms)"]');
+    expect(blockSlider.value).toBe('120');
+    await act(async () => {
+      setFieldValue(blockSlider, '80');
+    });
+    expect(view.getSettings().playbackSpeedSettings.blockMs).toBe(80);
+
+    // Reset defaults button
+    const resetButton = Array.from(view.container.querySelectorAll('button'))
+      .find((b) => b.textContent.trim() === 'Reset defaults');
+    expect(resetButton).toBeTruthy();
+    await act(async () => {
+      resetButton.click();
+    });
+    expect(view.getSettings().playbackSpeedSettings.stretchPerTrack).toBe(false);
+    expect(view.getSettings().playbackSpeedSettings.formantCompensation).toBe(false);
+    expect(view.getSettings().playbackSpeedSettings.blockMs).toBe(120);
+  });
 });

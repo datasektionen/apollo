@@ -5,6 +5,56 @@ export const RECORDING_OFFSET_MODES = Object.freeze({
   MANUAL: 'manual',
 });
 
+export const DEFAULT_PLAYBACK_SPEED_SETTINGS = Object.freeze({
+  stretchPerTrack: false,
+  showTransposeControl: false,
+  formantCompensation: false,
+  formantBaseHz: 500,
+  blockMs: 120,
+  tonalityHz: 8000,
+  overlap: 4,
+  highOverlap: false,
+});
+
+export function normalizePlaybackSpeedSettings(settings = {}) {
+  const blockMsRaw = Number(settings?.blockMs);
+  const blockMs = Number.isFinite(blockMsRaw)
+    ? Math.max(40, Math.min(250, Math.round(blockMsRaw)))
+    : DEFAULT_PLAYBACK_SPEED_SETTINGS.blockMs;
+
+  const tonalityHzRaw = Number(settings?.tonalityHz);
+  const tonalityHz = Number.isFinite(tonalityHzRaw)
+    ? Math.max(1000, Math.min(20000, Math.round(tonalityHzRaw)))
+    : DEFAULT_PLAYBACK_SPEED_SETTINGS.tonalityHz;
+
+  const formantBaseHzRaw = Number(settings?.formantBaseHz);
+  const formantBaseHz = Number.isFinite(formantBaseHzRaw)
+    ? Math.max(50, Math.min(1000, Math.round(formantBaseHzRaw)))
+    : DEFAULT_PLAYBACK_SPEED_SETTINGS.formantBaseHz;
+
+  const overlapRaw = Number(settings?.overlap);
+  let overlap = Number.isFinite(overlapRaw)
+    ? Math.max(2, Math.min(16, Math.round(overlapRaw)))
+    : DEFAULT_PLAYBACK_SPEED_SETTINGS.overlap;
+
+  if (settings?.highOverlap === true && overlap < 8) {
+    overlap = 8;
+  } else if (settings?.highOverlap === false && settings?.overlap === undefined && overlap >= 8) {
+    overlap = 4;
+  }
+
+  return {
+    stretchPerTrack: settings?.stretchPerTrack === true,
+    showTransposeControl: settings?.showTransposeControl === true,
+    formantCompensation: settings?.formantCompensation === true,
+    formantBaseHz,
+    blockMs,
+    tonalityHz,
+    overlap,
+    highOverlap: overlap >= 8 || settings?.highOverlap === true,
+  };
+}
+
 export const DEFAULT_PLAYBACK_DEVICE_SETTINGS = {
   inputDeviceId: '',
   outputDeviceId: '',
@@ -16,6 +66,7 @@ export const DEFAULT_PLAYBACK_DEVICE_SETTINGS = {
   recordingCalibrations: {},
   stereoPanLawDb: DEFAULT_PAN_LAW_DB,
   forceMonoOutput: false,
+  playbackSpeedSettings: DEFAULT_PLAYBACK_SPEED_SETTINGS,
 };
 
 export function normalizeRecordingCalibration(record) {
@@ -68,6 +119,7 @@ export function normalizePlaybackDeviceSettings(settings = {}) {
     requestedStereoPanLawDb ?? legacyDefaultPanLawDb ?? DEFAULT_PLAYBACK_DEVICE_SETTINGS.stereoPanLawDb
   );
   next.forceMonoOutput = next.forceMonoOutput === true;
+  next.playbackSpeedSettings = normalizePlaybackSpeedSettings(next.playbackSpeedSettings);
   next.inputDeviceId = String(next.inputDeviceId || '');
   next.outputDeviceId = String(next.outputDeviceId || '');
   delete next.defaultPanLawDb;

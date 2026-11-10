@@ -5,14 +5,18 @@ import {
   PLAYBACK_SPEED_BOUNDS,
   PLAYBACK_SPEED_DRAG_BOUNDS,
   PLAYBACK_SPEED_SEQUENCE,
+  PLAYBACK_TRANSPOSE_BOUNDS,
   clampControlsSidebarWidth,
   commitControlsSidebarDrag,
   controlsSidebarProgress,
   formatPlaybackSpeed,
+  formatPlaybackTranspose,
   getNextPlaybackSpeed,
   normalizeControlsSidebarMode,
   normalizeControlsSidebarSettings,
+  normalizePlaybackTransposeValue,
   parsePlaybackSpeedInput,
+  parsePlaybackTransposeInput,
   resolveControlsSidebarDrag,
 } from '../playerControlsSidebar';
 
@@ -33,9 +37,23 @@ describe('playerControlsSidebar utils', () => {
   });
 
   it('normalizes settings object', () => {
-    const normalized = normalizeControlsSidebarSettings({ mode: 'minimized', width: 300 });
+    const normalized = normalizeControlsSidebarSettings({
+      mode: 'minimized',
+      width: 300,
+      playbackSpeed: 0.75,
+      playbackTranspose: 2.5,
+      lastPlaybackTranspose: 3.5,
+    });
     expect(normalized.mode).toBe(CONTROLS_SIDEBAR_MODES.MINIMIZED);
     expect(normalized.width).toBe(CONTROLS_SIDEBAR.DEFAULT_MIN_WIDTH);
+    expect(normalized.playbackSpeed).toBe(0.75);
+    expect(normalized.playbackTranspose).toBe(2.5);
+    expect(normalized.lastPlaybackTranspose).toBe(3.5);
+
+    const defaultNormalized = normalizeControlsSidebarSettings({});
+    expect(defaultNormalized.playbackSpeed).toBe(1.0);
+    expect(defaultNormalized.playbackTranspose).toBe(0.0);
+    expect(defaultNormalized.lastPlaybackTranspose).toBe(1.0);
   });
 
   it('calculates progress between minimized and default_min', () => {
@@ -156,6 +174,44 @@ describe('playerControlsSidebar utils', () => {
       expect(parsePlaybackSpeedInput('')).toBeNull();
       expect(parsePlaybackSpeedInput('   ')).toBeNull();
       expect(parsePlaybackSpeedInput('abc')).toBeNull();
+    });
+  });
+
+  describe('playback transpose helpers', () => {
+    it('defines bounds correctly [-12, 12]', () => {
+      expect(PLAYBACK_TRANSPOSE_BOUNDS).toEqual({ MIN: -12, MAX: 12, STEP: 1 });
+    });
+
+    it('normalizes transpose values clamping between -12 and +12', () => {
+      expect(normalizePlaybackTransposeValue(0)).toBe(0);
+      expect(normalizePlaybackTransposeValue(2.5)).toBe(2.5);
+      expect(normalizePlaybackTransposeValue(-3.75)).toBe(-3.75);
+      expect(normalizePlaybackTransposeValue(15)).toBe(12);
+      expect(normalizePlaybackTransposeValue(-20)).toBe(-12);
+      expect(normalizePlaybackTransposeValue('invalid')).toBe(0);
+    });
+
+    it('formats transpose semitones accurately', () => {
+      expect(formatPlaybackTranspose(0)).toBe('0 st');
+      expect(formatPlaybackTranspose(2)).toBe('+2 st');
+      expect(formatPlaybackTranspose(2.5)).toBe('+2.5 st');
+      expect(formatPlaybackTranspose(-1.25)).toBe('-1.25 st');
+      expect(formatPlaybackTranspose(12)).toBe('+12 st');
+      expect(formatPlaybackTranspose(-12)).toBe('-12 st');
+      expect(formatPlaybackTranspose(null)).toBe('0 st');
+    });
+
+    it('parses manual transpose inputs allowing decimal values clamped to [-12, 12]', () => {
+      expect(parsePlaybackTransposeInput('0')).toBe(0);
+      expect(parsePlaybackTransposeInput('+2')).toBe(2);
+      expect(parsePlaybackTransposeInput('3.5')).toBe(3.5);
+      expect(parsePlaybackTransposeInput('-2.75')).toBe(-2.75);
+      expect(parsePlaybackTransposeInput('+1.2 st')).toBe(1.2);
+      expect(parsePlaybackTransposeInput('-4 semitones')).toBe(-4);
+      expect(parsePlaybackTransposeInput('15')).toBe(12);
+      expect(parsePlaybackTransposeInput('-25')).toBe(-12);
+      expect(parsePlaybackTransposeInput('')).toBeNull();
+      expect(parsePlaybackTransposeInput('abc')).toBeNull();
     });
   });
 });

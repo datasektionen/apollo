@@ -357,4 +357,176 @@ describe('PlayerControlsSidebar', () => {
 
     view.unmount();
   });
+
+  describe('pitch transpose controls', () => {
+    it('does not render transpose controls when transposeControlsEnabled is false', () => {
+      const view = render(
+        <PlayerControlsSidebar
+          transposeControlsEnabled={false}
+          playbackTranspose={2.5}
+        />
+      );
+
+      expect(view.container.querySelector('button[aria-label="Pitch transpose"]')).toBeNull();
+      expect(view.container.querySelector('input[type="range"][min="-12"]')).toBeNull();
+      view.unmount();
+    });
+
+    it('does not render transpose controls when speedControlsEnabled is false', () => {
+      const view = render(
+        <PlayerControlsSidebar
+          speedControlsEnabled={false}
+          transposeControlsEnabled={true}
+          playbackTranspose={2.5}
+        />
+      );
+
+      expect(view.container.querySelector('button[aria-label="Playback speed"]')).toBeNull();
+      expect(view.container.querySelector('button[aria-label="Pitch transpose"]')).toBeNull();
+      expect(view.container.querySelector('input[type="range"][min="-12"]')).toBeNull();
+      view.unmount();
+    });
+
+    it('renders transpose button and slider when transposeControlsEnabled is true', () => {
+      const onToggleTranspose = vi.fn();
+      const beginSliderDrag = vi.fn();
+      const openSliderEdit = vi.fn();
+
+      const view = render(
+        <PlayerControlsSidebar
+          transposeControlsEnabled={true}
+          playbackTranspose={3.5}
+          onToggleTranspose={onToggleTranspose}
+          beginSliderDrag={beginSliderDrag}
+          openSliderEdit={openSliderEdit}
+        />
+      );
+
+      const transposeBtn = view.container.querySelector('button[aria-label="Pitch transpose"]');
+      expect(transposeBtn).toBeTruthy();
+      expect(transposeBtn.getAttribute('title')).toContain('+3.5 st');
+      expect(transposeBtn.className).toContain('text-blue-300');
+
+      act(() => {
+        transposeBtn.click();
+      });
+      expect(onToggleTranspose).toHaveBeenCalledTimes(1);
+
+      const transposeInput = view.container.querySelector('input[type="range"][min="-12"]');
+      expect(transposeInput).toBeTruthy();
+      expect(transposeInput.getAttribute('max')).toBe('12');
+      expect(transposeInput.getAttribute('step')).toBe('1');
+      expect(transposeInput.getAttribute('value')).toBe('3.5');
+
+      act(() => {
+        transposeInput.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      });
+      expect(beginSliderDrag).toHaveBeenCalledTimes(1);
+      expect(beginSliderDrag).toHaveBeenCalledWith(expect.any(Object), {
+        kind: 'transpose',
+        value: 3.5,
+        min: -12,
+        max: 12,
+        step: 1,
+        disabled: false,
+      });
+
+      act(() => {
+        transposeInput.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      });
+      expect(openSliderEdit).toHaveBeenCalledTimes(1);
+      expect(openSliderEdit).toHaveBeenCalledWith('transpose', 3.5, false);
+
+      view.unmount();
+    });
+
+    it('highlights transpose icon only when transpose is not 0', () => {
+      const viewActive = render(
+        <PlayerControlsSidebar
+          transposeControlsEnabled={true}
+          playbackTranspose={2}
+        />
+      );
+      const activeBtn = viewActive.container.querySelector('button[aria-label="Pitch transpose"]');
+      expect(activeBtn.className).toContain('text-blue-300');
+      expect(activeBtn.className).not.toContain('text-gray-400');
+      viewActive.unmount();
+
+      const viewZero = render(
+        <PlayerControlsSidebar
+          transposeControlsEnabled={true}
+          playbackTranspose={0}
+          lastPlaybackTranspose={2}
+        />
+      );
+      const zeroBtn = viewZero.container.querySelector('button[aria-label="Pitch transpose"]');
+      expect(zeroBtn.className).toContain('text-gray-400');
+      expect(zeroBtn.className).not.toContain('text-blue-300');
+      expect(zeroBtn.getAttribute('title')).toContain('click to restore +2 st');
+      viewZero.unmount();
+    });
+
+    it('renders slider edit tooltip input for manual entry and drag tooltip for discrete drag', () => {
+      const setSliderEditTooltip = vi.fn();
+      const commitSliderEdit = vi.fn();
+      const formatSliderValue = vi.fn((kind, val) => `${val > 0 ? '+' : ''}${val} st`);
+
+      const view = render(
+        <PlayerControlsSidebar
+          transposeControlsEnabled={true}
+          playbackTranspose={0}
+          sliderEditTooltip={{ kind: 'transpose', text: '+2.5 st' }}
+          sliderDragTooltip={null}
+          setSliderEditTooltip={setSliderEditTooltip}
+          commitSliderEdit={commitSliderEdit}
+          formatSliderValue={formatSliderValue}
+        />
+      );
+
+      const textInput = view.container.querySelector('input[type="text"]');
+      expect(textInput).toBeTruthy();
+      expect(textInput.value).toBe('+2.5 st');
+
+      act(() => {
+        const prototype = window.HTMLInputElement.prototype;
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+        descriptor.set.call(textInput, '+3.75');
+        textInput.dispatchEvent(new Event('input', { bubbles: true }));
+        textInput.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      expect(setSliderEditTooltip).toHaveBeenCalled();
+
+      act(() => {
+        textInput.blur();
+      });
+      expect(commitSliderEdit).toHaveBeenCalled();
+
+      view.unmount();
+    });
+
+    it('renders all 5 controls in order: Metronome, Focus, Pan, Speed, Transpose at the bottom', () => {
+      const view = render(
+        <PlayerControlsSidebar
+          speedControlsEnabled={true}
+          transposeControlsEnabled={true}
+          metronomeControlsEnabled={true}
+          practiceControlsEnabled={true}
+        />
+      );
+
+      const buttons = Array.from(view.container.querySelectorAll('button[aria-label]'))
+        .map((btn) => btn.getAttribute('aria-label'))
+        .filter((label) => label !== 'Expand Controls' && label !== 'Collapse Controls');
+
+      expect(buttons).toEqual([
+        'Metronome',
+        'Practice focus',
+        'Transformed pan range',
+        'Playback speed',
+        'Pitch transpose',
+      ]);
+
+      view.unmount();
+    });
+  });
 });

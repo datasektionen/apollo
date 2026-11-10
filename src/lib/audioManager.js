@@ -9,10 +9,12 @@ import { SAMPLE_RATE } from '../types/project';
 import { getEffectiveTrackMix } from '../utils/trackTree';
 import { reportUserError } from '../utils/errorReporter';
 import {
+  DEFAULT_PLAYBACK_SPEED_SETTINGS,
   applySinkIdToAudioContext,
   applySinkIdToMediaElement,
   collectAudioOutputDeviceIds,
   isDefaultAudioOutputDeviceId,
+  normalizePlaybackSpeedSettings,
   shouldAutoPauseForOutputDeviceChange,
   shouldRoutePlaybackThroughMediaElement,
 } from '../utils/playbackOutput';
@@ -27,6 +29,14 @@ import {
 import { logLoadProgress, shortLoadId, withLoadStep } from './loadProgress';
 import { MediaBufferCache, mediaWaveformRevision, rememberMediaRevision } from './mediaBufferCache';
 import { waveformService } from './waveformService';
+import SignalsmithStretch from 'signalsmith-stretch';
+
+const WORKLET_CACHE_KEY = 'v=1.3.2-p3';
+const baseWorkletUrl = `${import.meta.env?.BASE_URL || '/'}signalsmith-stretch.js`.replace(/\/+/g, '/');
+const workletUrl = `${baseWorkletUrl}?${WORKLET_CACHE_KEY}`;
+if (typeof SignalsmithStretch === 'function') {
+  SignalsmithStretch.moduleUrl = workletUrl;
+}
 
 const MASTER_LIMITER_THRESHOLD_DB = -1;
 const MASTER_LIMITER_KNEE_DB = 0;
@@ -103,6 +113,34 @@ export class AudioManager {
     this.boundContextSinkChange = null;
     this.boundDeviceChange = null;
     this.currentPlayOptions = null;
+    this.currentProject = null;
+    this.currentPlaybackRate = 1.0;
+    this.currentTransposeSemitones = 0;
+    this.playbackRateAnchorContextTime = 0;
+    this.playbackRateAnchorTimelineMs = 0;
+    this.playbackSpeedSettings = { ...DEFAULT_PLAYBACK_SPEED_SETTINGS };
+    this.stretchNode = null;
+    this.trackStretchNodes = new Map();
+    this.stretchNodePromise = null;
+    this.workletLoadedPromise = null;
+    this.isStretchConnected = false;
+    this.masterSafetyInputNode = null;
+    this.bypassStretch = false;
+    this.diagnosticsListeners = new Set();
+    this.latestStretchDiagnostics = {
+      inRmsDb: -100,
+      outRmsDb: -100,
+      inRms: 0,
+      outRms: 0,
+      active: false,
+      semitones: 0,
+      tonalityHz: 6000,
+      channels: 2,
+      procDurationMs: 0,
+      updatedAt: 0,
+    };
+    this.workletLastError = null;
+    this.lastDiagLogTime = 0;
   }
 
   /**
@@ -128,6 +166,8 @@ export class AudioManager {
     await this.configureOutputRouting();
     this.attachHardwareLifecycleListeners();
     await this.handleOutputDeviceChange({ primeOnly: true });
+
+    await this.ensureStretchNode();
 
     console.log('AudioManager initialized', {
       sampleRate: this.audioContext.sampleRate,
@@ -295,6 +335,401 @@ export class AudioManager {
     return audioBuffer;
   }
 
+  getPlaybackRate() {
+    return this.currentPlaybackRate || 1.0;
+  }
+
+  getPlaybackSpeedSettings() {
+    return { ...this.playbackSpeedSettings };
+  }
+
+  getTransposeSemitones() {
+    return this.currentTransposeSemitones || 0;
+  }
+
+  async setTransposeSemitones(semitones) {
+    const numeric = Number(semitones);
+    const valid = Number.isFinite(numeric) ? Math.max(-12, Math.min(12, numeric)) : 0;
+    if (Math.abs(this.currentTransposeSemitones - valid) < 1e-4) {
+      return;
+    }
+    this.currentTransposeSemitones = valid;
+    if (!this.stretchNode && this.needsPitchStretch()) {
+      await this.ensureStretchNode();
+    }
+    this.updateStretchRouting();
+  }
+
+  needsPitchStretch() {
+    const rateDiffers = Math.abs((this.currentPlaybackRate || 1.0) - 1.0) > 1e-4;
+    const transposeDiffers = Math.abs(this.currentTransposeSemitones || 0) > 1e-4;
+    return rateDiffers || transposeDiffers;
+  }
+
+  setPlaybackSpeedSettings(settings) {
+    const prev = this.playbackSpeedSettings || {};
+    const next = normalizePlaybackSpeedSettings({
+      ...prev,
+      ...settings,
+    });
+
+    const blockMsChanged = prev.blockMs !== next.blockMs;
+    const overlapChanged = prev.overlap !== next.overlap || prev.highOverlap !== next.highOverlap;
+    const tonalityChanged = prev.tonalityHz !== next.tonalityHz;
+    const formantChanged = prev.formantCompensation !== next.formantCompensation;
+    const formantBaseChanged = prev.formantBaseHz !== next.formantBaseHz;
+    const perTrackChanged = prev.stretchPerTrack !== next.stretchPerTrack;
+    const showTransposeChanged = prev.showTransposeControl !== next.showTransposeControl;
+
+    if (!blockMsChanged && !overlapChanged && !tonalityChanged && !formantChanged && !formantBaseChanged && !perTrackChanged && !showTransposeChanged) {
+      return;
+    }
+
+    this.playbackSpeedSettings = next;
+
+    if (blockMsChanged || overlapChanged) {
+      const blockMs = next.blockMs;
+      const overlap = Number(next.overlap) || (next.highOverlap ? 8 : 4);
+      const intervalMs = blockMs / Math.max(1, overlap);
+
+      if (this.stretchNode && typeof this.stretchNode.configure === 'function') {
+        try {
+          this.stretchNode.configure({ blockMs, intervalMs, splitComputation: false });
+        } catch {}
+      }
+    }
+
+    this.updateStretchRouting();
+  }
+
+  async ensureStretchNode() {
+    if (this.stretchNode) return this.stretchNode;
+    if (!this.audioContext || typeof AudioWorkletNode === 'undefined') return null;
+    if (typeof this.audioContext.audioWorklet?.addModule !== 'function') return null;
+    if (this.stretchNodePromise) return this.stretchNodePromise;
+
+    this.stretchNodePromise = (async () => {
+      try {
+        if (typeof SignalsmithStretch === 'function') {
+          SignalsmithStretch.moduleUrl = workletUrl;
+        }
+
+        if (!this.workletLoadedPromise) {
+          this.workletLoadedPromise = this.audioContext.audioWorklet.addModule(workletUrl).catch((err) => {
+            console.warn('[AudioManager] Worklet module load warning:', err?.message || err);
+          });
+        }
+        await this.workletLoadedPromise;
+
+        const stretchNode = await SignalsmithStretch(this.audioContext, {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [2],
+        });
+        if (stretchNode) {
+          stretchNode.onprocessorerror = (err) => {
+            console.error('[AudioManager] SignalsmithStretch processor error:', err);
+            this.workletLastError = err?.message || 'Processor error';
+            this.notifyDiagnosticsListeners();
+          };
+
+          if (stretchNode.port) {
+            const originalOnMessage = stretchNode.port.onmessage;
+            stretchNode.port.onmessage = (event) => {
+              const data = event?.data;
+              if (Array.isArray(data)) {
+                const [msgType, payload] = data;
+                if (msgType === 'diagnostics') {
+                  const inDb = payload.inRms > 1e-6 ? 20 * Math.log10(payload.inRms) : -100;
+                  const outDb = payload.outRms > 1e-6 ? 20 * Math.log10(payload.outRms) : -100;
+                  this.latestStretchDiagnostics = {
+                    inRms: payload.inRms,
+                    outRms: payload.outRms,
+                    inRmsDb: Math.round(inDb * 10) / 10,
+                    outRmsDb: Math.round(outDb * 10) / 10,
+                    active: payload.active,
+                    semitones: payload.semitones,
+                    tonalityHz: payload.tonalityHz,
+                    channels: payload.channels,
+                    configureCount: payload.configureCount,
+                    procDurationMs: payload.procDurationMs,
+                    updatedAt: Date.now(),
+                  };
+                  this.notifyDiagnosticsListeners();
+                  return;
+                }
+                if (msgType === 'workletError') {
+                  console.error('[AudioManager] AudioWorklet reported error:', payload);
+                  this.workletLastError = payload?.message || 'Worklet runtime error';
+                  this.notifyDiagnosticsListeners();
+                  return;
+                }
+              }
+              if (typeof originalOnMessage === 'function') {
+                originalOnMessage(event);
+              }
+            };
+          }
+        }
+        this.stretchNode = stretchNode;
+        const blockMs = this.playbackSpeedSettings.blockMs;
+        const overlap = Number(this.playbackSpeedSettings.overlap) || (this.playbackSpeedSettings.highOverlap ? 8 : 4);
+        const intervalMs = blockMs / Math.max(1, overlap);
+        if (typeof stretchNode?.configure === 'function') {
+          try {
+            stretchNode.configure({ blockMs, intervalMs, splitComputation: false });
+          } catch {}
+        }
+        this.wireMasterAudioGraph();
+        this.updateStretchRouting();
+        this.notifyDiagnosticsListeners();
+        return stretchNode;
+      } catch (err) {
+        console.error('[AudioManager] SignalsmithStretch initialization failed:', err);
+        this.stretchNode = null;
+        this.wireMasterAudioGraph();
+        return null;
+      } finally {
+        this.stretchNodePromise = null;
+      }
+    })();
+    return this.stretchNodePromise;
+  }
+
+  async ensureTrackStretchNode() {
+    return null;
+  }
+
+  async ensureTrackStretchNodes() {
+    return;
+  }
+
+  wireMasterAudioGraph() {
+    if (!this.audioContext || !this.masterGainNode) return;
+    const targetSink = this.masterSafetyInputNode || this.masterOutputNode;
+    if (!targetSink) return;
+
+    try {
+      this.masterGainNode.disconnect();
+    } catch {}
+
+    if (this.stretchNode && !this.bypassStretch) {
+      try {
+        this.stretchNode.disconnect();
+      } catch {}
+      try {
+        this.masterGainNode.connect(this.stretchNode);
+        this.stretchNode.connect(targetSink);
+        this.isStretchConnected = true;
+      } catch (err) {
+        console.warn('Failed to wire stretch node in-line, falling back to direct master:', err);
+        try {
+          this.masterGainNode.connect(targetSink);
+        } catch {}
+        this.isStretchConnected = false;
+      }
+    } else {
+      if (this.stretchNode) {
+        try {
+          this.stretchNode.disconnect();
+        } catch {}
+      }
+      try {
+        this.masterGainNode.connect(targetSink);
+      } catch {}
+      this.isStretchConnected = false;
+    }
+    this.notifyDiagnosticsListeners();
+  }
+
+  setBypassStretch(bypass) {
+    this.bypassStretch = Boolean(bypass);
+    this.wireMasterAudioGraph();
+    this.updateStretchRouting();
+    this.notifyDiagnosticsListeners();
+    console.info(`[AudioManager] Stretch engine bypass set to: ${this.bypassStretch}`);
+  }
+
+  getAudioDiagnostics() {
+    return {
+      contextState: this.audioContext?.state || 'uninitialized',
+      sampleRate: this.audioContext?.sampleRate || 0,
+      currentTime: Math.round((this.audioContext?.currentTime || 0) * 100) / 100,
+      isPlaying: Boolean(this.isPlaying),
+      playbackRate: this.currentPlaybackRate || 1.0,
+      activeSourcesCount: this.activeSources?.size || 0,
+      workletLoaded: Boolean(this.stretchNode),
+      isStretchConnected: Boolean(this.isStretchConnected),
+      bypassStretch: Boolean(this.bypassStretch),
+      workletError: this.workletLastError || null,
+      worklet: this.latestStretchDiagnostics || {
+        inRmsDb: -100,
+        outRmsDb: -100,
+        inRms: 0,
+        outRms: 0,
+        active: false,
+        semitones: 0,
+        tonalityHz: 6000,
+        channels: 2,
+        configureCount: 0,
+        procDurationMs: 0,
+      },
+    };
+  }
+
+  subscribeAudioDiagnostics(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.diagnosticsListeners.add(listener);
+    try {
+      listener(this.getAudioDiagnostics());
+    } catch {}
+    return () => {
+      this.diagnosticsListeners.delete(listener);
+    };
+  }
+
+  notifyDiagnosticsListeners() {
+    if (!this.diagnosticsListeners.size) return;
+    const diag = this.getAudioDiagnostics();
+    for (const listener of this.diagnosticsListeners) {
+      try {
+        listener(diag);
+      } catch {}
+    }
+  }
+
+  updateStretchRouting() {
+    if (!this.audioContext) return;
+
+    const rate = this.currentPlaybackRate || 1.0;
+    const transpose = Number(this.currentTransposeSemitones) || 0;
+    const rateDiffers = Math.abs(rate - 1.0) > 1e-4;
+    const transposeDiffers = Math.abs(transpose) > 1e-4;
+    const needsStretch = rateDiffers || transposeDiffers;
+
+    const rateSemitones = rateDiffers ? -12 * Math.log2(rate) : 0;
+    const semitones = rateSemitones + transpose;
+    const tonalityHz = Number(this.playbackSpeedSettings.tonalityHz) || 8000;
+    const formantCompensation = Boolean(this.playbackSpeedSettings.formantCompensation);
+    const formantBaseHz = Number(this.playbackSpeedSettings.formantBaseHz) || 500;
+
+    if (this.stretchNode && typeof this.stretchNode.schedule === 'function') {
+      try {
+        this.stretchNode.schedule({
+          active: needsStretch,
+          semitones,
+          tonalityHz,
+          formantCompensation,
+          formantBaseHz,
+        });
+      } catch (err) {
+        console.warn('Failed to schedule stretch parameters:', err);
+      }
+    }
+  }
+
+  updateActiveClipRouting() {
+    if (!this.audioContext || !this.masterGainNode) return;
+    for (const nodes of this.activeSources.values()) {
+      if (!nodes?.panNode) continue;
+      if (nodes.currentDestination !== this.masterGainNode) {
+        try {
+          nodes.panNode.disconnect();
+        } catch {}
+        try {
+          nodes.panNode.connect(this.masterGainNode);
+          nodes.currentDestination = this.masterGainNode;
+        } catch {}
+      }
+    }
+  }
+
+  async setPlaybackRate(rate, project = null, options = {}) {
+    const numeric = Number(rate);
+    const validRate = Number.isFinite(numeric) && numeric > 0 ? numeric : 1.0;
+    const clampedRate = Math.max(0.1, Math.min(10.0, validRate));
+
+    if (Math.abs(this.currentPlaybackRate - clampedRate) < 1e-5 && !options?.forceReschedule) {
+      return;
+    }
+
+    if (this.isPlaying && this.audioContext) {
+      const now = this.audioContext.currentTime;
+      const currentTimelineMs = this.timelineMsAtContextTime(now);
+
+      this.currentPlaybackRate = clampedRate;
+      this.playbackRateAnchorContextTime = now;
+      this.playbackRateAnchorTimelineMs = currentTimelineMs;
+      this.startTime = now - (msToSeconds(currentTimelineMs) / clampedRate);
+
+      if (!this.stretchNode && this.needsPitchStretch()) {
+        await this.ensureStretchNode();
+      }
+      this.updateStretchRouting();
+
+      const activeProject = project || this.currentProject;
+      if (activeProject) {
+        this.currentProject = activeProject;
+      }
+
+      const clipsMap = new Map();
+      if (activeProject?.tracks) {
+        for (const track of activeProject.tracks) {
+          for (const clip of track.clips || []) {
+            clipsMap.set(this.getClipSourceKey(track.id, clip.id), clip);
+          }
+        }
+      }
+
+      for (const [sourceKey, nodes] of Array.from(this.activeSources.entries())) {
+        const source = nodes?.source;
+        if (!source) continue;
+
+        if (nodes.timelineStartMs > currentTimelineMs) {
+          // Future clip: previous start time on audioContext was scheduled with the old playback rate.
+          // Stop old scheduled start and reschedule at the new rate relative to current playback anchor.
+          const clip = clipsMap.get(sourceKey) || {
+            id: nodes.clipId,
+            blobId: nodes.blobId,
+            timelineStartMs: nodes.timelineStartMs,
+            cropStartMs: nodes.cropStartMs,
+            cropEndMs: nodes.cropEndMs,
+            gainDb: nodes.clipGainDb,
+          };
+          this.stopClipSource(nodes, now, 'Failed to reschedule future audio source.', 'audio:reschedule-future-source');
+          const schedule = this.getClipSchedule(clip, currentTimelineMs);
+          if (schedule) {
+            this.startClipSource(sourceKey, nodes, clip, schedule, now, this.playbackRequestId);
+          }
+        } else {
+          // Actively playing clip: update rate smoothly in-flight without stopping
+          if (source.playbackRate) {
+            try {
+              source.playbackRate.setValueAtTime(clampedRate, now);
+            } catch {
+              source.playbackRate.value = clampedRate;
+            }
+          }
+        }
+      }
+    } else {
+      this.currentPlaybackRate = clampedRate;
+      if (project) {
+        this.currentProject = project;
+      }
+      if (this.audioContext) {
+        const now = this.audioContext.currentTime;
+        this.playbackRateAnchorContextTime = now;
+        this.playbackRateAnchorTimelineMs = this.pauseTime;
+        this.startTime = now - (msToSeconds(this.pauseTime) / clampedRate);
+      }
+      if (this.audioContext && this.needsPitchStretch() && !this.stretchNode) {
+        void this.ensureStretchNode();
+      }
+      this.updateStretchRouting();
+    }
+  }
+
   /**
    * Play project from current time
    */
@@ -303,6 +738,7 @@ export class AudioManager {
     this.isInitializingPlayback = true;
     this.initializingPlaybackRequestId = playbackRequestId;
     this.currentPlayOptions = options || {};
+    this.currentProject = project;
     this.stopActiveSources('Failed to replace an active audio source.', 'audio:replace-source');
 
     try {
@@ -314,9 +750,20 @@ export class AudioManager {
       await this.resume();
       if (!this.isPlaybackRequestCurrent(playbackRequestId)) return;
 
-      this.isPlaying = true;
-      const at = this.audioContext.currentTime;
-      this.startTime = at - msToSeconds(currentTimeMs);
+      const rateOption = Number(options?.playbackRate);
+      if (Number.isFinite(rateOption) && rateOption > 0) {
+        this.currentPlaybackRate = Math.max(0.1, Math.min(10.0, rateOption));
+      } else if (options?.resetPlaybackRate) {
+        this.currentPlaybackRate = 1.0;
+      }
+
+      if (options?.transposeSemitones !== undefined) {
+        const transposeOption = Number(options.transposeSemitones);
+        if (Number.isFinite(transposeOption)) {
+          this.currentTransposeSemitones = Math.max(-12, Math.min(12, transposeOption));
+        }
+      }
+
       const useProjectMasterVolume = options?.useProjectMasterVolume !== false;
       if (useProjectMasterVolume) {
         this.currentMasterVolume = Number.isFinite(Number(project?.masterVolume))
@@ -324,9 +771,22 @@ export class AudioManager {
           : this.currentMasterVolume;
       }
       this.applyMasterGain();
+
+      if (!this.stretchNode && this.needsPitchStretch()) {
+        await this.ensureStretchNode();
+      }
+      this.updateStretchRouting();
+
+      this.isPlaying = true;
+      const at = this.audioContext.currentTime;
+      const startMs = Number(currentTimeMs) || 0;
+      this.playbackRateAnchorContextTime = at;
+      this.playbackRateAnchorTimelineMs = startMs;
+      this.startTime = at - (msToSeconds(startMs) / this.currentPlaybackRate);
+
       this.scheduleProjectClips(project, currentTimeMs, options, playbackRequestId, at, false);
       if (this.isPlaybackRequestCurrent(playbackRequestId)) {
-        this.notifyPlaybackStarted({ contextTime: at, timelineMs: Number(currentTimeMs) || 0 });
+        this.notifyPlaybackStarted({ contextTime: at, timelineMs: startMs });
       }
     } finally {
       if (this.initializingPlaybackRequestId === playbackRequestId) {
@@ -345,11 +805,22 @@ export class AudioManager {
     const seekMs = Math.max(0, Number(currentTimeMs) || 0);
     if (!this.isPlaying || !this.audioContext) {
       this.pauseTime = seekMs;
+      if (this.audioContext) {
+        this.playbackRateAnchorContextTime = this.audioContext.currentTime;
+        this.playbackRateAnchorTimelineMs = seekMs;
+        this.startTime = this.audioContext.currentTime - (msToSeconds(seekMs) / this.currentPlaybackRate);
+      }
       return null;
     }
 
     if (options && Object.keys(options).length > 0) {
       this.currentPlayOptions = options;
+    }
+    this.currentProject = project || this.currentProject;
+
+    const rateOption = Number(options?.playbackRate);
+    if (Number.isFinite(rateOption) && rateOption > 0) {
+      this.currentPlaybackRate = Math.max(0.1, Math.min(10.0, rateOption));
     }
 
     const playbackRequestId = ++this.playbackRequestId;
@@ -364,9 +835,16 @@ export class AudioManager {
       }
     }
 
+    if (this.needsPitchStretch() && !this.stretchNode) {
+      await this.ensureStretchNode();
+    }
+    this.updateStretchRouting();
+
     const at = this.audioContext.currentTime;
     this.pauseTime = seekMs;
-    this.startTime = at - msToSeconds(seekMs);
+    this.playbackRateAnchorContextTime = at;
+    this.playbackRateAnchorTimelineMs = seekMs;
+    this.startTime = at - (msToSeconds(seekMs) / this.currentPlaybackRate);
 
     this.stopActiveBufferSources(at, 'Failed to pause sources for seek.', 'audio:seek-stop-source');
     this.scheduleProjectClips(project, seekMs, options, playbackRequestId, at, true);
@@ -388,7 +866,15 @@ export class AudioManager {
    */
   timelineMsAtContextTime(contextTime) {
     if (!this.isPlaying || !this.audioContext) return this.pauseTime;
-    return (Number(contextTime) - this.startTime) * 1000;
+    const rate = this.currentPlaybackRate || 1.0;
+    const anchorContext = Number.isFinite(this.playbackRateAnchorContextTime)
+      ? this.playbackRateAnchorContextTime
+      : this.startTime;
+    const anchorTimeline = Number.isFinite(this.playbackRateAnchorTimelineMs)
+      ? this.playbackRateAnchorTimelineMs
+      : (anchorContext - this.startTime) * 1000;
+    const deltaSec = Number(contextTime) - anchorContext;
+    return anchorTimeline + (deltaSec * rate * 1000);
   }
 
   /**
@@ -465,8 +951,9 @@ export class AudioManager {
     const elapsedMs = Math.max(0, timeMs - startMs);
     const remainingMs = durationMs - elapsedMs;
     if (remainingMs <= 0) return null;
+    const rate = this.currentPlaybackRate || 1.0;
     return {
-      whenOffsetSec: msToSeconds(Math.max(0, startMs - timeMs)),
+      whenOffsetSec: msToSeconds(Math.max(0, startMs - timeMs)) / rate,
       offsetSec: msToSeconds(cropStartMs + elapsedMs),
       durationSec: msToSeconds(remainingMs),
     };
@@ -496,7 +983,9 @@ export class AudioManager {
     };
     this.applyNodeMix(nodes);
     gainNode.connect(panNode);
+
     panNode.connect(this.masterGainNode);
+    nodes.currentDestination = this.masterGainNode;
     return nodes;
   }
 
@@ -551,9 +1040,18 @@ export class AudioManager {
 
     const source = this.audioContext.createBufferSource();
     source.buffer = audioBuffer;
+    if (source.playbackRate) {
+      try {
+        source.playbackRate.value = this.currentPlaybackRate || 1.0;
+      } catch {}
+    }
     source.connect(nodes.gainNode);
     const when = at + schedule.whenOffsetSec;
-    source.start(when, schedule.offsetSec, schedule.durationSec);
+    const maxOffset = Math.max(0, (audioBuffer?.duration || 0) - 0.001);
+    const safeOffset = Math.min(schedule.offsetSec, maxOffset);
+    const safeDuration = Math.min(schedule.durationSec, Math.max(0, (audioBuffer?.duration || 0) - safeOffset));
+    if (safeDuration <= 0) return false;
+    source.start(when, safeOffset, safeDuration);
     source.onended = () => {
       const current = this.activeSources.get(sourceKey);
       if (current && current.source === source) {
@@ -613,6 +1111,16 @@ export class AudioManager {
             ? effectiveState.effectivePan
             : (track?.pan != null ? track.pan : 0);
           this.applyNodeMix(nodes);
+
+          if (nodes.currentDestination !== this.masterGainNode) {
+            try {
+              nodes.panNode.disconnect();
+            } catch {}
+            try {
+              nodes.panNode.connect(this.masterGainNode);
+              nodes.currentDestination = this.masterGainNode;
+            } catch {}
+          }
         }
         this.activeSources.set(sourceKey, nodes);
         if (!this.startClipSource(sourceKey, nodes, clip, schedule, at, playbackRequestId)) {
@@ -670,7 +1178,8 @@ export class AudioManager {
     }
 
     const at = this.audioContext.currentTime;
-    const timeMs = Math.max(0, (at - this.startTime) * 1000);
+    const timeMs = Math.max(0, this.timelineMsAtContextTime(at));
+    this.currentProject = project || this.currentProject;
     const mix = getEffectiveTrackMix(project);
     const effectiveOptions = options && Object.keys(options).length > 0
       ? options
@@ -788,10 +1297,25 @@ export class AudioManager {
     this.playbackRequestId += 1;
     this.isPlaying = false;
     this.pauseTime = 0;
+    this.playbackRateAnchorContextTime = 0;
+    this.playbackRateAnchorTimelineMs = 0;
     this.isInitializingPlayback = false;
     this.initializingPlaybackRequestId = null;
     this.currentPlayOptions = null;
+    this.currentProject = null;
     this.stopActiveSources('Failed to stop an active audio source.', 'audio:stop-source');
+    if (this.stretchNode && typeof this.stretchNode.schedule === 'function') {
+      try {
+        this.stretchNode.schedule({ active: false });
+      } catch {}
+    }
+    for (const trackNode of this.trackStretchNodes.values()) {
+      if (trackNode && typeof trackNode.schedule === 'function') {
+        try {
+          trackNode.schedule({ active: false });
+        } catch {}
+      }
+    }
   }
 
   stopActiveSources(errorMessage, onceKey) {
@@ -812,11 +1336,23 @@ export class AudioManager {
   async pause(currentTimeMs) {
     this.playbackRequestId += 1;
     this.isPlaying = false;
-    this.pauseTime = currentTimeMs;
+    this.pauseTime = typeof currentTimeMs === 'number' ? currentTimeMs : this.getCurrentTime();
     this.isInitializingPlayback = false;
     this.initializingPlaybackRequestId = null;
     this.currentPlayOptions = null;
     this.stopActiveSources('Failed to pause an active audio source.', 'audio:pause-source');
+    if (this.stretchNode && typeof this.stretchNode.schedule === 'function') {
+      try {
+        this.stretchNode.schedule({ active: false });
+      } catch {}
+    }
+    for (const trackNode of this.trackStretchNodes.values()) {
+      if (trackNode && typeof trackNode.schedule === 'function') {
+        try {
+          trackNode.schedule({ active: false });
+        } catch {}
+      }
+    }
   }
 
 
@@ -931,9 +1467,7 @@ export class AudioManager {
    */
   getCurrentTime() {
     if (!this.isPlaying || !this.audioContext) return this.pauseTime;
-    
-    const elapsed = this.audioContext.currentTime - this.startTime;
-    return elapsed * 1000; // Convert to ms
+    return this.timelineMsAtContextTime(this.audioContext.currentTime);
   }
 
   /**
@@ -942,6 +1476,21 @@ export class AudioManager {
   dispose() {
     this.stop();
     this.detachHardwareLifecycleListeners();
+
+    if (this.stretchNode) {
+      try {
+        this.stretchNode.disconnect();
+      } catch {}
+      this.stretchNode = null;
+    }
+    for (const trackNode of this.trackStretchNodes.values()) {
+      try {
+        trackNode.disconnect();
+      } catch {}
+    }
+    this.trackStretchNodes.clear();
+    this.stretchNodePromise = null;
+    this.isStretchConnected = false;
 
     if (this.outputRoutingElement) {
       try {
@@ -968,6 +1517,7 @@ export class AudioManager {
     this.masterLimiterNode = null;
     this.masterCeilingNode = null;
     this.masterOutputNode = null;
+    this.masterSafetyInputNode = null;
     this.currentOutputVolume = 100;
 
     this.mediaCache.clear();
@@ -1008,37 +1558,44 @@ export class AudioManager {
   createMasterSafetyStage() {
     if (!this.audioContext || !this.masterGainNode) return;
 
-    let outputNode = this.masterGainNode;
+    let limiter = null;
     if (typeof this.audioContext.createDynamicsCompressor === 'function') {
       try {
-        const limiter = this.audioContext.createDynamicsCompressor();
+        limiter = this.audioContext.createDynamicsCompressor();
         limiter.threshold.value = MASTER_LIMITER_THRESHOLD_DB;
         limiter.knee.value = MASTER_LIMITER_KNEE_DB;
         limiter.ratio.value = MASTER_LIMITER_RATIO;
         limiter.attack.value = MASTER_LIMITER_ATTACK_SEC;
         limiter.release.value = MASTER_LIMITER_RELEASE_SEC;
-        this.masterGainNode.connect(limiter);
         this.masterLimiterNode = limiter;
-        outputNode = limiter;
       } catch {
         this.masterLimiterNode = null;
       }
     }
 
+    let ceiling = null;
     if (typeof this.audioContext.createWaveShaper === 'function') {
       try {
-        const ceiling = this.audioContext.createWaveShaper();
+        ceiling = this.audioContext.createWaveShaper();
         ceiling.curve = createMasterCeilingCurve();
         ceiling.oversample = '4x';
-        outputNode.connect(ceiling);
         this.masterCeilingNode = ceiling;
-        outputNode = ceiling;
       } catch {
         this.masterCeilingNode = null;
       }
     }
 
-    this.masterOutputNode = outputNode;
+    if (limiter && ceiling) {
+      try {
+        limiter.connect(ceiling);
+      } catch {}
+    }
+
+    this.masterSafetyInputNode = limiter || ceiling || null;
+    this.masterOutputNode = ceiling || limiter || this.masterGainNode;
+
+    this.wireMasterAudioGraph();
+    this.updateStretchRouting();
   }
 
   getMasterOutputNode() {

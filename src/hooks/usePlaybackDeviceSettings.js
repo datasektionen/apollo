@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { audioManager } from '../lib/audioManager';
 import { reportUserError } from '../utils/errorReporter';
 import {
@@ -172,7 +172,10 @@ export function usePlaybackDeviceSettings(options = {}) {
     };
   }, [audioSettings.outputDeviceId]);
 
-  const normalizedAudioSettings = normalizePlaybackDeviceSettings(audioSettings);
+  const normalizedAudioSettings = useMemo(
+    () => normalizePlaybackDeviceSettings(audioSettings),
+    [audioSettings]
+  );
   const monoOutputActive = isMonoOutputActive(normalizedAudioSettings.forceMonoOutput, outputChannelCount);
   const playbackPanLawDb = resolvePlaybackPanLawDisplayDb(normalizedAudioSettings, outputChannelCount);
 

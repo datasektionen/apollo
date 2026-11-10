@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DEFAULT_PLAYBACK_SPEED_SETTINGS,
   applySinkIdToAudioContext,
   collectAudioOutputDeviceIds,
   isDefaultAudioOutputDeviceId,
   isMonoOutputActive,
   normalizePlaybackDeviceSettings,
+  normalizePlaybackSpeedSettings,
   resolvePlaybackPanLawDisplayDb,
   setAudioContextOutput,
   shouldAutoPauseForOutputDeviceChange,
@@ -22,6 +24,41 @@ describe('playbackOutput', () => {
     expect(normalized.stereoPanLawDb).toBe(-4.5);
     expect(normalized.forceMonoOutput).toBe(true);
     expect(normalized.recordingOffsetMs).toBe(13);
+    expect(normalized.playbackSpeedSettings).toEqual(DEFAULT_PLAYBACK_SPEED_SETTINGS);
+  });
+
+  it('normalizes playback speed settings and clamps ranges', () => {
+    const custom = normalizePlaybackSpeedSettings({
+      stretchPerTrack: true,
+      showTransposeControl: true,
+      formantCompensation: true,
+      formantBaseHz: '650',
+      blockMs: '300',
+      tonalityHz: '25000',
+      overlap: 8,
+    });
+    expect(custom).toEqual({
+      stretchPerTrack: true,
+      showTransposeControl: true,
+      formantCompensation: true,
+      formantBaseHz: 650,
+      blockMs: 250,
+      tonalityHz: 20000,
+      overlap: 8,
+      highOverlap: true,
+    });
+
+    const low = normalizePlaybackSpeedSettings({
+      blockMs: 20,
+      tonalityHz: 200,
+      formantBaseHz: 20,
+      overlap: 1,
+    });
+    expect(low.blockMs).toBe(40);
+    expect(low.tonalityHz).toBe(1000);
+    expect(low.formantBaseHz).toBe(50);
+    expect(low.overlap).toBe(2);
+    expect(low.showTransposeControl).toBe(false);
   });
 
   it('treats mono hardware or forced mono as mono output', () => {

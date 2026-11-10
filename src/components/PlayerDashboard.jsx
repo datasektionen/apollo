@@ -27,8 +27,12 @@ import { PlayerLibrarySidebar } from './PlayerLibrarySidebar';
 import { PlayerControlsSidebar } from './PlayerControlsSidebar';
 import {
   formatPlaybackSpeed,
+  formatPlaybackTranspose,
   getNextPlaybackSpeed,
   parsePlaybackSpeedInput,
+  parsePlaybackTransposeInput,
+  readControlsSidebarSettings,
+  writeControlsSidebarSettings,
 } from '../utils/playerControlsSidebar';
 import PlayerLyricsView from './PlayerLyricsView';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
@@ -307,9 +311,12 @@ function buildMixCategoryOptions(snapshot) {
 }
 
 function getPlayerPlayOptions(playback = {}, extra = {}) {
+  const base = playback || {};
   return {
     useProjectMasterVolume: true,
-    liveMixableTrackIds: playback.liveMixableTrackIds || null,
+    liveMixableTrackIds: extra?.liveMixableTrackIds ?? base?.liveMixableTrackIds ?? null,
+    playbackRate: extra?.playbackRate ?? base?.playbackRate ?? 1.0,
+    ...base,
     ...extra,
   };
 }
@@ -572,7 +579,66 @@ function PlayerDashboard({
   const [practiceFocusControl, setPracticeFocusControl] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.practiceFocusControl);
   const [hasRealtimeMetronome, setHasRealtimeMetronome] = useState(false);
   const [metronomeVolume, setMetronomeVolume] = useState(DEFAULT_PLAYER_PLAYBACK_PREFERENCES.metronomeVolume);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => {
+    const saved = readControlsSidebarSettings();
+    return saved?.playbackSpeed || 1;
+  });
+  const playbackSpeedRef = useRef(playbackSpeed);
+
+  useEffect(() => {
+    playbackSpeedRef.current = playbackSpeed;
+    writeControlsSidebarSettings({ playbackSpeed });
+  }, [playbackSpeed]);
+
+  const [playbackTranspose, setPlaybackTranspose] = useState(() => {
+    const saved = readControlsSidebarSettings();
+    return Number.isFinite(Number(saved?.playbackTranspose)) ? Number(saved.playbackTranspose) : 0;
+  });
+  const playbackTransposeRef = useRef(playbackTranspose);
+
+  const lastNonZeroTransposeRef = useRef(
+    (() => {
+      const saved = readControlsSidebarSettings();
+      const storedLast = Number(saved?.lastPlaybackTranspose);
+      if (Number.isFinite(storedLast) && Math.abs(storedLast) > 1e-4) {
+        return storedLast;
+      }
+      const current = Number(saved?.playbackTranspose);
+      if (Number.isFinite(current) && Math.abs(current) > 1e-4) {
+        return current;
+      }
+      return 1;
+    })()
+  );
+
+  useEffect(() => {
+    playbackTransposeRef.current = playbackTranspose;
+    writeControlsSidebarSettings({ playbackTranspose });
+  }, [playbackTranspose]);
+
+  useEffect(() => {
+    void audioManager.setTransposeSemitones(playbackTranspose);
+  }, [playbackTranspose]);
+
+  const handleToggleTranspose = useCallback(() => {
+    if (isRendering) return 0;
+    const current = Number(playbackTransposeRef.current) || 0;
+    let nextValue;
+    if (Math.abs(current) > 1e-4) {
+      lastNonZeroTransposeRef.current = current;
+      writeControlsSidebarSettings({ lastPlaybackTranspose: current });
+      nextValue = 0;
+    } else {
+      const stored = Number(lastNonZeroTransposeRef.current);
+      nextValue = Number.isFinite(stored) && Math.abs(stored) > 1e-4 ? stored : 1;
+    }
+    playbackTransposeRef.current = nextValue;
+    setPlaybackTranspose(nextValue);
+    void audioManager.setTransposeSemitones(nextValue);
+    return nextValue;
+  }, [isRendering]);
+
+
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mainPanelView, setMainPanelView] = useState('library');
   const [lyricsViewOpen, setLyricsViewOpen] = useState(false);
@@ -642,6 +708,22 @@ function PlayerDashboard({
     setCurrentTimeSec((Number(timeMs) || 0) / 1000);
     setIsPlaying(false);
   });
+
+  useEffect(() => {
+    if (sliderDragRef.current?.kind === 'speed') return;
+    const current = realtimePlaybackRef.current;
+    void audioManager.setPlaybackRate(playbackSpeed, current?.project);
+  }, [playbackSpeed]);
+
+  const lastAppliedPlaybackSpeedSettingsRef = useRef('');
+
+  useEffect(() => {
+    if (!audioSettings?.playbackSpeedSettings) return;
+    const serialized = JSON.stringify(audioSettings.playbackSpeedSettings);
+    if (serialized === lastAppliedPlaybackSpeedSettingsRef.current) return;
+    lastAppliedPlaybackSpeedSettingsRef.current = serialized;
+    audioManager.setPlaybackSpeedSettings(audioSettings.playbackSpeedSettings);
+  }, [audioSettings?.playbackSpeedSettings]);
 
   const monoOutputActive = audioSettings.forceMonoOutput === true || outputChannelCount <= 1;
   const showNoAccessBanner = (
@@ -1060,6 +1142,11 @@ function PlayerDashboard({
         setPracticePanRange(next);
       } else if (kind === 'speed') {
         setPlaybackSpeed(next);
+        const current = realtimePlaybackRef.current;
+        void audioManager.setPlaybackRate(next, current?.project, { smooth: true });
+      } else if (kind === 'transpose') {
+        setPlaybackTranspose(next);
+        void audioManager.setTransposeSemitones(next);
       }
       setSliderDragTooltip({ kind, value: next });
     };
@@ -1080,6 +1167,18 @@ function PlayerDashboard({
         } else {
           rememberNonZeroVolume(ref, drag.startValue);
         }
+      }
+      if (drag?.kind === 'speed') {
+        const current = realtimePlaybackRef.current;
+        void audioManager.setPlaybackRate(Number(drag.lastValue) || 1.0, current?.project, { forceReschedule: true });
+      }
+      if (drag?.kind === 'transpose') {
+        const finalValue = Number(drag.lastValue);
+        if (Math.abs(finalValue) > 1e-4) {
+          lastNonZeroTransposeRef.current = finalValue;
+          writeControlsSidebarSettings({ lastPlaybackTranspose: finalValue });
+        }
+        void audioManager.setTransposeSemitones(finalValue || 0);
       }
       sliderDragRef.current = null;
       setSliderDragTooltip(null);
@@ -1367,7 +1466,10 @@ function PlayerDashboard({
       audioManager.setOutputVolume(Math.max(0, Math.min(100, volume)));
       await withLoadStep(
         'Start Web Audio graph',
-        async () => audioManager.play(playbackSnapshot, 0, getPlayerPlayOptions({ liveMixableTrackIds }))
+        async () => audioManager.play(playbackSnapshot, 0, getPlayerPlayOptions(null, {
+          liveMixableTrackIds,
+          playbackRate: playbackSpeedRef.current,
+        }))
       );
       applyPlaybackMixSettings(playbackSnapshot, item, realtimeControlOverrides);
       realtimePlaybackRef.current = {
@@ -1399,7 +1501,7 @@ function PlayerDashboard({
         setIsRendering(false);
       }
     }
-  }, [applyPlaybackMixSettings, applyPlaybackOutputConfig, ensureSnapshotAudioBuffers, metronomeVolume, session, volume]);
+  }, [applyPlaybackMixSettings, applyPlaybackOutputConfig, ensureSnapshotAudioBuffers, metronomeVolume, playbackSpeed, session, volume]);
 
   const playQueueItem = useCallback(async (index) => {
     if (index < 0 || index >= activeQueueItems.length) return;
@@ -1486,7 +1588,9 @@ function PlayerDashboard({
       const current = realtimePlaybackRef.current;
       await applyPlaybackOutputConfig();
       audioManager.setOutputVolume(Math.max(0, Math.min(100, volume)));
-      await audioManager.play(current.project, resumeMs, getPlayerPlayOptions(current));
+      await audioManager.play(current.project, resumeMs, getPlayerPlayOptions(current, {
+        playbackRate: playbackSpeedRef.current,
+      }));
       applyPlaybackMixSettings(current.project, current.item);
       setIsPlaying(true);
       return;
@@ -1494,7 +1598,7 @@ function PlayerDashboard({
 
     const startIndex = activeIndex >= 0 ? activeIndex : 0;
     await playQueueItem(startIndex);
-  }, [activeIndex, activeQueueItems.length, applyPlaybackMixSettings, applyPlaybackOutputConfig, currentTimeSec, durationSec, isPlaying, playQueueItem, volume]);
+  }, [activeIndex, activeQueueItems.length, applyPlaybackMixSettings, applyPlaybackOutputConfig, currentTimeSec, durationSec, isPlaying, playQueueItem, playbackSpeed, volume]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -1560,7 +1664,9 @@ function PlayerDashboard({
     if (currentTimeSec > 3 && realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item) {
       const current = realtimePlaybackRef.current;
       if (isPlaying) {
-        await audioManager.seek(current.project, 0, getPlayerPlayOptions(current));
+        await audioManager.seek(current.project, 0, getPlayerPlayOptions(current, {
+          playbackRate: playbackSpeedRef.current,
+        }));
         applyPlaybackMixSettings(current.project, current.item);
       } else {
         await audioManager.pause(0);
@@ -1575,7 +1681,7 @@ function PlayerDashboard({
         : 0;
     }
     await playQueueItem(previousIndex);
-  }, [activeIndex, activeQueueItems.length, applyPlaybackMixSettings, currentTimeSec, isPlaying, loopMode, playQueueItem]);
+  }, [activeIndex, activeQueueItems.length, applyPlaybackMixSettings, currentTimeSec, isPlaying, loopMode, playQueueItem, playbackSpeed]);
 
   const previewTimelineTime = useCallback((nextTimeSec) => {
     const { timeSec } = clampPlayerSeek(nextTimeSec, durationSecRef.current);
@@ -1595,7 +1701,9 @@ function PlayerDashboard({
 
     try {
       if (isPlayingRef.current) {
-        await audioManager.seek(current.project, timeMs, getPlayerPlayOptions(current));
+        await audioManager.seek(current.project, timeMs, getPlayerPlayOptions(current, {
+          playbackRate: playbackSpeedRef.current,
+        }));
         applyPlaybackMixSettings(current.project, current.item);
       } else {
         await audioManager.pause(timeMs);
@@ -1603,7 +1711,7 @@ function PlayerDashboard({
     } catch (seekError) {
       setError(seekError.message || 'Seek failed');
     }
-  }, [applyPlaybackMixSettings]);
+  }, [applyPlaybackMixSettings, playbackSpeed]);
 
   const handleSeek = useCallback((nextTimeSec, event = null) => {
     const scrub = timelineScrubRef.current;
@@ -1758,6 +1866,9 @@ function PlayerDashboard({
     if (kind === 'speed') {
       return formatPlaybackSpeed(value);
     }
+    if (kind === 'transpose') {
+      return formatPlaybackTranspose(value);
+    }
     if (kind === 'focus') {
       const step = getPracticeFocusStep(value);
       if (step === 'omitted') return 'Omitted';
@@ -1771,6 +1882,9 @@ function PlayerDashboard({
     const text = String(rawText || '').trim();
     if (kind === 'speed') {
       return parsePlaybackSpeedInput(text);
+    }
+    if (kind === 'transpose') {
+      return parsePlaybackTransposeInput(text);
     }
     if (kind === 'master' || kind === 'metronome') {
       if (!text) return null;
@@ -1818,6 +1932,14 @@ function PlayerDashboard({
       if (sliderEditTooltip.kind === 'focus') setPracticeFocusControl(nextValue);
       if (sliderEditTooltip.kind === 'pan') setPracticePanRange(nextValue);
       if (sliderEditTooltip.kind === 'speed') setPlaybackSpeed(nextValue);
+      if (sliderEditTooltip.kind === 'transpose') {
+        setPlaybackTranspose(nextValue);
+        if (Math.abs(nextValue) > 1e-4) {
+          lastNonZeroTransposeRef.current = nextValue;
+          writeControlsSidebarSettings({ lastPlaybackTranspose: nextValue });
+        }
+        void audioManager.setTransposeSemitones(nextValue);
+      }
     }
     setSliderEditTooltip(null);
   }, [parseSliderInput, sliderEditTooltip]);
@@ -2195,7 +2317,8 @@ function PlayerDashboard({
     )
   );
   const metronomeControlsEnabled = Boolean(hasActiveSong && hasRealtimeMetronome);
-  const speedControlsEnabled = Boolean(hasActiveSong);
+  const speedControlsEnabled = true;
+  const transposeControlsEnabled = Boolean(audioSettings?.playbackSpeedSettings?.showTransposeControl);
   const focusControlDisabled = !practiceControlsEnabled || isRendering;
   const focusStep = getPracticeFocusStep(practiceFocusControl);
   const focusSliderPosition = getPracticeFocusSliderPosition(practiceFocusControl);
@@ -2769,7 +2892,7 @@ function PlayerDashboard({
 
   return (
     <div className="h-full flex flex-col bg-gray-900 text-white">
-      <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+      <div className="relative z-[100] bg-gray-800 border-b border-gray-700 px-4 py-3 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
         <button
           type="button"
           onClick={handleGoHome}
@@ -2829,7 +2952,7 @@ function PlayerDashboard({
               <CircleUserRound size={18} />
             </button>
             {profileMenuOpen ? (
-              <div className="absolute right-0 top-full mt-2 min-w-32 rounded-md border border-gray-700 bg-gray-800 shadow-lg z-30 overflow-hidden">
+              <div className="absolute right-0 top-full mt-2 min-w-32 rounded-md border border-gray-700 bg-gray-800 shadow-2xl z-[110] overflow-hidden">
                 {onOpenProfile ? (
                   <button
                     onClick={() => {
@@ -2940,6 +3063,7 @@ function PlayerDashboard({
                       monoOutputActive={monoOutputActive}
                       outputChannelCount={outputChannelCount}
                       playbackPanLawDb={playbackPanLawDb}
+                      showPlaybackSpeedSettings={true}
                     />
                   </div>
                 </>
@@ -3214,6 +3338,10 @@ function PlayerDashboard({
               speedControlsEnabled={speedControlsEnabled}
               playbackSpeed={playbackSpeed}
               onToggleSpeed={handleTogglePlaybackSpeed}
+              transposeControlsEnabled={transposeControlsEnabled}
+              playbackTranspose={playbackTranspose}
+              lastPlaybackTranspose={lastNonZeroTransposeRef.current}
+              onToggleTranspose={handleToggleTranspose}
               metronomeControlsEnabled={metronomeControlsEnabled}
               metronomeVolume={metronomeVolume}
               isMetronomeMuted={isMetronomeMuted}

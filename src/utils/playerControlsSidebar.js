@@ -24,7 +24,28 @@ export const CONTROLS_SIDEBAR = {
 const DEFAULT_CONTROLS_SIDEBAR_SETTINGS = {
   mode: CONTROLS_SIDEBAR_MODES.DEFAULT,
   width: CONTROLS_SIDEBAR.DEFAULT_WIDTH,
+  playbackSpeed: 1.0,
+  playbackTranspose: 0.0,
+  lastPlaybackTranspose: 1.0,
 };
+
+export const PLAYBACK_TRANSPOSE_BOUNDS = {
+  MIN: -12,
+  MAX: 12,
+  STEP: 1,
+};
+
+export function normalizePlaybackTransposeValue(transpose) {
+  const num = Number(transpose);
+  if (!Number.isFinite(num)) return 0.0;
+  return Math.max(PLAYBACK_TRANSPOSE_BOUNDS.MIN, Math.min(PLAYBACK_TRANSPOSE_BOUNDS.MAX, num));
+}
+
+export function normalizePlaybackSpeedValue(speed) {
+  const num = Number(speed);
+  if (!Number.isFinite(num) || num <= 0) return 1.0;
+  return Math.max(PLAYBACK_SPEED_BOUNDS.MIN, Math.min(PLAYBACK_SPEED_BOUNDS.MAX, num));
+}
 
 export function normalizeControlsSidebarMode(value) {
   return value === CONTROLS_SIDEBAR_MODES.MINIMIZED
@@ -46,12 +67,24 @@ export function clampControlsSidebarWidth(width, mode = CONTROLS_SIDEBAR_MODES.D
 
 export function normalizeControlsSidebarSettings(settings = {}) {
   const mode = normalizeControlsSidebarMode(settings.mode);
+  const speed = settings.playbackSpeed != null
+    ? normalizePlaybackSpeedValue(settings.playbackSpeed)
+    : DEFAULT_CONTROLS_SIDEBAR_SETTINGS.playbackSpeed;
+  const transpose = settings.playbackTranspose != null
+    ? normalizePlaybackTransposeValue(settings.playbackTranspose)
+    : DEFAULT_CONTROLS_SIDEBAR_SETTINGS.playbackTranspose;
+  const lastTranspose = settings.lastPlaybackTranspose != null
+    ? normalizePlaybackTransposeValue(settings.lastPlaybackTranspose)
+    : (Math.abs(transpose) > 1e-4 ? transpose : DEFAULT_CONTROLS_SIDEBAR_SETTINGS.lastPlaybackTranspose);
   return {
     mode,
     width: clampControlsSidebarWidth(
       settings.width ?? DEFAULT_CONTROLS_SIDEBAR_SETTINGS.width,
       CONTROLS_SIDEBAR_MODES.DEFAULT
     ),
+    playbackSpeed: speed,
+    playbackTranspose: transpose,
+    lastPlaybackTranspose: lastTranspose,
   };
 }
 
@@ -71,9 +104,10 @@ export function readControlsSidebarSettings() {
 export function writeControlsSidebarSettings(settings) {
   try {
     if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') return;
+    const existing = readControlsSidebarSettings();
     localStorage.setItem(
       CONTROLS_SIDEBAR_STORAGE_KEY,
-      JSON.stringify(normalizeControlsSidebarSettings(settings))
+      JSON.stringify(normalizeControlsSidebarSettings({ ...existing, ...settings }))
     );
   } catch {
     // Ignore storage failures
@@ -194,5 +228,25 @@ export function parsePlaybackSpeedInput(rawText) {
 
   value = Math.max(PLAYBACK_SPEED_BOUNDS.MIN, Math.min(PLAYBACK_SPEED_BOUNDS.MAX, value));
   return Math.round(value * 100) / 100;
+}
+
+export function formatPlaybackTranspose(transpose) {
+  if (transpose == null) return '0 st';
+  const num = Number(transpose);
+  if (!Number.isFinite(num) || Math.abs(num) < 1e-4) return '0 st';
+  const clamped = Math.max(PLAYBACK_TRANSPOSE_BOUNDS.MIN, Math.min(PLAYBACK_TRANSPOSE_BOUNDS.MAX, num));
+  const rounded = Number(clamped.toFixed(2));
+  const sign = rounded > 0 ? '+' : '';
+  return `${sign}${rounded} st`;
+}
+
+export function parsePlaybackTransposeInput(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text) return null;
+  const cleaned = text.replace(/st$/i, '').replace(/semitones?$/i, '').trim();
+  const parsed = Number.parseFloat(cleaned);
+  if (!Number.isFinite(parsed)) return null;
+  const clamped = Math.max(PLAYBACK_TRANSPOSE_BOUNDS.MIN, Math.min(PLAYBACK_TRANSPOSE_BOUNDS.MAX, parsed));
+  return Math.round(clamped * 100) / 100;
 }
 

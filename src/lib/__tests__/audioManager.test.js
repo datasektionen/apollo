@@ -183,6 +183,12 @@ describe('AudioManager playback requests', () => {
       createBufferSource() {
         const source = {
           buffer: null,
+          playbackRate: {
+            value: 1,
+            setValueAtTime: vi.fn((val) => {
+              source.playbackRate.value = val;
+            }),
+          },
           connect: vi.fn(),
           disconnect: vi.fn(),
           start: vi.fn((when, offset, duration) => {
@@ -847,5 +853,278 @@ describe('AudioManager playback requests', () => {
     const clip2Nodes = manager.activeSources.get('track-1-clip-2');
     expect(clip2Nodes.source).toBeDefined();
     expect(clip2Nodes.source.start).toHaveBeenCalled();
+  });
+
+  it('sets and clamps playback rate and updates buffer sources during playback', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 10 });
+
+    const project = makeProject();
+    await manager.play(project, 1000, { playbackRate: 0.8 });
+
+    expect(manager.getPlaybackRate()).toBe(0.8);
+    const sourceNode = manager.activeSources.get('track-1-clip-1');
+    expect(sourceNode.source.playbackRate.value).toBe(0.8);
+
+    // Initial timeline position is 1000ms at contextTime = 10
+    expect(manager.timelineMsAtContextTime(10)).toBe(1000);
+    // After 1 second of context time (at contextTime = 11), timeline advances by 1000 * 0.8 = 800ms
+    expect(manager.timelineMsAtContextTime(11)).toBe(1800);
+
+    // Update playback rate mid-playback to 1.2
+    manager.audioContext.currentTime = 11;
+    const initialSource = sourceNode.source;
+    await manager.setPlaybackRate(1.2);
+
+    expect(manager.getPlaybackRate()).toBe(1.2);
+    // Active source is updated in real time without stopping or dropping out
+    expect(initialSource.stop).not.toHaveBeenCalled();
+    expect(initialSource.playbackRate.setValueAtTime).toHaveBeenCalledWith(1.2, 11);
+    expect(initialSource.playbackRate.value).toBe(1.2);
+    const updatedNode = manager.activeSources.get('track-1-clip-1');
+
+    // After 1 second at 1.2x (at contextTime = 12), timeline advances by 1000 * 1.2 = 1200ms -> 3000ms
+    expect(manager.timelineMsAtContextTime(12)).toBe(3000);
+
+    // Smooth drag update updates playbackRate in place without restarting sources
+    await manager.setPlaybackRate(1.3, project, { smooth: true });
+    expect(manager.getPlaybackRate()).toBe(1.3);
+    expect(updatedNode.source.playbackRate.setValueAtTime).toHaveBeenCalledWith(1.3, 11);
+
+    // Timeline at transition instant (contextTime = 11) is still 1800ms (no jumps)
+    expect(manager.timelineMsAtContextTime(11)).toBe(1800);
+    // After 1 second at 1.3x (at contextTime = 12), timeline advances by 1000 * 1.3 = 1300ms -> 3100ms
+    expect(manager.timelineMsAtContextTime(12)).toBe(3100);
+
+    // Clamps out-of-range rates to [0.1, 10.0]
+    await manager.setPlaybackRate(25);
+    expect(manager.getPlaybackRate()).toBe(10);
+    await manager.setPlaybackRate(0.01);
+    expect(manager.getPlaybackRate()).toBe(0.1);
+
+    manager.stop();
+  });
+
+  it('reschedules future clips accurately on live playback rate change without drifting or interrupting active clips', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 10 });
+    manager.mediaCache.set('blob-2', { duration: 10 });
+
+    const project = {
+      masterVolume: 100,
+      loop: { enabled: false, startMs: 0, endMs: 0 },
+      tracks: [
+        {
+          id: 'track-1',
+          name: 'Track 1',
+          role: 'instrument',
+          volume: 100,
+          pan: 0,
+          muted: false,
+          soloed: false,
+          clips: [
+            {
+              id: 'clip-active',
+              blobId: 'blob-1',
+              timelineStartMs: 0,
+              cropStartMs: 0,
+              cropEndMs: 10000,
+              gainDb: 0,
+              muted: false,
+            },
+            {
+              id: 'clip-future',
+              blobId: 'blob-2',
+              timelineStartMs: 6000,
+              cropStartMs: 0,
+              cropEndMs: 10000,
+              gainDb: 0,
+              muted: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    await manager.init();
+    manager.audioContext.currentTime = 10;
+    await manager.play(project, 1000, { playbackRate: 1.0 });
+
+    const activeNode = manager.activeSources.get('track-1-clip-active');
+    const futureNode = manager.activeSources.get('track-1-clip-future');
+
+    expect(activeNode).toBeDefined();
+    expect(futureNode).toBeDefined();
+
+    // In initial 1.0x schedule:
+    // Future clip is at timeline 6000ms, start was 1000ms -> delay is (6000 - 1000) / 1.0 = 5.0s
+    // context start is 10 + 5.0 = 15.0s
+    const oldFutureSource = futureNode.source;
+    expect(oldFutureSource.start).toHaveBeenCalledWith(15, 0, 10);
+
+    // After 1 context second (contextTime = 11), timeline is at 1000 + (1 * 1.0 * 1000) = 2000ms
+    manager.audioContext.currentTime = 11;
+
+    // Change rate mid-playback to 0.5x
+    await manager.setPlaybackRate(0.5, project);
+
+    // Active source is updated in-flight without stopping
+    expect(activeNode.source).toBe(activeNode.source);
+    expect(activeNode.source.playbackRate.setValueAtTime).toHaveBeenCalledWith(0.5, 11);
+
+    // Future clip: old scheduled source must be cancelled
+    expect(oldFutureSource.stop).toHaveBeenCalledWith(11);
+
+    // New future source must be scheduled for the new rate!
+    // Remaining timeline distance: 6000ms - 2000ms = 4000ms = 4.0s
+    // At 0.5x, context delay is 4.0 / 0.5 = 8.0s
+    // New context start time: 11 + 8.0 = 19.0s
+    const newFutureSource = futureNode.source;
+    expect(newFutureSource).not.toBe(oldFutureSource);
+    expect(newFutureSource.playbackRate.value).toBe(0.5);
+    expect(newFutureSource.start).toHaveBeenCalledWith(19, 0, 10);
+
+    // Now change rate again at contextTime = 13 (2 context seconds later at 0.5x, timeline advanced by 2 * 0.5 * 1000 = 1000ms -> 3000ms)
+    manager.audioContext.currentTime = 13;
+    await manager.setPlaybackRate(2.0, project);
+
+    // Future clip remaining timeline distance: 6000ms - 3000ms = 3000ms = 3.0s
+    // At 2.0x, context delay is 3.0 / 2.0 = 1.5s
+    // New context start time: 13 + 1.5 = 14.5s
+    expect(newFutureSource.stop).toHaveBeenCalledWith(13);
+    const newestFutureSource = futureNode.source;
+    expect(newestFutureSource.start).toHaveBeenCalledWith(14.5, 0, 10);
+
+    manager.stop();
+  });
+
+  it('routes through stretch node and schedules transposition when playback rate != 1.0', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 10 });
+
+    const mockStretchNode = {
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      schedule: vi.fn(),
+    };
+    manager.stretchNode = mockStretchNode;
+
+    const project = makeProject();
+    await manager.play(project, 0, { playbackRate: 0.5 });
+
+    // At 0.5x speed, pitch drops by 1 octave (-12 semitones).
+    // SignalsmithStretch must be scheduled with +12 semitones to cancel it out and preserve pitch.
+    expect(mockStretchNode.schedule).toHaveBeenCalledWith({
+      active: true,
+      semitones: 12,
+      tonalityHz: 8000,
+      formantCompensation: false,
+      formantBaseHz: 500,
+    });
+    expect(mockStretchNode.connect).toHaveBeenCalled();
+
+    // Custom playback speed settings update the parameters on the stretch node
+    mockStretchNode.configure = vi.fn();
+    manager.setPlaybackSpeedSettings({
+      blockMs: 80,
+      tonalityHz: 5000,
+      formantCompensation: true,
+      highOverlap: true,
+    });
+    expect(mockStretchNode.configure).toHaveBeenCalledWith({
+      blockMs: 80,
+      intervalMs: 10,
+      splitComputation: false,
+    });
+    expect(mockStretchNode.schedule).toHaveBeenCalledWith({
+      active: true,
+      semitones: 12,
+      tonalityHz: 5000,
+      formantCompensation: true,
+      formantBaseHz: 500,
+    });
+
+    // Setting pitch transposition updates semitones live
+    await manager.setTransposeSemitones(2.5);
+    expect(mockStretchNode.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        active: true,
+        semitones: 14.5, // 12 from rate + 2.5 transpose
+      })
+    );
+
+    // Returning to 1.0x rate and 0 transpose bypasses stretch
+    await manager.setTransposeSemitones(0);
+    await manager.setPlaybackRate(1.0);
+    expect(mockStretchNode.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        active: false,
+        semitones: 0,
+      })
+    );
+
+    manager.stop();
+  });
+
+  it('starts playback with custom rate and immediately routes through stretch node', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 10 });
+    const mockStretchNode = {
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      schedule: vi.fn(),
+    };
+    manager.stretchNode = mockStretchNode;
+    const project = makeProject();
+
+    // Play at 0.75x speed
+    await manager.play(project, 0, { playbackRate: 0.75 });
+
+    expect(manager.currentPlaybackRate).toBeCloseTo(0.75, 4);
+    expect(mockStretchNode.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        active: true,
+        semitones: expect.closeTo(-12 * Math.log2(0.75), 4),
+      })
+    );
+    expect(mockStretchNode.connect).toHaveBeenCalled();
+
+    manager.stop();
+  });
+
+  it('re-routes clip pan nodes when toggling stretch mode between master and per-track', async () => {
+    const { AudioManager } = await import('../audioManager');
+    const manager = new AudioManager();
+    manager.mediaCache.set('blob-1', { duration: 10 });
+    const mockStretchNode = {
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      schedule: vi.fn(),
+    };
+    manager.stretchNode = mockStretchNode;
+    const project = makeProject();
+
+    await manager.play(project, 0, { playbackRate: 0.8 });
+
+    // Active source should have a destination
+    const activeNodes = Array.from(manager.activeSources.values())[0];
+    expect(activeNodes).toBeDefined();
+
+    // Toggle to per-track mode
+    manager.setPlaybackSpeedSettings({ stretchPerTrack: true });
+    // Let async routing settle
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(manager.getPlaybackSpeedSettings().stretchPerTrack).toBe(true);
+
+    // Toggle back to master mode
+    manager.setPlaybackSpeedSettings({ stretchPerTrack: false });
+    expect(manager.getPlaybackSpeedSettings().stretchPerTrack).toBe(false);
+
+    manager.stop();
   });
 });
