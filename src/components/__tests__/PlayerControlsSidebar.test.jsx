@@ -253,7 +253,7 @@ describe('PlayerControlsSidebar', () => {
 
     const view = render(
       <PlayerControlsSidebar
-        playbackSpeed={1.3}
+        playbackSpeed={1.25}
         onToggleSpeed={onToggleSpeed}
       />
     );
@@ -265,7 +265,7 @@ describe('PlayerControlsSidebar', () => {
 
     expect(onToggleSpeed).toHaveBeenCalledTimes(1);
 
-    // In minimized mode, next speed after 1.3 is 1.5
+    // In minimized mode, next speed after 1.25 is 1.5
     const badge = view.container.querySelector('[data-testid="speed-flash-badge"]');
     expect(badge).toBeTruthy();
     expect(badge.textContent).toBe('1.5');

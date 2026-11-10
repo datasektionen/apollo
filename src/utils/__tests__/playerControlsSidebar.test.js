@@ -98,7 +98,7 @@ describe('playerControlsSidebar utils', () => {
         1,
         1.05,
         1.1,
-        1.3,
+        1.25,
         1.5,
       ]);
       expect(PLAYBACK_SPEED_BOUNDS).toEqual({ MIN: 0.1, MAX: 10 });
@@ -114,8 +114,8 @@ describe('playerControlsSidebar utils', () => {
       expect(getNextPlaybackSpeed(0.95)).toBe(1);
       expect(getNextPlaybackSpeed(1)).toBe(1.05);
       expect(getNextPlaybackSpeed(1.05)).toBe(1.1);
-      expect(getNextPlaybackSpeed(1.1)).toBe(1.3);
-      expect(getNextPlaybackSpeed(1.3)).toBe(1.5);
+      expect(getNextPlaybackSpeed(1.1)).toBe(1.25);
+      expect(getNextPlaybackSpeed(1.25)).toBe(1.5);
       expect(getNextPlaybackSpeed(1.5)).toBe(0.5);
     });
 
@@ -124,7 +124,7 @@ describe('playerControlsSidebar utils', () => {
       expect(getNextPlaybackSpeed(0.7)).toBe(0.75);
       expect(getNextPlaybackSpeed(0.8)).toBe(5 / 6);
       expect(getNextPlaybackSpeed(0.83)).toBe(5 / 6);
-      expect(getNextPlaybackSpeed(1.2)).toBe(1.3);
+      expect(getNextPlaybackSpeed(1.2)).toBe(1.25);
       expect(getNextPlaybackSpeed(1.4)).toBe(1.5);
       expect(getNextPlaybackSpeed(1.8)).toBe(0.5);
       expect(getNextPlaybackSpeed(10)).toBe(0.5);
