@@ -2287,6 +2287,13 @@ function PlayerDashboard({
   const hasCurrentLyrics = hasPlayerLyrics(currentPlaybackLyrics);
   const handleToggleLyricsView = () => {
     if (!hasCurrentLyrics) return;
+    if (mainPanelView === 'settings') {
+      setMainPanelView('library');
+      if (!lyricsViewOpen) {
+        setLyricsViewOpen(true);
+      }
+      return;
+    }
     if (!lyricsViewOpen) setMainPanelView('library');
     setLyricsViewOpen((open) => !open);
   };
@@ -3030,16 +3037,7 @@ function PlayerDashboard({
             />
 
             <div className="flex-1 min-w-0 rounded-lg border border-gray-700 bg-gray-800/80 flex flex-col overflow-hidden">
-              {lyricsViewOpen ? (
-                <PlayerLyricsView
-                  lyrics={currentPlaybackLyrics}
-                  currentTimeMs={Math.round(currentTimeSec * 1000)}
-                  durationMs={Math.round(durationSec * 1000)}
-                  isLoading={isRendering}
-                  songTitle={nowPlayingLabel || activeQueueItem?.name || ''}
-                  onSeek={commitTimelineSeek}
-                />
-              ) : mainPanelView === 'settings' ? (
+              {mainPanelView === 'settings' ? (
                 <>
                   <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
                     <div>
@@ -3067,6 +3065,15 @@ function PlayerDashboard({
                     />
                   </div>
                 </>
+              ) : lyricsViewOpen ? (
+                <PlayerLyricsView
+                  lyrics={currentPlaybackLyrics}
+                  currentTimeMs={Math.round(currentTimeSec * 1000)}
+                  durationMs={Math.round(durationSec * 1000)}
+                  isLoading={isRendering}
+                  songTitle={nowPlayingLabel || activeQueueItem?.name || ''}
+                  onSeek={commitTimelineSeek}
+                />
               ) : mainPanelView === 'search' ? (
                 <PlayerSearchResults
                   query={searchDraft.trim()}
@@ -3834,10 +3841,10 @@ function PlayerDashboard({
               type="button"
               onClick={handleToggleLyricsView}
               disabled={!hasCurrentLyrics}
-              className={`shrink-0 p-1.5 transition-colors ${!hasCurrentLyrics ? 'text-gray-400' : (lyricsViewOpen ? 'text-blue-300' : 'text-gray-400 hover:text-gray-200')} disabled:cursor-not-allowed disabled:opacity-30`}
+              className={`shrink-0 p-1.5 transition-colors ${!hasCurrentLyrics ? 'text-gray-400' : (lyricsViewOpen && mainPanelView !== 'settings' ? 'text-blue-300' : 'text-gray-400 hover:text-gray-200')} disabled:cursor-not-allowed disabled:opacity-30`}
               title="Lyrics"
               aria-label="Lyrics"
-              aria-pressed={lyricsViewOpen && hasCurrentLyrics}
+              aria-pressed={lyricsViewOpen && hasCurrentLyrics && mainPanelView !== 'settings'}
             >
               <MicVocal size={20} />
             </button>
