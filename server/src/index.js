@@ -53,7 +53,7 @@ import {
   setOidcTransactionCookie,
   setSessionCookies,
 } from './sessionCookies.js';
-import { choosePreferredOrigin, getRequestOrigin } from './requestOrigin.js';
+import { choosePreferredOrigin, getRequestOrigin, sanitizeReturnTo } from './requestOrigin.js';
 import { getAppSettings, saveAppSettings } from './appSettings.js';
 import {
   detachArtistFromCredits,
@@ -1615,7 +1615,9 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/auth/oidc/start', async (req, res) => {
   try {
+    const returnTo = sanitizeReturnTo(req.query?.returnTo);
     const { url, transaction } = await buildOidcAuthorizationRequest(req);
+    transaction.returnTo = returnTo;
     setOidcTransactionCookie(res, transaction);
     res.redirect(url.href);
   } catch (error) {
@@ -1655,7 +1657,8 @@ app.get('/api/auth/oidc/callback', async (req, res) => {
     await issueApolloSession(res, user, {
       oidcIdToken: tokens.id_token || '',
     });
-    res.redirect('/');
+    const safeReturnTo = sanitizeReturnTo(transaction?.returnTo);
+    res.redirect(safeReturnTo);
   } catch (error) {
     console.error(error);
     clearSessionCookies(res);

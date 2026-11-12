@@ -4698,7 +4698,7 @@ function Editor({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-hidden" style={{ minWidth: 0 }}>
+      <div className="flex-1 overflow-hidden overscroll-none" style={{ minWidth: 0, overscrollBehavior: 'none' }}>
         <Timeline
           project={treeProject}
           rows={timelineRows}
@@ -4750,8 +4750,11 @@ function Editor({
             pendingGroupCollapseId,
           }) => (
             <div
-              className="relative grid h-full min-h-0 min-w-0 grid-cols-[384px_1fr]"
-              style={{ gridTemplateRows: lyricsTrackShown ? `${TIMELINE_RULER_HEIGHT}px 44px minmax(0,1fr)` : `${TIMELINE_RULER_HEIGHT}px minmax(0,1fr)` }}
+              className="relative grid h-full min-h-0 min-w-0 grid-cols-[384px_1fr] overscroll-none"
+              style={{
+                gridTemplateRows: lyricsTrackShown ? `${TIMELINE_RULER_HEIGHT}px 44px minmax(0,1fr)` : `${TIMELINE_RULER_HEIGHT}px minmax(0,1fr)`,
+                overscrollBehavior: 'none',
+              }}
             >
               <div className="flex min-w-0 items-stretch border-b border-r border-gray-700 bg-gray-800">{rulerTools}</div>
               <div className="relative z-50 min-w-0 overflow-hidden">{header}</div>

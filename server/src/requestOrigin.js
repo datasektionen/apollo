@@ -53,3 +53,11 @@ export function replaceUrlOrigin(urlLike, nextOrigin) {
   url.host = replacement.host;
   return url;
 }
+
+export function sanitizeReturnTo(raw) {
+  const value = String(raw || '').trim();
+  if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) {
+    return '/';
+  }
+  return value;
+}

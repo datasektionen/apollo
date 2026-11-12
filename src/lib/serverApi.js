@@ -140,8 +140,10 @@ export async function createGuestArtist(guest, session) {
   return payload.guest || null;
 }
 
-export function beginOidcLogin() {
-  window.location.assign(buildApiPath('/api/auth/oidc/start'));
+export function beginOidcLogin(returnTo = null) {
+  const target = returnTo || `${window.location.pathname}${window.location.search}`;
+  const search = target && target !== '/' ? `?returnTo=${encodeURIComponent(target)}` : '';
+  window.location.assign(buildApiPath(`/api/auth/oidc/start${search}`));
 }
 
 export async function refreshSession() {

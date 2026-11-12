@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useInRouterContext, useSearchParams } from 'react-router-dom';
 import { ChevronDown, Plus, Download, FileAudio, CircleUserRound } from 'lucide-react';
 import { isValidMusicalNumber, normalizeMusicalNumber, normalizeProjectName } from '../utils/naming';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
@@ -32,6 +33,9 @@ function HostedDashboard({
   onOpenAdmin = null,
   onOpenProfile = null,
 }) {
+  const inRouter = useInRouterContext();
+  const [routerSearchParams, setRouterSearchParams] = inRouter ? useSearchParams() : [null, null];
+  const urlShowId = routerSearchParams ? routerSearchParams.get('show') : null;
   const [newProjectName, setNewProjectName] = useState('');
   const [newMusicalNumber, setNewMusicalNumber] = useState('0.0');
   const [selectedShowId, setSelectedShowId] = useState('');
@@ -83,9 +87,26 @@ function HostedDashboard({
     selectedShow ? project.showId === selectedShow.id : false
   ));
 
+  const handleSelectShow = (showId) => {
+    setSelectedShowId(showId);
+    if (inRouter && setRouterSearchParams) {
+      const next = new URLSearchParams(routerSearchParams);
+      if (showId) {
+        next.set('show', showId);
+      } else {
+        next.delete('show');
+      }
+      setRouterSearchParams(next, { replace: true });
+    }
+  };
+
   useEffect(() => {
     if (!selectableShows.length) {
       setSelectedShowId('');
+      return;
+    }
+    if (urlShowId && selectableShows.some((show) => String(show.id) === String(urlShowId))) {
+      setSelectedShowId(urlShowId);
       return;
     }
     setSelectedShowId((current) => (
@@ -97,7 +118,7 @@ function HostedDashboard({
             : selectableShows[0].id
         )
     ));
-  }, [defaultDawShowId, selectableShowIds]);
+  }, [defaultDawShowId, selectableShowIds, urlShowId]);
 
   const formatRelativeTime = (timestamp) => {
     const numeric = Number(timestamp);
@@ -142,7 +163,7 @@ function HostedDashboard({
     if (!normalized) return;
     const created = await onCreateShow(normalized);
     if (created?.id) {
-      setSelectedShowId(created.id);
+      handleSelectShow(created.id);
       setShowDropdownOpen(false);
     }
   };
@@ -154,7 +175,7 @@ function HostedDashboard({
     const normalized = normalizeProjectName(name || '');
     if (!normalized || normalized === show.name) return;
     const updated = await onRenameShow(show, normalized);
-    if (updated?.id) setSelectedShowId(updated.id);
+    if (updated?.id) handleSelectShow(updated.id);
   };
 
   const openShowCreditsEditor = async (show) => {
@@ -282,7 +303,7 @@ function HostedDashboard({
                     key={show.id}
                     type="button"
                     onClick={() => {
-                      setSelectedShowId(show.id);
+                      handleSelectShow(show.id);
                       setShowDropdownOpen(false);
                     }}
                     onContextMenu={(event) => {

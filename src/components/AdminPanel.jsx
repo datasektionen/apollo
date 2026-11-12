@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useInRouterContext, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CircleUserRound, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { BrandWordmark } from './BrandLogo';
 import AdminShowsPanel from './AdminShowsPanel';
@@ -239,6 +240,10 @@ export default function AdminPanel({
   onOpenProfile = null,
   onSessionRefresh = null,
 }) {
+  const inRouter = useInRouterContext();
+  const navigate = inRouter ? useNavigate() : null;
+  const { tab: tabParam, roleId: roleIdParam } = inRouter ? useParams() : {};
+
   const [tab, setTab] = useState('roles');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -249,6 +254,21 @@ export default function AdminPanel({
   const [artists, setArtists] = useState({ users: [], groups: [], guests: [] });
   const [catalog, setCatalog] = useState({ shows: [], projects: [], groupNames: [], partNames: [] });
   const [selectedRoleId, setSelectedRoleId] = useState('');
+
+  const VALID_TABS = useMemo(() => ['roles', 'users', 'shows', 'artists', 'storage'], []);
+
+  useEffect(() => {
+    if (!inRouter) return;
+    if (roleIdParam) {
+      if (tab !== 'roles') setTab('roles');
+      if (selectedRoleId !== roleIdParam) setSelectedRoleId(roleIdParam);
+      return;
+    }
+    if (tabParam && VALID_TABS.includes(tabParam)) {
+      if (tab !== tabParam) setTab(tabParam);
+      if (selectedRoleId) setSelectedRoleId('');
+    }
+  }, [inRouter, tabParam, roleIdParam, tab, selectedRoleId, VALID_TABS]);
   const [selectedRole, setSelectedRole] = useState(null);
   const [newlyCreatedRoleId, setNewlyCreatedRoleId] = useState('');
   const [roleDetailTab, setRoleDetailTab] = useState('permissions');
@@ -559,7 +579,11 @@ export default function AdminPanel({
         const createdRole = await createRbacRole({ name: 'New role' }, session);
         await loadBaseData();
         setNewlyCreatedRoleId(createdRole.id);
-        setSelectedRoleId(createdRole.id);
+        if (inRouter) {
+          navigate(`/admin/roles/${createdRole.id}`);
+        } else {
+          setSelectedRoleId(createdRole.id);
+        }
       }, 'Failed to create role.');
     });
   };
@@ -1033,8 +1057,12 @@ export default function AdminPanel({
                   type="button"
                   onClick={() => {
                     leaveAdmin(() => {
-                      setSelectedRoleId('');
-                      setTab('artists');
+                      if (inRouter) {
+                        navigate('/admin/artists');
+                      } else {
+                        setSelectedRoleId('');
+                        setTab('artists');
+                      }
                     });
                   }}
                   className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
@@ -1055,8 +1083,12 @@ export default function AdminPanel({
                   type="button"
                   onClick={() => {
                     leaveAdmin(() => {
-                      setSelectedRoleId('');
-                      setTab('users');
+                      if (inRouter) {
+                        navigate('/admin/users');
+                      } else {
+                        setSelectedRoleId('');
+                        setTab('users');
+                      }
                     });
                   }}
                   className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
@@ -1077,8 +1109,12 @@ export default function AdminPanel({
                   type="button"
                   onClick={() => {
                     leaveAdmin(() => {
-                      setSelectedRoleId('');
-                      setTab('shows');
+                      if (inRouter) {
+                        navigate('/admin/shows');
+                      } else {
+                        setSelectedRoleId('');
+                        setTab('shows');
+                      }
                     });
                   }}
                   className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
@@ -1099,8 +1135,12 @@ export default function AdminPanel({
                   type="button"
                   onClick={() => {
                     leaveAdmin(() => {
-                      setSelectedRoleId('');
-                      setTab('roles');
+                      if (inRouter) {
+                        navigate('/admin/roles');
+                      } else {
+                        setSelectedRoleId('');
+                        setTab('roles');
+                      }
                     });
                   }}
                   className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
@@ -1121,8 +1161,12 @@ export default function AdminPanel({
                   type="button"
                   onClick={() => {
                     leaveAdmin(() => {
-                      setSelectedRoleId('');
-                      setTab('storage');
+                      if (inRouter) {
+                        navigate('/admin/storage');
+                      } else {
+                        setSelectedRoleId('');
+                        setTab('storage');
+                      }
                     });
                   }}
                   className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
@@ -1211,7 +1255,13 @@ export default function AdminPanel({
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => leaveAdmin(() => setSelectedRoleId(''))}
+                          onClick={() => leaveAdmin(() => {
+                            if (inRouter) {
+                              navigate('/admin/roles');
+                            } else {
+                              setSelectedRoleId('');
+                            }
+                          })}
                           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-gray-800 bg-gray-950/80 px-2 py-1.5 text-left text-sm font-medium text-gray-200 transition hover:border-gray-700 hover:bg-gray-900"
                         >
                           <ArrowLeft size={16} className="shrink-0" />
@@ -1234,7 +1284,13 @@ export default function AdminPanel({
                             type="button"
                             onClick={() => {
                               if (role.id === selectedRoleId) return;
-                              leaveAdmin(() => setSelectedRoleId(role.id));
+                              leaveAdmin(() => {
+                                if (inRouter) {
+                                  navigate(`/admin/roles/${role.id}`);
+                                } else {
+                                  setSelectedRoleId(role.id);
+                                }
+                              });
                             }}
                             className={`w-full rounded-lg px-2 py-1.5 text-left text-sm ${
                               role.id === selectedRoleId
@@ -1600,7 +1656,13 @@ export default function AdminPanel({
                         <button
                           key={role.id}
                           type="button"
-                          onClick={() => setSelectedRoleId(role.id)}
+                          onClick={() => {
+                            if (inRouter) {
+                              navigate(`/admin/roles/${role.id}`);
+                            } else {
+                              setSelectedRoleId(role.id);
+                            }
+                          }}
                           className={`grid w-full grid-cols-[1fr,140px] items-center gap-4 border-b px-4 py-4 text-left last:border-b-0 hover:bg-gray-900 md:grid-cols-[1fr,150px,120px] ${
                             role.isSystem ? 'border-gray-700 bg-gray-900/40' : 'border-gray-800'
                           }`}

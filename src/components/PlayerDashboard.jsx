@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useInRouterContext, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ChevronRight,
   ChevronsLeftRightEllipsis,
@@ -551,6 +552,23 @@ function PlayerDashboard({
   onOpenAdmin = null,
   onOpenProfile = null,
 }) {
+  const inRouter = useInRouterContext();
+  const location = inRouter ? useLocation() : { pathname: '/player', search: '' };
+  const navigate = inRouter ? useNavigate() : null;
+  const [routerSearchParams, setRouterSearchParams] = inRouter ? useSearchParams() : [null, null];
+  const routeParams = inRouter ? useParams() : {};
+
+  const pathname = inRouter ? location.pathname : '/player';
+  const showMatch = pathname.match(/^\/player\/shows\/([^/?#]+)/);
+  const playlistMatch = pathname.match(/^\/player\/playlists\/([^/?#]+)/);
+  const folderMatch = pathname.match(/^\/player\/folders\/([^/?#]+)/);
+
+  const routeShowId = routeParams.showId || (showMatch ? decodeURIComponent(showMatch[1]) : null);
+  const routePlaylistId = routeParams.playlistId || (playlistMatch ? decodeURIComponent(playlistMatch[1]) : null);
+  const routeFolderId = routeParams.folderId || (folderMatch ? decodeURIComponent(folderMatch[1]) : null);
+  const isSearchRoute = inRouter && pathname.startsWith('/player/search');
+  const isExactPlayerRoot = inRouter && (pathname === '/player' || pathname === '/player/');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [folders, setFolders] = useState([]);
@@ -641,10 +659,37 @@ function PlayerDashboard({
 
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mainPanelView, setMainPanelView] = useState('library');
+  const effectiveMainPanelView = mainPanelView === 'settings'
+    ? 'settings'
+    : (inRouter ? (isSearchRoute ? 'search' : 'library') : mainPanelView);
   const [lyricsViewOpen, setLyricsViewOpen] = useState(false);
-  const [searchDraft, setSearchDraft] = useState('');
-  const [searchType, setSearchType] = useState(PLAYER_SEARCH_TYPES.ALL);
+  const [searchDraft, setSearchDraft] = useState(() => (
+    inRouter && isSearchRoute ? (routerSearchParams?.get('q') || '') : ''
+  ));
+  const [searchType, setSearchType] = useState(() => (
+    inRouter && isSearchRoute ? (routerSearchParams?.get('type') || PLAYER_SEARCH_TYPES.ALL) : PLAYER_SEARCH_TYPES.ALL
+  ));
   const [searchCredits, setSearchCredits] = useState([]);
+
+  const searchDebounceTimerRef = useRef(null);
+  const lastSyncedSearchQueryRef = useRef(
+    inRouter && isSearchRoute ? (routerSearchParams?.get('q') ?? '') : ''
+  );
+  const lastSyncedSearchTypeRef = useRef(
+    inRouter && isSearchRoute ? (routerSearchParams?.get('type') || PLAYER_SEARCH_TYPES.ALL) : PLAYER_SEARCH_TYPES.ALL
+  );
+  const searchTypeRef = useRef(searchType);
+  searchTypeRef.current = searchType;
+  const searchDraftRef = useRef(searchDraft);
+  searchDraftRef.current = searchDraft;
+
+  useEffect(() => {
+    return () => {
+      if (searchDebounceTimerRef.current) {
+        clearTimeout(searchDebounceTimerRef.current);
+      }
+    };
+  }, []);
   const [searchCreditsLoading, setSearchCreditsLoading] = useState(false);
   const [focusedSearchCreditId, setFocusedSearchCreditId] = useState(null);
   const [libraryScopeFolderId, setLibraryScopeFolderId] = useState(null);
@@ -1194,7 +1239,9 @@ function PlayerDashboard({
 
   const selectedPlaylistItems = useMemo(() => {
     if (!selectedPlaylistId) return [];
-    return playlistItemsByPlaylistId[selectedPlaylistId] || [];
+    return playlistItemsByPlaylistId[selectedPlaylistId]
+      || playlistItemsByPlaylistId[String(selectedPlaylistId)]
+      || [];
   }, [playlistItemsByPlaylistId, selectedPlaylistId]);
 
   const myDeviceQueue = useMemo(() => (
@@ -2287,18 +2334,18 @@ function PlayerDashboard({
   const hasCurrentLyrics = hasPlayerLyrics(currentPlaybackLyrics);
   const handleToggleLyricsView = () => {
     if (!hasCurrentLyrics) return;
-    if (mainPanelView === 'settings') {
+    if (effectiveMainPanelView === 'settings') {
       setMainPanelView('library');
       if (!lyricsViewOpen) {
         setLyricsViewOpen(true);
       }
       return;
     }
-    if (!lyricsViewOpen) setMainPanelView('library');
+    if (!lyricsViewOpen && !inRouter) setMainPanelView('library');
     setLyricsViewOpen((open) => !open);
   };
   const defaultTuttiCollectionId = defaultTuttiShowId ? `show:${defaultTuttiShowId}` : 'tutti';
-  const selectedPlaylist = playlists.find((playlist) => playlist.id === selectedPlaylistId) || null;
+  const selectedPlaylist = playlists.find((playlist) => String(playlist.id) === String(selectedPlaylistId)) || null;
   const loopLabel = loopMode === PLAYER_LOOP_MODES.OFF
     ? 'Loop off'
     : (loopMode === PLAYER_LOOP_MODES.ALL ? 'Loop all' : 'Loop one');
@@ -2407,12 +2454,24 @@ function PlayerDashboard({
     setLibraryScopeFolderId(nextFolderId);
     if (!nextFolderId) {
       setSelectedFolderId(null);
+      if (inRouter) {
+        navigate('/player');
+      }
+    } else if (inRouter) {
+      navigate(`/player/folders/${nextFolderId}`);
     }
-  }, []);
+  }, [inRouter, navigate]);
 
   const handleSelectLibraryEntry = useCallback((entry) => {
     if (!entry) return;
-    setMainPanelView('library');
+    if (searchDebounceTimerRef.current) {
+      clearTimeout(searchDebounceTimerRef.current);
+    }
+    if (!inRouter) setMainPanelView('library');
+    if (searchDraftRef.current) {
+      setSearchDraft('');
+      lastSyncedSearchQueryRef.current = '';
+    }
     if (entry.kind === 'folder') {
       const folderId = entry.folder?.id || null;
       setLibraryScopeFolderId(folderId);
@@ -2420,6 +2479,9 @@ function PlayerDashboard({
       setSelectedPlaylistId(null);
       setActiveIndex(-1);
       handleSelectCollection(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES, folderId || 'root');
+      if (inRouter && folderId) {
+        navigate(`/player/folders/${folderId}`);
+      }
       return;
     }
     if (entry.kind === 'playlist' && entry.playlist?.id) {
@@ -2427,6 +2489,9 @@ function PlayerDashboard({
       setSelectedFolderId(null);
       setActiveIndex(-1);
       handleSelectCollection(PLAYER_COLLECTION_TYPES.PLAYLIST, entry.playlist.id);
+      if (inRouter) {
+        navigate(`/player/playlists/${entry.playlist.id}`);
+      }
       return;
     }
     if (entry.kind === 'mix' && entry.mix) {
@@ -2441,7 +2506,7 @@ function PlayerDashboard({
         handleSelectCollection(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES, mixFolderId || 'root');
       }
     }
-  }, [handleSelectCollection, handleSelectItem, myMixes]);
+  }, [handleSelectCollection, handleSelectItem, myMixes, inRouter, navigate]);
 
   const handlePlayLibraryMix = useCallback(async (mix) => {
     if (!mix) return;
@@ -2458,23 +2523,81 @@ function PlayerDashboard({
   }, [myMixes, playMixItem]);
 
   const handleClearSearch = useCallback(() => {
+    if (searchDebounceTimerRef.current) {
+      clearTimeout(searchDebounceTimerRef.current);
+    }
+    lastSyncedSearchQueryRef.current = '';
+    lastSyncedSearchTypeRef.current = PLAYER_SEARCH_TYPES.ALL;
     setSearchDraft('');
     setSearchType(PLAYER_SEARCH_TYPES.ALL);
     setFocusedSearchCreditId(null);
-    if (mainPanelView === 'search') setMainPanelView('library');
-  }, [mainPanelView]);
+    if (!inRouter) setMainPanelView('library');
+    if (inRouter && isSearchRoute) navigate('/player', { replace: true });
+  }, [inRouter, isSearchRoute, navigate]);
 
   const handleSubmitSearch = useCallback((query) => {
+    if (searchDebounceTimerRef.current) {
+      clearTimeout(searchDebounceTimerRef.current);
+    }
     const nextQuery = String(query || '').trim();
     if (!nextQuery) {
       handleClearSearch();
       return;
     }
     setSearchDraft(nextQuery);
-    setSearchType(PLAYER_SEARCH_TYPES.ALL);
-    setMainPanelView('search');
+    lastSyncedSearchQueryRef.current = nextQuery;
+    if (!inRouter) setMainPanelView('search');
     void ensureSearchCredits();
-  }, [ensureSearchCredits, handleClearSearch]);
+    if (inRouter) {
+      navigate(`/player/search?q=${encodeURIComponent(nextQuery)}&type=${encodeURIComponent(searchTypeRef.current)}`, { replace: isSearchRoute });
+    }
+  }, [ensureSearchCredits, handleClearSearch, inRouter, isSearchRoute, navigate]);
+
+  const handleSearchInputChange = useCallback((next) => {
+    if (searchDebounceTimerRef.current) {
+      clearTimeout(searchDebounceTimerRef.current);
+    }
+    setSearchDraft(next);
+    setFocusedSearchCreditId(null);
+
+    const trimmed = String(next || '').trim();
+    if (!trimmed) {
+      lastSyncedSearchQueryRef.current = '';
+      lastSyncedSearchTypeRef.current = PLAYER_SEARCH_TYPES.ALL;
+      setSearchType(PLAYER_SEARCH_TYPES.ALL);
+      if (!inRouter) setMainPanelView('library');
+      if (inRouter && isSearchRoute) navigate('/player', { replace: true });
+      return;
+    }
+
+    if (!inRouter) setMainPanelView('search');
+    void ensureSearchCredits();
+
+    if (inRouter) {
+      if (!isSearchRoute) {
+        lastSyncedSearchQueryRef.current = trimmed;
+        navigate(`/player/search?q=${encodeURIComponent(trimmed)}&type=${encodeURIComponent(searchTypeRef.current)}`);
+      } else {
+        searchDebounceTimerRef.current = setTimeout(() => {
+          lastSyncedSearchQueryRef.current = trimmed;
+          navigate(`/player/search?q=${encodeURIComponent(trimmed)}&type=${encodeURIComponent(searchTypeRef.current)}`, { replace: true });
+        }, 300);
+      }
+    }
+  }, [ensureSearchCredits, inRouter, isSearchRoute, navigate]);
+
+  const handleSearchTypeChange = useCallback((nextType) => {
+    if (searchDebounceTimerRef.current) {
+      clearTimeout(searchDebounceTimerRef.current);
+    }
+    setSearchType(nextType);
+    lastSyncedSearchTypeRef.current = nextType;
+    if (inRouter) {
+      const q = searchDraftRef.current.trim();
+      lastSyncedSearchQueryRef.current = q;
+      navigate(`/player/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(nextType)}`, { replace: true });
+    }
+  }, [inRouter, navigate]);
 
   const playSearchMix = useCallback(async (mix, collectionType, collectionId, index) => {
     const queueItem = createQueueItemFromMix(mix, collectionType, collectionId);
@@ -2492,13 +2615,22 @@ function PlayerDashboard({
 
   const handleSearchSelect = useCallback(async (item) => {
     if (!item) return;
+    if (searchDebounceTimerRef.current) {
+      clearTimeout(searchDebounceTimerRef.current);
+    }
     if (item.type === 'show' && item.payload?.id) {
-      setMainPanelView('library');
+      if (!inRouter) setMainPanelView('library');
+      setSearchDraft('');
+      lastSyncedSearchQueryRef.current = '';
       setSelectedPlaylistId(null);
       setSelectedFolderId(null);
       setLibraryScopeFolderId(null);
       handleSelectCollection(PLAYER_COLLECTION_TYPES.TUTTI, `show:${item.payload.id}`);
       setActiveIndex(-1);
+      if (inRouter) {
+        navigate(`/player/shows/${item.payload.id}`);
+        return;
+      }
       return;
     }
     if (item.type === 'song' && item.payload) {
@@ -2509,14 +2641,23 @@ function PlayerDashboard({
       const index = (show?.mixes || tuttiMixes).findIndex((candidate) => (
         String(candidate.projectId || candidate.id) === String(mix.projectId || mix.id)
       ));
-      setMainPanelView('library');
+      if (!inRouter) setMainPanelView('library');
+      setSearchDraft('');
+      lastSyncedSearchQueryRef.current = '';
       setSelectedPlaylistId(null);
       setSelectedFolderId(null);
       setLibraryScopeFolderId(null);
+      if (inRouter && showId) {
+        navigate(`/player/shows/${showId}?play=${mix.projectId || mix.id}`);
+        return;
+      }
       await playSearchMix(mix, PLAYER_COLLECTION_TYPES.TUTTI, collectionId, index >= 0 ? index : 0);
       return;
     }
     if (item.type === 'mix' && item.payload) {
+      if (!inRouter) setMainPanelView('library');
+      setSearchDraft('');
+      lastSyncedSearchQueryRef.current = '';
       const mix = item.payload;
       const ownedIndex = myMixes.findIndex((candidate) => String(candidate.id) === String(mix.id));
       if (ownedIndex >= 0) {
@@ -2532,19 +2673,39 @@ function PlayerDashboard({
       }
       return;
     }
-    if (item.type === 'playlist' && item.payload) {
+    if (item.type === 'playlist' && item.payload?.id) {
+      if (!inRouter) setMainPanelView('library');
+      setSearchDraft('');
+      lastSyncedSearchQueryRef.current = '';
+      if (inRouter) {
+        navigate(`/player/playlists/${item.payload.id}`);
+        return;
+      }
       handleSelectLibraryEntry({ kind: 'playlist', playlist: item.payload });
       return;
     }
-    if (item.type === 'folder' && item.payload) {
+    if (item.type === 'folder' && item.payload?.id) {
+      if (!inRouter) setMainPanelView('library');
+      setSearchDraft('');
+      lastSyncedSearchQueryRef.current = '';
+      if (inRouter) {
+        navigate(`/player/folders/${item.payload.id}`);
+        return;
+      }
       handleSelectLibraryEntry({ kind: 'folder', folder: item.payload });
       return;
     }
     if (item.type === 'credit') {
       setSearchType(PLAYER_SEARCH_TYPES.CREDITS);
+      lastSyncedSearchTypeRef.current = PLAYER_SEARCH_TYPES.CREDITS;
       setFocusedSearchCreditId(item.id);
-      setMainPanelView('search');
+      if (!inRouter) setMainPanelView('search');
       void ensureSearchCredits();
+      if (inRouter) {
+        const q = searchDraftRef.current.trim();
+        lastSyncedSearchQueryRef.current = q;
+        navigate(`/player/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(PLAYER_SEARCH_TYPES.CREDITS)}`, { replace: true });
+      }
     }
   }, [
     ensureSearchCredits,
@@ -2555,11 +2716,209 @@ function PlayerDashboard({
     playSearchMix,
     tuttiMixes,
     tuttiShows,
+    inRouter,
+    navigate,
   ]);
 
   const handleSearchPlay = useCallback(async (item) => {
     await handleSearchSelect(item);
   }, [handleSearchSelect]);
+
+  const previousPathnameRef = useRef(inRouter ? location.pathname : '/player');
+  useEffect(() => {
+    if (!inRouter) return;
+    if (previousPathnameRef.current !== location.pathname) {
+      previousPathnameRef.current = location.pathname;
+      if (!isSearchRoute && searchDraftRef.current) {
+        setSearchDraft('');
+        lastSyncedSearchQueryRef.current = '';
+      }
+    }
+  }, [inRouter, location.pathname, isSearchRoute]);
+
+  useEffect(() => {
+    if (!inRouter || loading) return;
+
+    if (routePlaylistId) {
+      if (playlists.length > 0) {
+        const found = playlists.some((p) => String(p.id) === String(routePlaylistId));
+        if (found) {
+          if (String(selectedPlaylistId) !== String(routePlaylistId)) {
+            setSelectedPlaylistId(routePlaylistId);
+            setSelectedFolderId(null);
+            setLibraryScopeFolderId(null);
+            setActiveCollectionType(PLAYER_COLLECTION_TYPES.PLAYLIST);
+            setActiveCollectionId(routePlaylistId);
+          }
+        } else {
+          setError('Playlist not found or private.');
+          navigate('/player', { replace: true });
+        }
+      }
+      return;
+    }
+
+    if (routeFolderId) {
+      if (folders.length > 0) {
+        const found = folders.some((f) => String(f.id) === String(routeFolderId));
+        if (found) {
+          if (String(selectedFolderId) !== String(routeFolderId) || String(libraryScopeFolderId) !== String(routeFolderId)) {
+            setLibraryScopeFolderId(routeFolderId);
+            setSelectedFolderId(routeFolderId);
+            setSelectedPlaylistId(null);
+            setActiveCollectionType(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES);
+            setActiveCollectionId(routeFolderId);
+          }
+        } else {
+          setError('Folder not found or private.');
+          navigate('/player', { replace: true });
+        }
+      }
+      return;
+    }
+
+    if (routeShowId) {
+      if (tuttiShows.length > 0) {
+        const found = tuttiShows.some((s) => String(s.id) === String(routeShowId));
+        if (found) {
+          const targetId = `show:${routeShowId}`;
+          if (activeCollectionId !== targetId || activeCollectionType !== PLAYER_COLLECTION_TYPES.TUTTI) {
+            setSelectedPlaylistId(null);
+            setSelectedFolderId(null);
+            setLibraryScopeFolderId(null);
+            setActiveCollectionType(PLAYER_COLLECTION_TYPES.TUTTI);
+            setActiveCollectionId(targetId);
+          }
+        } else {
+          navigate('/player', { replace: true });
+        }
+      }
+      return;
+    }
+
+    if (isSearchRoute) {
+      const q = routerSearchParams?.get('q') ?? '';
+      if (q !== lastSyncedSearchQueryRef.current) {
+        lastSyncedSearchQueryRef.current = q;
+        if (q !== searchDraftRef.current) {
+          setSearchDraft(q);
+        }
+      }
+      const t = routerSearchParams?.get('type') || PLAYER_SEARCH_TYPES.ALL;
+      if (t !== lastSyncedSearchTypeRef.current) {
+        lastSyncedSearchTypeRef.current = t;
+        if (t !== searchTypeRef.current) {
+          setSearchType(t);
+        }
+      }
+      return;
+    }
+
+    if (isExactPlayerRoot) {
+      if (selectedPlaylistId || selectedFolderId) {
+        setSelectedPlaylistId(null);
+        setSelectedFolderId(null);
+        setLibraryScopeFolderId(null);
+        setActiveCollectionType(PLAYER_COLLECTION_TYPES.TUTTI);
+        setActiveCollectionId(defaultTuttiCollectionId);
+      }
+    }
+  }, [
+    inRouter,
+    loading,
+    routePlaylistId,
+    routeFolderId,
+    routeShowId,
+    isSearchRoute,
+    isExactPlayerRoot,
+    playlists,
+    folders,
+    tuttiShows,
+    selectedPlaylistId,
+    selectedFolderId,
+    libraryScopeFolderId,
+    activeCollectionId,
+    activeCollectionType,
+    routerSearchParams,
+    defaultTuttiCollectionId,
+    navigate,
+  ]);
+
+  const playParam = routerSearchParams?.get('play');
+  const playHandledRef = useRef('');
+
+  useEffect(() => {
+    if (!playParam || loading || !inRouter) return;
+    if (playHandledRef.current === playParam) return;
+    playHandledRef.current = playParam;
+
+    const clearPlayParam = () => {
+      if (setRouterSearchParams && routerSearchParams) {
+        const next = new URLSearchParams(routerSearchParams);
+        next.delete('play');
+        setRouterSearchParams(next, { replace: true });
+      }
+    };
+
+    // 1. Look in activeQueueItems
+    const queueIndex = activeQueueItems.findIndex((item) => (
+      String(item.mixId || item.id || item.projectId) === String(playParam)
+    ));
+    if (queueIndex >= 0) {
+      playMixItem(activeQueueItems[queueIndex], queueIndex);
+      clearPlayParam();
+      return;
+    }
+
+    // 2. Look in myMixes or globalMixes
+    const userMix = [...myMixes, ...globalMixes].find((m) => (
+      String(m.id) === String(playParam) || String(m.projectId) === String(playParam)
+    ));
+    if (userMix) {
+      const qItem = createQueueItemFromMix(
+        userMix,
+        PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES,
+        userMix.folderId || 'root'
+      );
+      if (qItem) {
+        playMixItem(qItem, 0);
+      }
+      clearPlayParam();
+      return;
+    }
+
+    // 3. Look in tuttiMixes (fallback for private mix)
+    const tuttiMatch = tuttiMixes.find((m) => (
+      String(m.projectId) === String(playParam) || String(m.id) === String(playParam)
+    ));
+    if (tuttiMatch) {
+      setError('Private mix unavailable. Playing original Tutti track.');
+      const showId = String(tuttiMatch.showId || 'unknown-show');
+      const show = tuttiShows.find((s) => String(s.id) === showId);
+      const idx = (show?.mixes || tuttiMixes).findIndex((candidate) => (
+        String(candidate.projectId || candidate.id) === String(tuttiMatch.projectId || tuttiMatch.id)
+      ));
+      playSearchMix(tuttiMatch, PLAYER_COLLECTION_TYPES.TUTTI, `show:${showId}`, idx >= 0 ? idx : 0);
+      clearPlayParam();
+      return;
+    }
+
+    // Not found
+    clearPlayParam();
+  }, [
+    playParam,
+    loading,
+    inRouter,
+    activeQueueItems,
+    myMixes,
+    globalMixes,
+    tuttiMixes,
+    tuttiShows,
+    playMixItem,
+    playSearchMix,
+    routerSearchParams,
+    setRouterSearchParams,
+  ]);
 
   const openCreditsForMix = useCallback(async (mix) => {
     if (!mix?.projectId) return;
@@ -2886,6 +3245,11 @@ function PlayerDashboard({
   }, [playMixItem, selectedPlaylist]);
 
   const handleGoHome = useCallback(() => {
+    if (searchDebounceTimerRef.current) {
+      clearTimeout(searchDebounceTimerRef.current);
+    }
+    lastSyncedSearchQueryRef.current = '';
+    lastSyncedSearchTypeRef.current = PLAYER_SEARCH_TYPES.ALL;
     setMainPanelView('library');
     setSearchDraft('');
     setSearchType(PLAYER_SEARCH_TYPES.ALL);
@@ -2895,7 +3259,10 @@ function PlayerDashboard({
     setActiveCollectionType(PLAYER_COLLECTION_TYPES.TUTTI);
     setActiveCollectionId(defaultTuttiCollectionId);
     setActiveIndex(-1);
-  }, [defaultTuttiCollectionId]);
+    if (inRouter) {
+      navigate('/player');
+    }
+  }, [defaultTuttiCollectionId, inRouter, navigate]);
 
   return (
     <div className="h-full flex flex-col bg-gray-900 text-white">
@@ -2913,17 +3280,7 @@ function PlayerDashboard({
           <div className="w-full min-w-0 max-w-md">
             <PlayerSearchBar
               value={searchDraft}
-              onChange={(next) => {
-                setSearchDraft(next);
-                setFocusedSearchCreditId(null);
-                if (!String(next || '').trim()) {
-                  setSearchType(PLAYER_SEARCH_TYPES.ALL);
-                  if (mainPanelView === 'search') setMainPanelView('library');
-                  return;
-                }
-                if (mainPanelView !== 'settings') setMainPanelView('search');
-                void ensureSearchCredits();
-              }}
+              onChange={handleSearchInputChange}
               results={searchResults}
               loading={searchCreditsLoading}
               onFocus={() => { void ensureSearchCredits(); }}
@@ -3037,7 +3394,7 @@ function PlayerDashboard({
             />
 
             <div className="flex-1 min-w-0 rounded-lg border border-gray-700 bg-gray-800/80 flex flex-col overflow-hidden">
-              {mainPanelView === 'settings' ? (
+              {effectiveMainPanelView === 'settings' ? (
                 <>
                   <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
                     <div>
@@ -3074,7 +3431,7 @@ function PlayerDashboard({
                   songTitle={nowPlayingLabel || activeQueueItem?.name || ''}
                   onSeek={commitTimelineSeek}
                 />
-              ) : mainPanelView === 'search' ? (
+              ) : effectiveMainPanelView === 'search' ? (
                 <PlayerSearchResults
                   query={searchDraft.trim()}
                   results={searchResults}
@@ -3082,7 +3439,7 @@ function PlayerDashboard({
                   activeType={searchType}
                   focusedCreditId={focusedSearchCreditId}
                   onFocusedCreditChange={setFocusedSearchCreditId}
-                  onTypeChange={setSearchType}
+                  onTypeChange={handleSearchTypeChange}
                   onSelect={handleSearchSelect}
                   onPlay={handleSearchPlay}
                 />
@@ -3841,10 +4198,10 @@ function PlayerDashboard({
               type="button"
               onClick={handleToggleLyricsView}
               disabled={!hasCurrentLyrics}
-              className={`shrink-0 p-1.5 transition-colors ${!hasCurrentLyrics ? 'text-gray-400' : (lyricsViewOpen && mainPanelView !== 'settings' ? 'text-blue-300' : 'text-gray-400 hover:text-gray-200')} disabled:cursor-not-allowed disabled:opacity-30`}
+              className={`shrink-0 p-1.5 transition-colors ${!hasCurrentLyrics ? 'text-gray-400' : (lyricsViewOpen && effectiveMainPanelView !== 'settings' ? 'text-blue-300' : 'text-gray-400 hover:text-gray-200')} disabled:cursor-not-allowed disabled:opacity-30`}
               title="Lyrics"
               aria-label="Lyrics"
-              aria-pressed={lyricsViewOpen && hasCurrentLyrics && mainPanelView !== 'settings'}
+              aria-pressed={lyricsViewOpen && hasCurrentLyrics && effectiveMainPanelView !== 'settings'}
             >
               <MicVocal size={20} />
             </button>

@@ -212,12 +212,23 @@ export function buildLibraryVisibleItems({
 } = {}) {
   if (libraryScopeFolderId) {
     const scopedFolders = folders
-      .filter((folder) => (folder.parentFolderId || null) === libraryScopeFolderId)
+      .filter((folder) => String(folder.parentFolderId || '') === String(libraryScopeFolderId))
       .map(mapFolder);
     const scopedPlaylists = playlists
-      .filter((playlist) => (playlist.folderId || null) === libraryScopeFolderId)
+      .filter((playlist) => String(playlist.folderId || '') === String(libraryScopeFolderId))
       .map(mapPlaylist);
-    return [...scopedFolders, ...scopedPlaylists];
+    const playlistMixIds = new Set(
+      Object.values(playlistItemsByPlaylistId || {})
+        .flat()
+        .map((item) => item?.mixId)
+        .filter(Boolean)
+        .map((mixId) => String(mixId))
+    );
+    const scopedMixes = myMixes
+      .filter((mix) => String(mix.folderId || '') === String(libraryScopeFolderId))
+      .filter((mix) => !playlistMixIds.has(String(mix.id)))
+      .map(mapMix);
+    return [...scopedFolders, ...scopedPlaylists, ...scopedMixes];
   }
 
   const playlistMixIds = new Set(

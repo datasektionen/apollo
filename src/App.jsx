@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import useStore from './store/useStore';
 import Editor from './components/Editor';
 import HostedLogin from './components/HostedLogin';
@@ -22,6 +23,8 @@ import {
   createShow,
   createServerProject,
   deleteServerProject,
+  fetchPlayerGlobalMixes,
+  fetchPlayerMyDevice,
   getCurrentSession,
   isSessionRecoveryError,
   listServerProjects,
@@ -96,15 +99,6 @@ function remapProjectBlobIds(project, idMap) {
   };
 }
 
-function getBrowserPath() {
-  return window.location.pathname || '/';
-}
-
-function isAdminPath(path) {
-  const normalized = String(path || '/').replace(/\/+$/, '') || '/';
-  return normalized === '/admin';
-}
-
 function AdminAccessDenied({ onBack, onLogout }) {
   return (
     <div className="flex h-full w-full items-center justify-center bg-gray-900 px-6 text-white">
@@ -134,11 +128,125 @@ function AdminAccessDenied({ onBack, onLogout }) {
   );
 }
 
+function RequireAuth({ session, loading, error, onSsoLogin, children }) {
+  if (!session) {
+    return (
+      <HostedLogin
+        onSsoLogin={onSsoLogin}
+        loading={loading}
+        error={error}
+      />
+    );
+  }
+  return children;
+}
+
+function RequireAdmin({ session, onBack, onLogout, children }) {
+  if (!session?.user?.isAdmin) {
+    return <AdminAccessDenied onBack={onBack} onLogout={onLogout} />;
+  }
+  return children;
+}
+
+function DawProjectRoute({
+  serverSession,
+  remoteEditorSession,
+  advancedMixSession,
+  handleOpenServerProject,
+  handleOpenAdvancedMix,
+  handleBackToDashboard,
+  handleSwitchToPlayerMode,
+  handleSaveAdvancedMix,
+  setServerError,
+}) {
+  const { projectId, mixId } = useParams();
+  const navigate = useNavigate();
+  const loadingKeyRef = useRef('');
+
+  useEffect(() => {
+    if (!serverSession || !projectId) return;
+
+    const currentKey = `${projectId}:${mixId || ''}`;
+    const isLoaded = mixId
+      ? advancedMixSession?.mix?.id === mixId && remoteEditorSession?.serverProjectId === projectId
+      : remoteEditorSession?.serverProjectId === projectId && !advancedMixSession;
+
+    if (isLoaded) {
+      loadingKeyRef.current = currentKey;
+      return;
+    }
+
+    if (loadingKeyRef.current === currentKey) return;
+    loadingKeyRef.current = currentKey;
+
+    let cancelled = false;
+
+    const performLoad = async () => {
+      try {
+        if (mixId) {
+          const [myDevice, globalMixes] = await Promise.all([
+            fetchPlayerMyDevice(serverSession).catch(() => ({ myMixes: [] })),
+            fetchPlayerGlobalMixes(serverSession).catch(() => []),
+          ]);
+          const allMixes = [...(myDevice?.myMixes || []), ...(globalMixes || [])];
+          const found = allMixes.find((m) => String(m.id) === String(mixId));
+          if (found) {
+            await handleOpenAdvancedMix(found);
+            return;
+          }
+          if (!cancelled) {
+            console.warn('Advanced mix not found or private. Opening base project.');
+            navigate(`/daw/projects/${projectId}`, { replace: true });
+          }
+          return;
+        }
+
+        await handleOpenServerProject({ id: projectId });
+      } catch (err) {
+        if (!cancelled) {
+          setServerError(err.message || 'Failed to open project');
+          navigate('/daw', { replace: true });
+        }
+      }
+    };
+
+    performLoad();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, mixId, serverSession, remoteEditorSession, advancedMixSession, handleOpenServerProject, handleOpenAdvancedMix, navigate, setServerError]);
+
+  const isReady = mixId
+    ? advancedMixSession?.mix?.id === mixId && remoteEditorSession?.serverProjectId === projectId
+    : remoteEditorSession?.serverProjectId === projectId && !advancedMixSession;
+
+  if (!isReady) {
+    return null;
+  }
+
+  return (
+    <Editor
+      onBackToDashboard={handleBackToDashboard}
+      onSwitchToPlayerMode={handleSwitchToPlayerMode}
+      remoteSession={
+        remoteEditorSession
+          ? {
+              ...remoteEditorSession,
+              session: serverSession || null,
+            }
+          : null
+      }
+      advancedMixSession={advancedMixSession}
+      onSaveAdvancedMix={handleSaveAdvancedMix}
+    />
+  );
+}
+
 function App() {
-  const [view, setView] = useState('player'); // 'player' | 'daw' | 'editor'
+  const navigate = useNavigate();
   const openAttemptRef = useRef(0);
   const openReturnViewRef = useRef('player');
-  const [currentPath, setCurrentPath] = useState(getBrowserPath);
   const [serverSession, setServerSession] = useState(loadServerSession());
   const [authBootstrapping, setAuthBootstrapping] = useState(true);
   const [serverProjects, setServerProjects] = useState([]);
@@ -169,16 +277,6 @@ function App() {
       setServerLoading(false);
     }
   };
-
-  useEffect(() => {
-    const handlePopState = () => {
-      setCurrentPath(getBrowserPath());
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-    };
-  }, []);
 
   useEffect(() => installNativeDragGuard(), []);
 
@@ -244,14 +342,6 @@ function App() {
     beginOidcLogin();
   };
 
-  const navigateTo = (path) => {
-    const nextPath = String(path || '/');
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({}, '', nextPath);
-    }
-    setCurrentPath(getBrowserPath());
-  };
-
   const handleServerLogout = async () => {
     let redirectUrl = '';
     try {
@@ -267,7 +357,7 @@ function App() {
     setRemoteEditorSession(null);
     setAdvancedMixSession(null);
     setProfileDialogOpen(false);
-    setView('player');
+    navigate('/player');
     if (redirectUrl) {
       window.location.assign(redirectUrl);
     }
@@ -279,14 +369,14 @@ function App() {
     setServerLoading(false);
     setRemoteEditorSession(null);
     setAdvancedMixSession(null);
-    setView(openReturnViewRef.current || 'player');
+    navigate(openReturnViewRef.current === 'player' ? '/player' : '/daw');
   };
 
   const handleOpenServerProject = async (projectMeta) => {
     setServerError('');
     setServerLoading(true);
     const attempt = ++openAttemptRef.current;
-    openReturnViewRef.current = view;
+    openReturnViewRef.current = 'daw';
     const progressId = startLoadProgress({
       kind: 'open',
       title: projectMeta?.name || 'Project',
@@ -331,11 +421,11 @@ function App() {
         current: 'Loading audio…',
       });
       logLoadProgress('Editor mounting under the open screen to load stems and waveforms');
-      setView('editor');
     } catch (error) {
       if (openAttemptRef.current !== attempt) return;
       setServerError(error.message || 'Failed to open project');
       finishLoadProgress(error, progressId);
+      throw error;
     } finally {
       setServerLoading(false);
     }
@@ -347,7 +437,7 @@ function App() {
     setServerError('');
     setServerLoading(true);
     const attempt = ++openAttemptRef.current;
-    openReturnViewRef.current = view;
+    openReturnViewRef.current = 'player';
     const progressId = startLoadProgress({
       kind: 'open',
       title: mix?.name || 'Advanced mix',
@@ -403,11 +493,11 @@ function App() {
         current: 'Loading audio…',
       });
       logLoadProgress('Mix editor mounting under the open screen to load stems and waveforms');
-      setView('editor');
     } catch (error) {
       if (openAttemptRef.current !== attempt) return;
       setServerError(error.message || 'Failed to open mix editor');
       finishLoadProgress(error, progressId);
+      throw error;
     } finally {
       setServerLoading(false);
     }
@@ -439,8 +529,8 @@ function App() {
     try {
       const created = await createServerProject(name, serverSession, { musicalNumber, showId });
       await refreshServerData();
-      if (created?.project) {
-        await handleOpenServerProject(created.project);
+      if (created?.project?.id) {
+        navigate(`/daw/projects/${created.project.id}`);
       }
     } catch (error) {
       setServerError(error.message || 'Failed to create project');
@@ -511,7 +601,7 @@ function App() {
       });
 
       await refreshServerData();
-      await handleOpenServerProject({ id: importedProjectId, name: importedName, musicalNumber: snapshot.musicalNumber, showId });
+      navigate(`/daw/projects/${importedProjectId}`);
     } catch (error) {
       setServerError(error.message || 'Failed to import ZIP project to server');
     } finally {
@@ -594,33 +684,33 @@ function App() {
     if (advancedMixSession) {
       setAdvancedMixSession(null);
       setRemoteEditorSession(null);
-      setView('player');
+      navigate('/player');
       return;
     }
     setRemoteEditorSession(null);
-    setView('daw');
+    navigate('/daw');
   };
 
   const handleSwitchToPlayerMode = () => {
     setRemoteEditorSession(null);
     setAdvancedMixSession(null);
-    setView('player');
+    navigate('/player');
   };
 
   const handleSwitchToDawMode = () => {
     setRemoteEditorSession(null);
     setAdvancedMixSession(null);
-    setView('daw');
+    navigate('/daw');
   };
 
   const handleOpenAdmin = () => {
     setRemoteEditorSession(null);
     setAdvancedMixSession(null);
-    navigateTo('/admin');
+    navigate('/admin');
   };
 
   const handleLeaveAdmin = () => {
-    navigateTo('/');
+    navigate('/player');
   };
 
   const handleOpenProfile = () => {
@@ -646,75 +736,130 @@ function App() {
     return null;
   }
 
-  const adminRouteActive = isAdminPath(currentPath);
+  const playerElement = (
+    <RequireAuth session={serverSession} loading={serverLoading} error={serverError} onSsoLogin={handleSsoLogin}>
+      <PlayerDashboard
+        session={serverSession}
+        onLogout={handleServerLogout}
+        onSwitchToDawDashboard={handleSwitchToDawMode}
+        onOpenDawProject={handleOpenServerProject}
+        onOpenAdvancedMix={handleOpenAdvancedMix}
+        onOpenAdmin={handleOpenAdmin}
+        onOpenProfile={handleOpenProfile}
+      />
+    </RequireAuth>
+  );
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-gray-900 text-white">
-      {!serverSession ? (
-        <HostedLogin
-          onSsoLogin={handleSsoLogin}
-          loading={serverLoading}
-          error={serverError}
-        />
-      ) : adminRouteActive && !serverSession.user?.isAdmin ? (
-        <AdminAccessDenied
-          onBack={handleLeaveAdmin}
-          onLogout={handleServerLogout}
-        />
-      ) : adminRouteActive ? (
-        <AdminPanel
-          session={serverSession}
-          onClose={handleLeaveAdmin}
-          onLogout={handleServerLogout}
-          onOpenProfile={handleOpenProfile}
-          onSessionRefresh={handleSessionRefresh}
-        />
-      ) : view === 'editor' ? (
-        <Editor
-          onBackToDashboard={handleBackToDashboard}
-          onSwitchToPlayerMode={handleSwitchToPlayerMode}
-          remoteSession={
-            remoteEditorSession
-              ? {
-                ...remoteEditorSession,
-                session: serverSession || null,
-              }
-              : null
+    <div
+      className="h-screen w-screen overflow-hidden bg-gray-900 text-white"
+      style={{ overscrollBehaviorX: 'auto', overscrollBehaviorY: 'none' }}
+    >
+      <Routes>
+        <Route path="/" element={<Navigate to="/player" replace />} />
+        <Route path="/player" element={playerElement} />
+        <Route path="/player/shows/:showId" element={playerElement} />
+        <Route path="/player/playlists/:playlistId" element={playerElement} />
+        <Route path="/player/folders/:folderId" element={playerElement} />
+        <Route path="/player/search" element={playerElement} />
+        <Route path="/player/*" element={playerElement} />
+        <Route
+          path="/daw"
+          element={
+            <RequireAuth session={serverSession} loading={serverLoading} error={serverError} onSsoLogin={handleSsoLogin}>
+              <HostedDashboard
+                session={serverSession}
+                shows={serverShows}
+                projects={serverProjects}
+                onOpenProject={(project) => navigate(`/daw/projects/${project.id}`)}
+                onCreateProject={handleCreateServerProject}
+                onImportProject={handleImportServerProject}
+                onCreateShow={handleCreateShow}
+                onRenameShow={handleRenameShow}
+                onLogout={handleServerLogout}
+                onDeleteProject={handleDeleteServerProject}
+                onRenameProject={handleRenameServerProject}
+                onUpdateMusicalNumber={handleUpdateServerProjectMusicalNumber}
+                loading={serverLoading}
+                error={serverError}
+                onSwitchToPlayerMode={handleSwitchToPlayerMode}
+                onOpenAdmin={handleOpenAdmin}
+                onOpenProfile={handleOpenProfile}
+              />
+            </RequireAuth>
           }
-          advancedMixSession={advancedMixSession}
-          onSaveAdvancedMix={handleSaveAdvancedMix}
         />
-      ) : view === 'daw' ? (
-          <HostedDashboard
-            session={serverSession}
-            shows={serverShows}
-            projects={serverProjects}
-            onOpenProject={handleOpenServerProject}
-            onCreateProject={handleCreateServerProject}
-            onImportProject={handleImportServerProject}
-            onCreateShow={handleCreateShow}
-            onRenameShow={handleRenameShow}
-            onLogout={handleServerLogout}
-            onDeleteProject={handleDeleteServerProject}
-            onRenameProject={handleRenameServerProject}
-            onUpdateMusicalNumber={handleUpdateServerProjectMusicalNumber}
-            loading={serverLoading}
-            error={serverError}
-            onSwitchToPlayerMode={handleSwitchToPlayerMode}
-            onOpenAdmin={handleOpenAdmin}
-            onOpenProfile={handleOpenProfile}
-          />
-      ) : (
-        <PlayerDashboard
-          session={serverSession}
-          onLogout={handleServerLogout}
-          onSwitchToDawDashboard={handleSwitchToDawMode}
-          onOpenDawProject={handleOpenServerProject}
-          onOpenAdvancedMix={handleOpenAdvancedMix}
-          onOpenAdmin={handleOpenAdmin}
-          onOpenProfile={handleOpenProfile}
+        <Route
+          path="/daw/projects/:projectId"
+          element={
+            <RequireAuth session={serverSession} loading={serverLoading} error={serverError} onSsoLogin={handleSsoLogin}>
+              <DawProjectRoute
+                serverSession={serverSession}
+                remoteEditorSession={remoteEditorSession}
+                advancedMixSession={advancedMixSession}
+                handleOpenServerProject={handleOpenServerProject}
+                handleOpenAdvancedMix={handleOpenAdvancedMix}
+                handleBackToDashboard={handleBackToDashboard}
+                handleSwitchToPlayerMode={handleSwitchToPlayerMode}
+                handleSaveAdvancedMix={handleSaveAdvancedMix}
+                setServerError={setServerError}
+              />
+            </RequireAuth>
+          }
         />
-      )}
+        <Route
+          path="/daw/projects/:projectId/mix/:mixId"
+          element={
+            <RequireAuth session={serverSession} loading={serverLoading} error={serverError} onSsoLogin={handleSsoLogin}>
+              <DawProjectRoute
+                serverSession={serverSession}
+                remoteEditorSession={remoteEditorSession}
+                advancedMixSession={advancedMixSession}
+                handleOpenServerProject={handleOpenServerProject}
+                handleOpenAdvancedMix={handleOpenAdvancedMix}
+                handleBackToDashboard={handleBackToDashboard}
+                handleSwitchToPlayerMode={handleSwitchToPlayerMode}
+                handleSaveAdvancedMix={handleSaveAdvancedMix}
+                setServerError={setServerError}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route path="/admin" element={<Navigate to="/admin/roles" replace />} />
+        <Route
+          path="/admin/:tab"
+          element={
+            <RequireAuth session={serverSession} loading={serverLoading} error={serverError} onSsoLogin={handleSsoLogin}>
+              <RequireAdmin session={serverSession} onBack={handleLeaveAdmin} onLogout={handleServerLogout}>
+                <AdminPanel
+                  session={serverSession}
+                  onClose={handleLeaveAdmin}
+                  onLogout={handleServerLogout}
+                  onOpenProfile={handleOpenProfile}
+                  onSessionRefresh={handleSessionRefresh}
+                />
+              </RequireAdmin>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/roles/:roleId"
+          element={
+            <RequireAuth session={serverSession} loading={serverLoading} error={serverError} onSsoLogin={handleSsoLogin}>
+              <RequireAdmin session={serverSession} onBack={handleLeaveAdmin} onLogout={handleServerLogout}>
+                <AdminPanel
+                  session={serverSession}
+                  onClose={handleLeaveAdmin}
+                  onLogout={handleServerLogout}
+                  onOpenProfile={handleOpenProfile}
+                  onSessionRefresh={handleSessionRefresh}
+                />
+              </RequireAdmin>
+            </RequireAuth>
+          }
+        />
+        <Route path="*" element={<Navigate to="/player" replace />} />
+      </Routes>
       {serverSession ? (
         <ProfileDialog
           open={profileDialogOpen}

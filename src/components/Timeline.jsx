@@ -3231,7 +3231,11 @@ function Timeline({
   );
 
   const header = (
-    <div ref={rulerViewportRef} className="relative w-full min-w-0 overflow-hidden bg-gray-800" style={{ height: TIMELINE_RULER_HEIGHT }}>
+    <div
+      ref={rulerViewportRef}
+      className="relative w-full min-w-0 overflow-hidden bg-gray-800 overscroll-none"
+      style={{ height: TIMELINE_RULER_HEIGHT, overscrollBehavior: 'none' }}
+    >
       <div
         ref={rulerScrollRef}
         className="ruler-scrollbar-hidden absolute inset-0 overflow-x-scroll overflow-y-hidden"
@@ -3375,8 +3379,8 @@ function Timeline({
         }}
         data-timeline-scroll="true"
         aria-label="Timeline tracks"
-        className={`${sharedVerticalScroll ? 'h-full overflow-x-auto overflow-y-hidden' : 'absolute inset-0 overflow-auto'} scrollbar-hidden w-full min-w-0 overscroll-x-none`}
-        style={{ overscrollBehaviorX: 'none' }}
+        className={`${sharedVerticalScroll ? 'h-full overflow-x-auto overflow-y-hidden' : 'absolute inset-0 overflow-auto'} scrollbar-hidden w-full min-w-0 overscroll-none`}
+        style={{ overscrollBehavior: 'none', overscrollBehaviorX: 'none' }}
         onScroll={(event) => {
           if (event.currentTarget.scrollTop < 0) {
             event.currentTarget.scrollTop = 0;
@@ -3726,7 +3730,10 @@ function Timeline({
   }
 
   return (
-    <div className={`${sharedVerticalScroll ? '' : 'flex-1'} flex flex-col bg-gray-900 ${sharedVerticalScroll ? '' : 'overflow-hidden'} relative`} style={{ minWidth: 0 }}>
+    <div
+      className={`${sharedVerticalScroll ? '' : 'flex-1'} flex flex-col bg-gray-900 ${sharedVerticalScroll ? '' : 'overflow-hidden'} relative overscroll-none`}
+      style={{ minWidth: 0, overscrollBehavior: 'none' }}
+    >
       <div className="absolute right-3 z-50 -translate-y-1/2" style={{ top: `${TIMELINE_RULER_HEIGHT / 2}px` }}>{zoomOverlay}</div>
       {header}
       {lyricsLane}
