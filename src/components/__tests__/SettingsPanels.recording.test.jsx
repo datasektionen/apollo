@@ -101,11 +101,11 @@ describe('PlaybackDevicesSettingsPanel recording delay', () => {
     });
     expect(offsetField(view.container).value).toBe('63');
     expect(view.container.textContent).not.toContain('Headset Mic');
-    expect(view.container.textContent).toContain('Measure the input-to-output round trip');
-    expect(view.container.textContent).toContain('input device can hear the output device');
+    expect(view.container.textContent).not.toContain('Measure the input-to-output round trip');
+    expect(view.container.textContent).not.toContain('input device can hear the output device');
     expect(view.container.textContent).not.toContain('Keep measuring until I stop');
     const button = Array.from(view.container.querySelectorAll('button'))
-      .find((candidate) => candidate.textContent.trim() === 'Measure');
+      .find((candidate) => candidate.textContent.trim() === 'Latency test' || candidate.textContent.trim() === 'Measure');
     await act(async () => {
       button.click();
     });
@@ -113,6 +113,7 @@ describe('PlaybackDevicesSettingsPanel recording delay', () => {
 
     await views.pop().unmount();
     const plain = await renderPanel({});
+    expect(plain.container.textContent).not.toContain('Latency test');
     expect(plain.container.textContent).not.toContain('Measure');
     expect(offsetField(plain.container)).toBeTruthy();
   });
@@ -134,7 +135,7 @@ describe('PlaybackDevicesSettingsPanel recording delay', () => {
     expect(view.container.textContent).toContain('did not pick up the test sound');
   });
 
-  it('keeps the wireless warning on the measure hover', async () => {
+  it('does not render hover text on the measure button even when wireless is detected', async () => {
     const view = await renderPanel({}, {
       recordingDelay: {
         status: 'missing',
@@ -142,10 +143,8 @@ describe('PlaybackDevicesSettingsPanel recording delay', () => {
       },
       onMeasureRecordingDelay: vi.fn(),
     });
-    const hover = view.container.querySelector('.group');
-    expect(hover.textContent).toContain('Wireless device detected');
-    expect(hover.textContent).toContain('use wired devices');
-    expect(view.container.textContent.replace(hover.textContent, '')).not.toContain('Wireless device detected');
+    expect(view.container.textContent).not.toContain('Wireless device detected');
+    expect(view.container.textContent).not.toContain('Measure the input-to-output round trip');
   });
 
   it('renders and updates playback speed settings when showPlaybackSpeedSettings is true', async () => {

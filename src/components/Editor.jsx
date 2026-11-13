@@ -33,12 +33,17 @@ import { TIMELINE_RULER_HEIGHT } from '../utils/timelineViewport';
 import ExportDialog from './ExportDialog';
 import CreditsEditorDialog from './CreditsEditorDialog';
 import LyricsEditorDialog from './LyricsEditorDialog';
+import { LatencyCorrectionDialog } from './LatencyCorrectionDialog';
 import { dbToVolume, volumeToDb } from '../utils/audio';
 import { applyChoirAutoPanToProject } from '../utils/choirAutoPan';
 import { DawSettingsPanel, PlaybackDevicesSettingsPanel, ProjectSettingsPanel } from './SettingsPanels';
 import { useDawViewSettings } from '../hooks/useDawViewSettings';
 import { measureRecordingRoundTrip } from '../lib/recordingLatencyCalibration';
-import { RECORDING_OFFSET_MODES } from '../utils/playbackOutput';
+import {
+  RECORDING_OFFSET_MODES,
+  normalizePlaybackDeviceSettings,
+  normalizeRecordingCalibration,
+} from '../utils/playbackOutput';
 import { describeRecordingDevices, resolveRecordingOffset } from '../utils/recordingDevices';
 import useKeyboardShortcuts from '../utils/useKeyboardShortcuts';
 import { processRecordingOverwrites } from '../utils/clipCollision';
@@ -343,6 +348,8 @@ function Editor({
   const [returnToStartToken, setReturnToStartToken] = useState(0);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showLyricsDialog, setShowLyricsDialog] = useState(false);
+  const [latencyDialogOpen, setLatencyDialogOpen] = useState(false);
+  const pendingRecordAfterLatencyRef = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState('playback');
   const [dawView, setDawView] = useDawViewSettings();
@@ -1656,57 +1663,93 @@ function Editor({
     return { ...resolved, deviceInfo };
   };
 
+  const handleConfirmLatencyCorrection = async (offsetMs, measuredRecord = null) => {
+    let devices = [];
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch {
+      devices = [];
+    }
+    const settings = audioSettingsRef.current;
+    const deviceInfo = describeRecordingDevices(devices, {
+      inputDeviceId: settings.inputDeviceId,
+      outputDeviceId: settings.outputDeviceId,
+    });
+
+    const sampleRate = measuredRecord?.sampleRate
+      ?? audioManager.audioContext?.sampleRate
+      ?? 48000;
+    const outputLatencyMs = Number.isFinite(measuredRecord?.outputLatencyMs) && measuredRecord.outputLatencyMs > 0
+      ? measuredRecord.outputLatencyMs
+      : (Number.isFinite(audioManager.audioContext?.outputLatency) && audioManager.audioContext.outputLatency > 0
+        ? audioManager.audioContext.outputLatency * 1000
+        : null);
+    const baseLatencyMs = Number.isFinite(measuredRecord?.baseLatencyMs)
+      ? measuredRecord.baseLatencyMs
+      : (Number.isFinite(audioManager.audioContext?.baseLatency) ? audioManager.audioContext.baseLatency * 1000 : null);
+
+    const record = {
+      roundTripMs: offsetMs,
+      spreadMs: Number.isFinite(measuredRecord?.spreadMs) ? measuredRecord.spreadMs : 0,
+      sigmaMs: Number.isFinite(measuredRecord?.sigmaMs) ? measuredRecord.sigmaMs : 0,
+      uncertaintyMs: Number.isFinite(measuredRecord?.uncertaintyMs) ? measuredRecord.uncertaintyMs : 0,
+      stable: true,
+      measuredAt: Date.now(),
+      sampleRate,
+      outputLatencyMs,
+      baseLatencyMs,
+      inputLabel: deviceInfo.input?.label || '',
+      outputLabel: deviceInfo.output?.label || '',
+    };
+
+    const normalizedRecord = normalizeRecordingCalibration(record);
+
+    const updatedCalibrations = {
+      ...(settings.recordingCalibrations || {}),
+      [deviceInfo.key]: normalizedRecord,
+      'default|default': normalizedRecord,
+    };
+
+    const updatedSettings = normalizePlaybackDeviceSettings({
+      ...settings,
+      recordingCalibrations: updatedCalibrations,
+      recordingOffsetMode: RECORDING_OFFSET_MODES.AUTO,
+      recordingOffsetMs: offsetMs,
+    });
+
+    audioSettingsRef.current = updatedSettings;
+    setAudioSettings(updatedSettings);
+
+    try {
+      const existing = JSON.parse(localStorage.getItem('apollo.settings') || '{}');
+      localStorage.setItem('apollo.settings', JSON.stringify({
+        ...existing,
+        ...updatedSettings,
+      }));
+    } catch {
+      // ignore
+    }
+
+    void refreshAudioDevices();
+    setLatencyDialogOpen(false);
+
+    if (pendingRecordAfterLatencyRef.current) {
+      pendingRecordAfterLatencyRef.current = false;
+      setTimeout(() => {
+        void handleRecord();
+      }, 50);
+    }
+  };
+
   const startRecordingDelayMeasurement = () => {
-    if (isRecording || measuringRecordingDelayRef.current) return null;
+    if (isRecording) return null;
     if (isPlaying) {
       pause();
     }
     void refreshAudioDevices();
-    setSettingsTab('playback');
-    setSettingsOpen(true);
-
-    measuringRecordingDelayRef.current = true;
-    setMeasuringRecordingDelay(true);
-    setRecordingDelayError('');
-    return (async () => {
-      try {
-        const record = await measureRecordingRoundTrip({
-          inputDeviceId: getActiveInputDeviceId(),
-        });
-        let devices = [];
-        try {
-          devices = await navigator.mediaDevices.enumerateDevices();
-        } catch {
-          devices = [];
-        }
-        const settings = audioSettingsRef.current;
-        const deviceInfo = describeRecordingDevices(devices, {
-          inputDeviceId: settings.inputDeviceId,
-          outputDeviceId: settings.outputDeviceId,
-        });
-        const offsetMs = Math.max(0, Math.round(Number(record.roundTripMs) || 0));
-        saveRecordingCalibration(deviceInfo.key, {
-          ...record,
-          inputLabel: deviceInfo.input?.label || '',
-          outputLabel: deviceInfo.output?.label || '',
-        });
-        setAudioSettings((prev) => ({
-          ...prev,
-          recordingOffsetMode: RECORDING_OFFSET_MODES.AUTO,
-          recordingOffsetMs: offsetMs,
-        }));
-        void refreshAudioDevices();
-        return record;
-      } catch (error) {
-        if (error?.code !== 'aborted') {
-          setRecordingDelayError(error?.message || 'The measurement could not be completed.');
-        }
-        return null;
-      } finally {
-        measuringRecordingDelayRef.current = false;
-        setMeasuringRecordingDelay(false);
-      }
-    })();
+    pendingRecordAfterLatencyRef.current = false;
+    setLatencyDialogOpen(true);
+    return null;
   };
 
   // Resolves to `true` when this client owns the lock, otherwise to a
@@ -2515,7 +2558,9 @@ function Editor({
         // Prompt for a measurement before touching any recording lock.
         const offsetInfo = await resolveRecordingOffsetForTake();
         if (offsetInfo.offsetMs == null) {
-          void startRecordingDelayMeasurement();
+          isArmingRecordingRef.current = false;
+          pendingRecordAfterLatencyRef.current = true;
+          setLatencyDialogOpen(true);
           return;
         }
 
@@ -2555,6 +2600,7 @@ function Editor({
 
         const track = project.tracks.find(t => t.id === selectedTrackId);
         const offsetMs = normalizeRecordingOffset(offsetInfo.offsetMs);
+        const effectiveOffsetMs = offsetMs + audioManager.getMasterDspLatencyMs();
         await recordingManager.ensureCapture({ deviceId: getActiveInputDeviceId() });
 
         // Store original clips state
@@ -2570,7 +2616,7 @@ function Editor({
           timelineStartMs = currentTimeMs;
           startRecording();
           recordingStartTimeRef.current = timelineStartMs;
-          setRecordingSegments([{ startTimeMs: timelineStartMs, offsetMs }]);
+          setRecordingSegments([{ startTimeMs: timelineStartMs, offsetMs: effectiveOffsetMs }]);
           if (!isPlaying) {
             play();
           }
@@ -2588,10 +2634,10 @@ function Editor({
           trackId: selectedTrackId,
           startContextTime,
           timelineStartMs,
-          roundTripMs: offsetMs,
+          roundTripMs: effectiveOffsetMs,
         });
         recordingStartTimeRef.current = timelineStartMs;
-        setRecordingSegments([{ startTimeMs: timelineStartMs, offsetMs }]);
+        setRecordingSegments([{ startTimeMs: timelineStartMs, offsetMs: effectiveOffsetMs }]);
       } catch (error) {
         console.error('Failed to start recording:', error);
         alert('Failed to start recording: ' + error.message);
@@ -4992,6 +5038,17 @@ function Editor({
           onClose={() => setShowLyricsDialog(false)}
         />
       ) : null}
+
+      <LatencyCorrectionDialog
+        isOpen={latencyDialogOpen}
+        onClose={() => {
+          pendingRecordAfterLatencyRef.current = false;
+          setLatencyDialogOpen(false);
+        }}
+        onConfirm={handleConfirmLatencyCorrection}
+        inputDeviceId={getActiveInputDeviceId()}
+        initialOffsetMs={audioSettings.recordingOffsetMs || 65}
+      />
 
       {settingsOpen && !isAdvancedMixSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">

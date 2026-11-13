@@ -38,6 +38,8 @@ if (typeof SignalsmithStretch === 'function') {
   SignalsmithStretch.moduleUrl = workletUrl;
 }
 
+export const PLAYBACK_SCHEDULE_LOOKAHEAD_SEC = 0.04;
+
 const MASTER_LIMITER_THRESHOLD_DB = -1;
 const MASTER_LIMITER_KNEE_DB = 0;
 const MASTER_LIMITER_RATIO = 20;
@@ -778,7 +780,10 @@ export class AudioManager {
       this.updateStretchRouting();
 
       this.isPlaying = true;
-      const at = this.audioContext.currentTime;
+      const lookaheadSec = Number.isFinite(options?.lookaheadSec)
+        ? Math.max(0, Number(options.lookaheadSec))
+        : (options?.immediate ? 0 : PLAYBACK_SCHEDULE_LOOKAHEAD_SEC);
+      const at = this.audioContext.currentTime + lookaheadSec;
       const startMs = Number(currentTimeMs) || 0;
       this.playbackRateAnchorContextTime = at;
       this.playbackRateAnchorTimelineMs = startMs;
@@ -840,7 +845,10 @@ export class AudioManager {
     }
     this.updateStretchRouting();
 
-    const at = this.audioContext.currentTime;
+    const lookaheadSec = Number.isFinite(options?.lookaheadSec)
+      ? Math.max(0, Number(options.lookaheadSec))
+      : 0;
+    const at = this.audioContext.currentTime + lookaheadSec;
     this.pauseTime = seekMs;
     this.playbackRateAnchorContextTime = at;
     this.playbackRateAnchorTimelineMs = seekMs;
@@ -874,6 +882,9 @@ export class AudioManager {
       ? this.playbackRateAnchorTimelineMs
       : (anchorContext - this.startTime) * 1000;
     const deltaSec = Number(contextTime) - anchorContext;
+    if (deltaSec < 0) {
+      return anchorTimeline;
+    }
     return anchorTimeline + (deltaSec * rate * 1000);
   }
 
@@ -928,12 +939,43 @@ export class AudioManager {
   }
 
   /**
-   * Node to feed test signals into so they travel the same output path as
-   * project playback (limiter, ceiling, selected sink) without depending on
-   * the project master volume.
+   * Node to feed test signals into so they travel directly to the active
+   * output sink/destination to measure pure hardware roundtrip latency,
+   * matching BandLab and hardware standards without master limiter/ceiling DSP latency.
    */
   getCalibrationInputNode() {
-    return this.masterLimiterNode || this.masterCeilingNode || this.masterGainNode;
+    return this.outputTargetNode || this.audioContext?.destination || this.masterOutputNode || this.masterGainNode;
+  }
+
+  /**
+   * Additional DSP latency in milliseconds introduced by the master output
+   * chain (e.g., lookahead limiter buffer and wave shaper oversampling decimation filter).
+   * Hardware calibration measures roundtrip directly at outputTargetNode (bypassing
+   * the master DSP stage). During project playback and recording, this delay is
+   * added to the hardware offset to ensure sample-accurate recording alignment.
+   */
+  getMasterDspLatencyMs() {
+    if (!this.audioContext) return 0;
+    const sampleRate = this.audioContext.sampleRate || 48000;
+    let dspFrames = 0;
+
+    // Web Audio DynamicsCompressorNode has a 128-sample lookahead buffer
+    if (this.masterLimiterNode) {
+      dspFrames += 128;
+    }
+
+    // Web Audio WaveShaperNode oversampling uses decimation FIR filters:
+    // '4x' = 256 frames delay; '2x' = 128 frames delay; 'none' = 0 frames delay.
+    if (this.masterCeilingNode) {
+      const oversample = this.masterCeilingNode.oversample;
+      if (oversample === '4x') {
+        dspFrames += 256;
+      } else if (oversample === '2x') {
+        dspFrames += 128;
+      }
+    }
+
+    return (dspFrames / sampleRate) * 1000;
   }
 
   getClipSourceKey(trackId, clipId) {

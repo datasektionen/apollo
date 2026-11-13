@@ -96,27 +96,15 @@ function RecordingDelaySection({
         />
         <span className="text-xs text-gray-500">ms</span>
         {canMeasure ? (
-          <div className="group relative ml-auto">
-            <button
-              type="button"
-              className="rounded bg-gray-700 px-2.5 py-1.5 text-xs text-white hover:bg-gray-600 disabled:cursor-wait disabled:opacity-60"
-              onClick={() => onMeasureRecordingDelay()}
-              disabled={measuringRecordingDelay}
-              aria-busy={measuringRecordingDelay}
-            >
-              {measuringRecordingDelay ? 'Measuring…' : 'Measure'}
-            </button>
-            <div className="invisible absolute bottom-full right-0 z-20 w-64 pb-2 group-hover:visible group-focus-within:visible">
-              <div className="rounded border border-gray-600 bg-gray-950 p-3 text-xs text-gray-200 opacity-0 shadow-lg group-hover:opacity-100 group-focus-within:opacity-100">
-                <p>Measure the input-to-output round trip. Make sure your input device can hear the output device before measuring.</p>
-                {bluetooth ? (
-                  <p className="mt-2 text-amber-200">
-                    Wireless device detected. Acoustic round trip will likely vary and you will need to manually adjust timing post recording. For best recording precision, use wired devices.
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </div>
+          <button
+            type="button"
+            className="ml-auto rounded bg-gray-700 px-2.5 py-1.5 text-xs text-white hover:bg-gray-600 disabled:cursor-wait disabled:opacity-60"
+            onClick={() => onMeasureRecordingDelay()}
+            disabled={measuringRecordingDelay}
+            aria-busy={measuringRecordingDelay}
+          >
+            {measuringRecordingDelay ? 'Measuring…' : 'Latency test'}
+          </button>
         ) : null}
       </div>
 

@@ -749,6 +749,7 @@ export async function measureRecordingRoundTrip({
   signal = null,
   untilStopped = false,
   shouldFinish = null,
+  burstCount = null,
 } = {}) {
   const report = (phase, detail = {}) => {
     if (typeof onProgress === 'function') onProgress({ phase, ...detail });
@@ -778,7 +779,7 @@ export async function measureRecordingRoundTrip({
   await audioManager.init();
   await audioManager.resume();
   const audioContext = audioManager.audioContext;
-  const outputLatencyMs = Number.isFinite(audioContext?.outputLatency)
+  const outputLatencyMs = Number.isFinite(audioContext?.outputLatency) && audioContext.outputLatency > 0
     ? audioContext.outputLatency * 1000
     : null;
   const baseLatencyMs = Number.isFinite(audioContext?.baseLatency)
@@ -829,6 +830,76 @@ export async function measureRecordingRoundTrip({
   const coarseWindows = prior.reliable && (prior.minMs > 0 || prior.maxMs !== fallback.maxMs)
     ? [prior, fallback]
     : [fallback];
+
+  if (Number.isFinite(burstCount) && burstCount > 0) {
+    const totalBursts = Math.round(burstCount);
+    const samplesMs = [];
+    const edgeMarginSamples = msToSamples(sampleRate, 2);
+    let sweepIndex = 0;
+
+    for (let b = 1; b <= totalBursts; b += 1) {
+      if (stopRequested()) break;
+      throwIfAborted();
+      report('burst', { burstIndex: b, totalBursts });
+
+      let minMs = 0;
+      let maxMs = COARSE_FALLBACK_MAX_MS;
+      if (samplesMs.length > 0) {
+        const sorted = [...samplesMs].sort((x, y) => x - y);
+        const centerMs = sorted[Math.floor(sorted.length / 2)];
+        minMs = Math.max(0, centerMs - 45);
+        maxMs = centerMs + 45;
+      } else if (prior.reliable && b === 1) {
+        minMs = prior.minMs;
+        maxMs = prior.maxMs;
+      }
+
+      const heard = await playSweepAndEstimate({
+        audioContext,
+        target,
+        sweep,
+        sampleRate,
+        minMs,
+        maxMs,
+        edgeMarginSamples: samplesMs.length > 0 ? edgeMarginSamples : 0,
+      });
+      sweepIndex += 1;
+      logSweep(sweepIndex, heard);
+
+      if (heard.confident && Number.isFinite(heard.lagMs)) {
+        samplesMs.push(heard.lagMs);
+      }
+      await yieldToUi();
+    }
+
+    throwIfAborted();
+
+    if (samplesMs.length === 0) {
+      const missed = failureForEstimation({ status: 'no-signal', validCount: 0 });
+      log(missed.message);
+      throw missed;
+    }
+
+    const sorted = [...samplesMs].sort((x, y) => x - y);
+    const medianLag = sorted[Math.floor(sorted.length / 2)];
+    const roundTripMs = Math.round(medianLag);
+    const spreadMs = Math.round((sorted[sorted.length - 1] - sorted[0]) * 10) / 10;
+
+    const record = {
+      roundTripMs,
+      spreadMs,
+      sigmaMs: 0,
+      uncertaintyMs: 0,
+      stable: true,
+      measuredAt: Date.now(),
+      sampleRate,
+      outputLatencyMs,
+      baseLatencyMs,
+      validCount: samplesMs.length,
+    };
+    report('done', { record });
+    return record;
+  }
 
   let coarse = null;
   let sweepIndex = 0;

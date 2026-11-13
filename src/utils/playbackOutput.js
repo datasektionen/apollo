@@ -73,7 +73,7 @@ export function normalizeRecordingCalibration(record) {
   if (!record || typeof record !== 'object') return null;
   const roundTripMs = Number(record.roundTripMs);
   if (!Number.isFinite(roundTripMs) || roundTripMs < 0) return null;
-  const toFinite = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+  const toFinite = (value) => (value != null && Number.isFinite(Number(value)) ? Number(value) : null);
   return {
     roundTripMs,
     spreadMs: toFinite(record.spreadMs),

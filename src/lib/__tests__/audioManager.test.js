@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PLAYBACK_SCHEDULE_LOOKAHEAD_SEC } from '../audioManager';
 import { getPanLawHeadroomGain } from '../../utils/audio';
 
 function deferred() {
@@ -262,7 +263,7 @@ describe('AudioManager playback requests', () => {
 
     expect(startedSources).toHaveLength(1);
     expect(manager.activeSources.size).toBe(1);
-    expect(manager.startTime).toBeCloseTo(9.5);
+    expect(manager.startTime).toBeCloseTo(9.5 + PLAYBACK_SCHEDULE_LOOKAHEAD_SEC);
   });
 
   it('applies the stored project master separately from the player output volume', async () => {
@@ -327,7 +328,7 @@ describe('AudioManager playback requests', () => {
     expect(startedSources).toHaveLength(2);
     expect(manager.activeSources.size).toBe(2);
     expect(manager.isPlaying).toBe(true);
-    expect(manager.startTime).toBeCloseTo(9.5);
+    expect(manager.startTime).toBeCloseTo(9.5 + PLAYBACK_SCHEDULE_LOOKAHEAD_SEC);
     expect(manager.activeSources.get('metro-1-metro-clip-1').gainNode.gain.value).toBe(0);
 
     const playbackRequestId = manager.playbackRequestId;
@@ -861,7 +862,7 @@ describe('AudioManager playback requests', () => {
     manager.mediaCache.set('blob-1', { duration: 10 });
 
     const project = makeProject();
-    await manager.play(project, 1000, { playbackRate: 0.8 });
+    await manager.play(project, 1000, { playbackRate: 0.8, immediate: true });
 
     expect(manager.getPlaybackRate()).toBe(0.8);
     const sourceNode = manager.activeSources.get('track-1-clip-1');
@@ -950,7 +951,7 @@ describe('AudioManager playback requests', () => {
 
     await manager.init();
     manager.audioContext.currentTime = 10;
-    await manager.play(project, 1000, { playbackRate: 1.0 });
+    await manager.play(project, 1000, { playbackRate: 1.0, immediate: true });
 
     const activeNode = manager.activeSources.get('track-1-clip-active');
     const futureNode = manager.activeSources.get('track-1-clip-future');

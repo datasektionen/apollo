@@ -78,6 +78,33 @@ describe('recording offset resolution', () => {
     expect(resolveRecordingOffset(settings, info, { sampleRate: 48000, outputLatencyMs: 45 }).status)
       .toBe('stale');
     expect(isRecordingCalibrationStale(null)).toBe(true);
+
+    // Stored without outputLatencyMs does not falsely trip stale when context has outputLatencyMs
+    const noOutputLatency = normalizePlaybackDeviceSettings({
+      recordingCalibrations: {
+        [info.key]: { roundTripMs: 70, sampleRate: 48000, outputLatencyMs: null },
+      },
+    });
+    expect(resolveRecordingOffset(noOutputLatency, info, { sampleRate: 48000, outputLatencyMs: 25 }))
+      .toMatchObject({ status: 'measured', offsetMs: 70 });
+  });
+
+  it('falls back to default|default or any known calibration if specific key is not matched', () => {
+    const defaultSettings = normalizePlaybackDeviceSettings({
+      recordingCalibrations: {
+        'default|default': { roundTripMs: 110, sampleRate: 48000 },
+      },
+    });
+    expect(resolveRecordingOffset(defaultSettings, info, { sampleRate: 48000 }))
+      .toMatchObject({ status: 'measured', offsetMs: 110 });
+
+    const otherSettings = normalizePlaybackDeviceSettings({
+      recordingCalibrations: {
+        'other-mic|other-out': { roundTripMs: 120, measuredAt: 1000, sampleRate: 48000 },
+      },
+    });
+    expect(resolveRecordingOffset(otherSettings, info, { sampleRate: 48000 }))
+      .toMatchObject({ status: 'measured', offsetMs: 120 });
   });
 
   it('remembers when a measurement was unstable', () => {
@@ -96,5 +123,21 @@ describe('recording offset resolution', () => {
       },
     });
     expect(older.recordingCalibrations[info.key].stable).toBe(true);
+  });
+
+  it('preserves known offset even if calibration is stale so user is not blocked on second take', () => {
+    const settings = normalizePlaybackDeviceSettings({
+      recordingOffsetMs: 63,
+      recordingCalibrations: {
+        [info.key]: { roundTripMs: 63.4, sampleRate: 48000, outputLatencyMs: 20 },
+      },
+    });
+    // First take (context outputLatency is 0 before playback primes):
+    const take1 = resolveRecordingOffset(settings, info, { sampleRate: 48000, outputLatencyMs: 0 });
+    expect(take1.offsetMs).toBe(63);
+
+    // Second take (context outputLatency becomes 45 after playback primes):
+    const take2 = resolveRecordingOffset(settings, info, { sampleRate: 48000, outputLatencyMs: 45 });
+    expect(take2.offsetMs).toBe(63);
   });
 });

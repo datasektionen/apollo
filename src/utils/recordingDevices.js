@@ -96,15 +96,23 @@ export function describeRecordingDevices(devices = [], { inputDeviceId = '', out
 export function isRecordingCalibrationStale(record, { sampleRate = null, outputLatencyMs = null } = {}) {
   if (!record) return true;
   if (
-    Number.isFinite(Number(record.sampleRate))
+    record.sampleRate != null
+    && sampleRate != null
+    && Number.isFinite(Number(record.sampleRate))
     && Number.isFinite(Number(sampleRate))
+    && Number(record.sampleRate) > 0
+    && Number(sampleRate) > 0
     && Number(record.sampleRate) !== Number(sampleRate)
   ) {
     return true;
   }
   if (
-    Number.isFinite(Number(record.outputLatencyMs))
+    record.outputLatencyMs != null
+    && outputLatencyMs != null
+    && Number.isFinite(Number(record.outputLatencyMs))
     && Number.isFinite(Number(outputLatencyMs))
+    && Number(record.outputLatencyMs) > 0
+    && Number(outputLatencyMs) > 0
     && Math.abs(Number(record.outputLatencyMs) - Number(outputLatencyMs)) > STALE_OUTPUT_LATENCY_DELTA_MS
   ) {
     return true;
@@ -130,16 +138,49 @@ export function resolveRecordingOffset(settings = {}, deviceInfo = null, context
   }
 
   const key = deviceInfo?.key || getRecordingCalibrationKey(null, null);
-  const record = settings?.recordingCalibrations?.[key] || null;
+  let record = settings?.recordingCalibrations?.[key] || null;
+  if (!record && key !== 'default|default') {
+    record = settings?.recordingCalibrations?.['default|default'] || null;
+  }
+  if (!record && settings?.recordingCalibrations) {
+    const calibrations = Object.values(settings.recordingCalibrations).filter(Boolean);
+    if (calibrations.length > 0) {
+      calibrations.sort((a, b) => (b.measuredAt || 0) - (a.measuredAt || 0));
+      record = calibrations[0];
+    }
+  }
+
+  const fallbackOffset = Number.isFinite(Number(settings?.recordingOffsetMs)) && Number(settings.recordingOffsetMs) > 0
+    ? Math.max(0, Math.round(Number(settings.recordingOffsetMs)))
+    : null;
+
   if (!record) {
+    if (fallbackOffset != null) {
+      return {
+        status: 'measured',
+        offsetMs: fallbackOffset,
+        calibration: null,
+        key,
+      };
+    }
     return { status: 'missing', offsetMs: null, calibration: null, key };
   }
+
+  const measuredOffset = Math.max(0, Math.round(Number(record.roundTripMs) || 0));
+  const effectiveOffset = measuredOffset > 0 ? measuredOffset : fallbackOffset;
+
   if (isRecordingCalibrationStale(record, context)) {
-    return { status: 'stale', offsetMs: null, calibration: record, key };
+    return {
+      status: 'stale',
+      offsetMs: effectiveOffset,
+      calibration: record,
+      key,
+    };
   }
+
   return {
     status: 'measured',
-    offsetMs: Math.max(0, Math.round(Number(record.roundTripMs) || 0)),
+    offsetMs: effectiveOffset != null ? effectiveOffset : 0,
     calibration: record,
     key,
   };
