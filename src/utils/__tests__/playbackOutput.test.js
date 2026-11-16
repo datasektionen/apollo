@@ -83,6 +83,10 @@ describe('playbackOutput', () => {
       outputDeviceId: 'headphones',
       audioContextSinkApplied: false,
     })).toBe(true);
+    expect(shouldRoutePlaybackThroughMediaElement({
+      outputDeviceId: '',
+      isMobile: true,
+    })).toBe(false);
   });
 
   it('treats empty, default, and communications sink ids as the OS default', () => {

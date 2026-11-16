@@ -1,0 +1,16 @@
+{
+  "appId": "com.apollo.choir",
+  "appName": "Apollo",
+  "webDir": "dist",
+  "server": {
+    "url": "https://apollo.metaspexet.se",
+    "cleartext": true,
+    "allowNavigation": [
+      "*"
+    ]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#121212"
+  }
+}

@@ -43,6 +43,7 @@ job "apollo" {
 {{ with nomadVar "nomad/jobs/apollo" }}
 {{ end }}
 WEB_PORT={{ env "NOMAD_PORT_http" }}
+APOLLO_APK_DOWNLOAD_URL=https://github.com/datasektionen/apollo/releases/latest/download/apollo.apk
 {{ range nomadService "apollo-api" }}
 API_PORT={{ .Port }}
 API_UPSTREAM_ORIGIN=http://{{ .Address }}:{{ .Port }}
@@ -82,6 +83,7 @@ OIDC_SCOPES="openid profile email"
 OIDC_USE_PKCE=false
 ABSOLUTE_MEDIA_ROOT=/data
 COOKIE_SECURE=true
+APOLLO_APK_DOWNLOAD_URL=https://github.com/datasektionen/apollo/releases/latest/download/apollo.apk
 ENV
         destination = "local/.env"
         env         = true

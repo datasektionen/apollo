@@ -241,14 +241,29 @@ export function shouldAutoPauseForOutputDeviceChange({
   return false;
 }
 
+export function isMobileDevice() {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const ua = String(navigator.userAgent || '');
+  const platform = String(navigator.platform || '');
+  const maxTouchPoints = Number(navigator.maxTouchPoints || 0);
+  return (
+    /android|iphone|ipad|ipod|mobile/i.test(ua)
+    || (maxTouchPoints > 1 && /mac/i.test(platform))
+  );
+}
+
 /**
- * MediaStreamDestination + HTMLAudioElement resampling is a known source of
- * brief pitch/speed glitches on Android. Use it only when a custom output
- * device is selected and AudioContext.setSinkId could not be applied.
+ * Audio output routing policy.
+ * Master mix audio should always output directly to AudioContext.destination
+ * on all mobile devices and desktop default outputs to eliminate WebRTC jitter-buffer
+ * clock drift and WSOLA pitch warping.
+ * It is only routed through an HTMLAudioElement when an explicit non-default output
+ * sink device is selected on a browser where AudioContext.setSinkId is unsupported or failed.
  */
 export function shouldRoutePlaybackThroughMediaElement({
   outputDeviceId = '',
   audioContextSinkApplied = false,
+  isMobile = null,
 } = {}) {
   return Boolean(String(outputDeviceId || '')) && audioContextSinkApplied !== true;
 }

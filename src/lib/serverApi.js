@@ -1,9 +1,21 @@
 import { createEmptyProject } from '../types/project';
 import { createId } from '../utils/id';
 import { formatMediaDownloadFailure } from '../utils/mediaErrors';
+import { APP_VERSION, APP_BUILD_NUMBER } from '../config/version';
 
 const API_PREFIX = '/api';
 let currentServerSession = null;
+
+function getClientPlatformHeader() {
+  if (typeof window === 'undefined') return 'unknown';
+  try {
+    if (window.Capacitor?.isNativePlatform?.()) return 'native-android';
+    if (window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone) {
+      return 'pwa';
+    }
+  } catch {}
+  return 'web';
+}
 
 function isObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
@@ -54,6 +66,10 @@ async function apiFetch(path, options = {}, session = null, retryOnAuth = true) 
   if (session?.accessToken) {
     headers.set('Authorization', `Bearer ${session.accessToken}`);
   }
+  // Attach Apollo version & client platform headers
+  headers.set('X-Apollo-Client-Version', APP_VERSION);
+  headers.set('X-Apollo-Native-Build', String(APP_BUILD_NUMBER));
+  headers.set('X-Apollo-Platform', getClientPlatformHeader());
 
   const response = await fetch(buildApiPath(path), {
     ...options,
@@ -63,6 +79,21 @@ async function apiFetch(path, options = {}, session = null, retryOnAuth = true) 
       ? options.body
       : (typeof options.body === 'string' ? options.body : (options.body ? JSON.stringify(options.body) : undefined)),
   });
+
+  if (response.status === 426) {
+    let body = null;
+    try {
+      body = await response.json();
+    } catch {}
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('apollo:upgrade-required', { detail: body }));
+    }
+    const error = new Error(body?.message || 'A new version of Apollo is required to continue.');
+    error.status = 426;
+    error.isUpgradeRequired = true;
+    error.upgradeDetails = body;
+    throw error;
+  }
 
   if (response.status === 401 && retryOnAuth && !String(path).includes('/api/auth/refresh')) {
     const hadSession = Boolean(session?.user || loadServerSession()?.user);
@@ -104,7 +135,25 @@ async function apiFetch(path, options = {}, session = null, retryOnAuth = true) 
     return await response.json();
   }
 
+  // Reject unexpected HTML responses for API calls (e.g. SPA fallback index.html)
+  if (contentType.includes('text/html')) {
+    const error = new Error(`API endpoint returned HTML instead of JSON: ${path}`);
+    error.status = response.status;
+    error.isHtmlFallback = true;
+    throw error;
+  }
+
   return response;
+}
+
+export async function fetchServerVersion() {
+  const response = await fetch(buildApiPath('/version'), {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch server version: ${response.status}`);
+  }
+  return await response.json();
 }
 
 export async function getCurrentSession() {

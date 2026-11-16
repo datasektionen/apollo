@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useInRouterContext, useSearchParams } from 'react-router-dom';
+import { useInRouterContext, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, Plus, Download, FileAudio, CircleUserRound } from 'lucide-react';
 import { isValidMusicalNumber, normalizeMusicalNumber, normalizeProjectName } from '../utils/naming';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
@@ -8,6 +8,7 @@ import { BrandWordmark } from './BrandLogo';
 import CreditsEditorDialog from './CreditsEditorDialog';
 import { getProjectCredits, getShowMetadata, saveProjectCredits, saveShowMetadata } from '../lib/serverApi';
 import { formatDurationMs } from '../utils/playerTime';
+import { isStandaloneApp } from '../utils/platform';
 import {
   getConfiguredShowId,
   getNoAccessMessage,
@@ -34,6 +35,7 @@ function HostedDashboard({
   onOpenProfile = null,
 }) {
   const inRouter = useInRouterContext();
+  const navigate = inRouter ? useNavigate() : null;
   const [routerSearchParams, setRouterSearchParams] = inRouter ? useSearchParams() : [null, null];
   const urlShowId = routerSearchParams ? routerSearchParams.get('show') : null;
   const [newProjectName, setNewProjectName] = useState('');
@@ -397,6 +399,23 @@ function HostedDashboard({
               }}
             />
           </label>
+
+          {!isStandaloneApp() ? (
+            <a
+              href="/download"
+              onClick={(e) => {
+                if (inRouter && navigate) {
+                  e.preventDefault();
+                  navigate('/download');
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md bg-gray-700 hover:bg-gray-600 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:text-white transition-colors"
+              title="Install App"
+            >
+              <Download size={13} />
+              <span>Install App</span>
+            </a>
+          ) : null}
 
           <div className="flex items-center rounded-lg bg-gray-700 p-0.5">
             {onSwitchToPlayerMode ? (

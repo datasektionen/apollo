@@ -79,6 +79,7 @@ export default defineConfig(({ mode }) => {
       host: serverHost,
       port: serverPort,
       strictPort: true,
+      https,
     },
     build: {
       target: 'esnext',

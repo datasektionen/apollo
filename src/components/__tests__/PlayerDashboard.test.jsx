@@ -284,4 +284,49 @@ describe('PlayerDashboard - Settings and Lyrics View Priority', () => {
     expect(view.container.querySelector('[aria-label="Lyrics lines"]')).toBeTruthy();
     expect(lyricsButton.getAttribute('aria-pressed')).toBe('true');
   });
+
+  it('renders Install App button to the left of the Player/DAW toggle in browser mode and hides it in standalone mode', async () => {
+    // 1. Browser mode: should render Install App link
+    await act(async () => {
+      view = render(
+        <PlayerDashboard
+          session={session}
+          onLogout={vi.fn()}
+          onSwitchToDawDashboard={vi.fn()}
+        />
+      );
+    });
+
+    const installBtn = view.container.querySelector('a[href="/download"]');
+    expect(installBtn).toBeTruthy();
+    expect(installBtn.textContent).toContain('Install App');
+
+    // Verify it is placed before the Player/DAW toggle in the DOM
+    const dawBtn = Array.from(view.container.querySelectorAll('button')).find(
+      (b) => b.textContent.trim() === 'DAW'
+    );
+    expect(dawBtn).toBeTruthy();
+    expect(installBtn.compareDocumentPosition(dawBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    view.unmount();
+    view = null;
+
+    // 2. Standalone mode: should NOT render Install App button
+    window.Capacitor = { isNativePlatform: () => true };
+    try {
+      await act(async () => {
+        view = render(
+          <PlayerDashboard
+            session={session}
+            onLogout={vi.fn()}
+            onSwitchToDawDashboard={vi.fn()}
+          />
+        );
+      });
+
+      expect(view.container.querySelector('a[href="/download"]')).toBeNull();
+    } finally {
+      delete window.Capacitor;
+    }
+  });
 });

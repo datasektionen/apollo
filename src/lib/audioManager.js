@@ -111,6 +111,7 @@ export class AudioManager {
     this.playbackStartedListeners = new Set();
     this.hardwareLifecycleAttached = false;
     this.isConfiguringOutput = false;
+    this.lastContextResumeAttemptMs = 0;
     this.boundContextStateChange = null;
     this.boundContextSinkChange = null;
     this.boundDeviceChange = null;
@@ -169,7 +170,7 @@ export class AudioManager {
     this.attachHardwareLifecycleListeners();
     await this.handleOutputDeviceChange({ primeOnly: true });
 
-    await this.ensureStretchNode();
+    void this.ensureStretchNode();
 
     console.log('AudioManager initialized', {
       sampleRate: this.audioContext.sampleRate,
@@ -1346,6 +1347,7 @@ export class AudioManager {
     this.currentPlayOptions = null;
     this.currentProject = null;
     this.stopActiveSources('Failed to stop an active audio source.', 'audio:stop-source');
+    this.pauseOutputRoutingElement();
     if (this.stretchNode && typeof this.stretchNode.schedule === 'function') {
       try {
         this.stretchNode.schedule({ active: false });
@@ -1383,6 +1385,7 @@ export class AudioManager {
     this.initializingPlaybackRequestId = null;
     this.currentPlayOptions = null;
     this.stopActiveSources('Failed to pause an active audio source.', 'audio:pause-source');
+    this.pauseOutputRoutingElement();
     if (this.stretchNode && typeof this.stretchNode.schedule === 'function') {
       try {
         this.stretchNode.schedule({ active: false });
@@ -1441,14 +1444,27 @@ export class AudioManager {
   }
 
   async setPlaybackOutputConfig({ outputDeviceId = '', outputChannelCount = 2, forceMonoOutput = false, panLawDb = this.currentPanLawDb } = {}) {
-    this.currentOutputDeviceId = String(outputDeviceId || '');
-    this.currentOutputChannelCount = Number.isFinite(Number(outputChannelCount))
+    const nextOutputDeviceId = String(outputDeviceId || '');
+    const nextOutputChannelCount = Number.isFinite(Number(outputChannelCount))
       ? Number(outputChannelCount)
       : this.currentOutputChannelCount;
-    this.forceMonoOutput = forceMonoOutput === true;
-    this.currentPanLawDb = normalizePanLawDb(panLawDb);
+    const nextForceMono = forceMonoOutput === true;
+    const nextPanLaw = normalizePanLawDb(panLawDb);
 
-    if (this.audioContext) {
+    const configChanged = (
+      nextOutputDeviceId !== this.currentOutputDeviceId ||
+      nextOutputChannelCount !== this.currentOutputChannelCount ||
+      nextForceMono !== this.forceMonoOutput ||
+      nextPanLaw !== this.currentPanLawDb ||
+      !this.outputTargetNode
+    );
+
+    this.currentOutputDeviceId = nextOutputDeviceId;
+    this.currentOutputChannelCount = nextOutputChannelCount;
+    this.forceMonoOutput = nextForceMono;
+    this.currentPanLawDb = nextPanLaw;
+
+    if (configChanged && this.audioContext) {
       await this.configureOutputRouting();
     }
     this.applyMasterGain();
@@ -1744,6 +1760,17 @@ export class AudioManager {
   handleAudioContextStateChange() {
     const state = this.audioContext?.state;
     if (state === 'suspended' || state === 'interrupted') {
+      if (this.isPlaying && state === 'suspended') {
+        const now = Date.now();
+        if (now - (this.lastContextResumeAttemptMs || 0) > 1000) {
+          this.lastContextResumeAttemptMs = now;
+          this.audioContext.resume().catch(() => {});
+        }
+        return;
+      }
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden' && this.isPlaying) {
+        return;
+      }
       this.handlePlaybackInterrupted(`context-${state}`);
     }
   }
@@ -1908,21 +1935,50 @@ export class AudioManager {
     if (!this.audioContext) return null;
 
     try {
-      if (!this.outputStreamDestination) {
+      if (!this.outputStreamDestination && typeof this.audioContext.createMediaStreamDestination === 'function') {
         this.outputStreamDestination = this.audioContext.createMediaStreamDestination();
       }
 
+      if (!this.outputStreamDestination) {
+        return null;
+      }
+
       if (!this.outputRoutingElement) {
-        const element = new Audio();
+        const element = typeof Audio === 'function' ? new Audio() : document.createElement('audio');
+        element.id = 'apollo-audio-output-routing';
+        element.setAttribute?.('aria-hidden', 'true');
+        if (element.style) {
+          element.style.position = 'fixed';
+          element.style.width = '1px';
+          element.style.height = '1px';
+          element.style.opacity = '0.01';
+          element.style.pointerEvents = 'none';
+          element.style.bottom = '0';
+          element.style.right = '0';
+        }
+        if (typeof document !== 'undefined' && document.body && !element.parentNode) {
+          try {
+            document.body.appendChild(element);
+          } catch {}
+        }
         element.autoplay = true;
         element.preload = 'auto';
+        element.muted = false;
+        element.volume = 1.0;
+        if ('preservesPitch' in element) {
+          element.preservesPitch = true;
+        } else if ('webkitPreservesPitch' in element) {
+          element.webkitPreservesPitch = true;
+        }
         element.srcObject = this.outputStreamDestination.stream;
         this.outputRoutingElement = element;
       } else if (this.outputRoutingElement.srcObject !== this.outputStreamDestination.stream) {
         this.outputRoutingElement.srcObject = this.outputStreamDestination.stream;
       }
 
-      await applySinkIdToMediaElement(this.outputRoutingElement, this.currentOutputDeviceId);
+      if (this.currentOutputDeviceId && !isDefaultAudioOutputDeviceId(this.currentOutputDeviceId)) {
+        await applySinkIdToMediaElement(this.outputRoutingElement, this.currentOutputDeviceId);
+      }
       await this.resumeOutputRoutingElement();
 
       return this.outputStreamDestination;
@@ -1936,13 +1992,64 @@ export class AudioManager {
     }
   }
 
+  refreshOutputRoutingStream() {
+    if (!this.audioContext || !this.outputRoutingElement) return;
+    try {
+      const oldDestination = this.outputStreamDestination;
+      const newDestination = typeof this.audioContext.createMediaStreamDestination === 'function'
+        ? this.audioContext.createMediaStreamDestination()
+        : null;
+      if (!newDestination) return;
+
+      this.outputStreamDestination = newDestination;
+      this.outputRoutingElement.srcObject = newDestination.stream;
+
+      const outputNode = this.getMasterOutputNode();
+      if (outputNode) {
+        if (oldDestination) {
+          try {
+            outputNode.disconnect(oldDestination);
+          } catch {}
+        }
+        this.outputTargetNode = newDestination;
+        outputNode.connect(newDestination);
+      }
+
+      const playPromise = this.outputRoutingElement.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Failed to refresh output routing stream:', err);
+    }
+  }
+
   async resumeOutputRoutingElement() {
     if (!this.outputRoutingElement) return;
     try {
-      await this.outputRoutingElement.play();
+      const playPromise = this.outputRoutingElement.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        await playPromise;
+      }
     } catch {
       // Ignore autoplay-related routing element failures.
     }
+  }
+
+  async primeOutputRouting() {
+    const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AudioContextCtor) return;
+    try {
+      if (!this.audioContext) {
+        await this.init();
+      }
+      if (this.audioContext && shouldRoutePlaybackThroughMediaElement({
+        outputDeviceId: this.currentOutputDeviceId,
+        audioContextSinkApplied: false,
+      })) {
+        await this.ensureOutputRoutingTarget();
+      }
+    } catch {}
   }
 }
 

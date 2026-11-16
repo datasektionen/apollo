@@ -8,6 +8,9 @@ import PlayerDashboard from './components/PlayerDashboard';
 import AdminPanel from './components/AdminPanel';
 import ProfileDialog from './components/ProfileDialog';
 import LoadProgressDialog from './components/LoadProgressDialog';
+import DistributionLanding from './components/DistributionLanding';
+import UpdateNotificationModal from './components/UpdateNotificationModal';
+import { isStandaloneApp } from './utils/platform';
 import { audioManager } from './lib/audioManager';
 import { importFromZIP } from './lib/projectPortability';
 import { deleteProject as deleteCachedProject, getMediaBlob, saveRemoteProjectMeta, storeMediaBlob } from './lib/db';
@@ -756,7 +759,11 @@ function App() {
       style={{ overscrollBehaviorX: 'auto', overscrollBehaviorY: 'none' }}
     >
       <Routes>
-        <Route path="/" element={<Navigate to="/player" replace />} />
+        <Route
+          path="/"
+          element={isStandaloneApp() ? <Navigate to="/player" replace /> : <DistributionLanding />}
+        />
+        <Route path="/download" element={<DistributionLanding />} />
         <Route path="/player" element={playerElement} />
         <Route path="/player/shows/:showId" element={playerElement} />
         <Route path="/player/playlists/:playlistId" element={playerElement} />
@@ -869,6 +876,7 @@ function App() {
         />
       ) : null}
       <LoadProgressDialog />
+      <UpdateNotificationModal />
     </div>
   );
 }

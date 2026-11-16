@@ -34,6 +34,14 @@ import ExportDialog from './ExportDialog';
 import CreditsEditorDialog from './CreditsEditorDialog';
 import LyricsEditorDialog from './LyricsEditorDialog';
 import { LatencyCorrectionDialog } from './LatencyCorrectionDialog';
+import {
+  clearMediaSession,
+  setMediaSessionPlaybackState,
+  setupMediaSession,
+  unlockAudioSession,
+  updateMediaSessionMetadata,
+  updateMediaSessionPositionState,
+} from '../lib/mediaSessionService';
 import { dbToVolume, volumeToDb } from '../utils/audio';
 import { applyChoirAutoPanToProject } from '../utils/choirAutoPan';
 import { DawSettingsPanel, PlaybackDevicesSettingsPanel, ProjectSettingsPanel } from './SettingsPanels';
@@ -1558,6 +1566,13 @@ function Editor({
             setCurrentTime(newTime);
             previousTimeRef.current = newTime;
           }
+          if (playbackEndMs > 0) {
+            updateMediaSessionPositionState({
+              durationSec: playbackEndMs / 1000,
+              positionSec: (newTime || 0) / 1000,
+              playbackRate: audioManager.getPlaybackRate(),
+            });
+          }
         }
       }, 50);
     } else {
@@ -1573,6 +1588,69 @@ function Editor({
       }
     };
   }, [applyAdvancedMixRealtimeSettings, applyEditorPlaybackOutputConfig, applyProjectLiveMix, isPlaying, project.projectId]);
+
+  useEffect(() => {
+    setMediaSessionPlaybackState(isPlaying);
+  }, [isPlaying]);
+
+  useEffect(() => {
+    updateMediaSessionMetadata({
+      title: project?.name || 'Untitled Project',
+      artist: project?.artist || 'Apollo',
+      album: 'Apollo DAW',
+    });
+  }, [project?.artist, project?.name]);
+
+  const playRef = useRef(play);
+  const pauseRef = useRef(pause);
+  const stopRef = useRef(stop);
+  const setCurrentTimeRef = useRef(setCurrentTime);
+
+  useEffect(() => {
+    playRef.current = play;
+  }, [play]);
+
+  useEffect(() => {
+    pauseRef.current = pause;
+  }, [pause]);
+
+  useEffect(() => {
+    stopRef.current = stop;
+  }, [stop]);
+
+  useEffect(() => {
+    setCurrentTimeRef.current = setCurrentTime;
+  }, [setCurrentTime]);
+
+  useEffect(() => {
+    const cleanup = setupMediaSession({
+      onPlay: () => {
+        unlockAudioSession();
+        playRef.current?.();
+      },
+      onPause: () => {
+        pauseRef.current?.();
+      },
+      onStop: () => {
+        stopRef.current?.();
+        audioManager.stop();
+      },
+      onSeekTo: (seekTimeSec) => {
+        setCurrentTimeRef.current?.(seekTimeSec * 1000);
+      },
+      onPrevious: () => {
+        setCurrentTimeRef.current?.(0);
+      },
+      onNext: () => {},
+    });
+    return cleanup;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearMediaSession();
+    };
+  }, []);
 
   // Separate effect for handling recording overwrite
   useEffect(() => {

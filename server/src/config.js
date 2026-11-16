@@ -172,4 +172,9 @@ export const config = {
   oidcPostLogoutRedirectUri: buildOidcPostLogoutRedirectUri(),
   oidcAllowInsecureHttp: allowsInsecureOidcIssuer(oidcIssuer),
   oidcFirstAdminClaim: firstDefined(process.env.OIDC_FIRST_ADMIN_CLAIM) || '',
+  appVersion: process.env.APOLLO_LATEST_VERSION || '1.0.0',
+  minSupportedVersion: process.env.APOLLO_MIN_SUPPORTED_VERSION || '1.0.0',
+  minSupportedNativeBuild: Number(process.env.APOLLO_MIN_NATIVE_BUILD || 1),
+  apkUrl: process.env.APOLLO_APK_URL || process.env.APOLLO_APK_DOWNLOAD_URL || '/apollo.apk',
+  releaseNotes: process.env.APOLLO_RELEASE_NOTES || 'Initial Apollo release with high-fidelity low-latency audio.',
 };

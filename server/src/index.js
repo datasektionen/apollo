@@ -10,6 +10,7 @@ import { WebSocketServer } from 'ws';
 import bcrypt from 'bcryptjs';
 
 import { config } from './config.js';
+import { isVersionSupported, isNativeBuildSupported } from './version.js';
 import { buildStoredMediaPath, resolveMediaPath } from './mediaPaths.js';
 import {
   MediaGcActionError,
@@ -1611,6 +1612,57 @@ app.use(morgan('dev'));
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', now: nowIso() });
+});
+
+app.get('/api/version', (_req, res) => {
+  res.json({
+    version: config.appVersion,
+    minSupportedVersion: config.minSupportedVersion,
+    minSupportedNativeBuild: config.minSupportedNativeBuild,
+    apkUrl: config.apkUrl,
+    releaseNotes: config.releaseNotes,
+    serverTime: nowIso(),
+  });
+});
+
+// Middleware enforcing minimum client version & minimum native build
+app.use('/api', (req, res, next) => {
+  // Allow health, version, and auth start/callbacks without client version constraints
+  if (
+    req.path === '/health' ||
+    req.path === '/version' ||
+    req.path.startsWith('/auth/oidc')
+  ) {
+    return next();
+  }
+
+  const clientVersion = req.header('X-Apollo-Client-Version');
+  const nativeBuild = req.header('X-Apollo-Native-Build');
+
+  if (clientVersion && !isVersionSupported(clientVersion, config.minSupportedVersion)) {
+    return res.status(426).json({
+      error: 'UPGRADE_REQUIRED',
+      message: `Apollo v${clientVersion} is outdated and no longer supported. Please update to v${config.appVersion} to continue.`,
+      currentVersion: clientVersion,
+      minSupportedVersion: config.minSupportedVersion,
+      latestVersion: config.appVersion,
+      apkUrl: config.apkUrl,
+    });
+  }
+
+  if (nativeBuild && !isNativeBuildSupported(nativeBuild, config.minSupportedNativeBuild)) {
+    const parsedBuild = parseInt(nativeBuild, 10);
+    return res.status(426).json({
+      error: 'UPGRADE_REQUIRED',
+      message: `Your installed native Apollo app (build ${parsedBuild}) is outdated. Please update to build ${config.minSupportedNativeBuild} or newer.`,
+      currentBuild: parsedBuild,
+      minSupportedNativeBuild: config.minSupportedNativeBuild,
+      latestVersion: config.appVersion,
+      apkUrl: config.apkUrl,
+    });
+  }
+
+  next();
 });
 
 app.get('/api/auth/oidc/start', async (req, res) => {

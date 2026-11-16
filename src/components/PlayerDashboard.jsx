@@ -5,6 +5,7 @@ import {
   ChevronsLeftRightEllipsis,
   CircleUserRound,
   Clock,
+  Download,
   HeadphoneOff,
   Headphones,
   Loader2,
@@ -89,6 +90,14 @@ import {
 import { TRACK_ROLE_METRONOME, isMetronomeRole } from '../utils/trackRoles';
 import { usePlaybackDeviceSettings, useAudioDeviceAutoPause } from '../hooks/usePlaybackDeviceSettings';
 import {
+  clearMediaSession,
+  setMediaSessionPlaybackState,
+  setupMediaSession,
+  unlockAudioSession,
+  updateMediaSessionMetadata,
+  updateMediaSessionPositionState,
+} from '../lib/mediaSessionService';
+import {
   finishLoadProgress,
   logLoadProgress,
   startLoadProgress,
@@ -98,6 +107,7 @@ import {
 } from '../lib/loadProgress';
 import { reportUserError } from '../utils/errorReporter';
 import { isTextEntryTarget } from '../utils/keyboard';
+import { isStandaloneApp } from '../utils/platform';
 import {
   getConfiguredShowId,
   getNoAccessMessage,
@@ -735,6 +745,8 @@ function PlayerDashboard({
   });
   const isPlayingRef = useRef(false);
   const durationSecRef = useRef(0);
+  const currentTimeSecRef = useRef(0);
+  const volumeRef = useRef(80);
   const playGenerationRef = useRef(0);
   const projectSnapshotCacheRef = useRef(new Map());
   const searchCreditsLoadedRef = useRef(false);
@@ -1415,6 +1427,14 @@ function PlayerDashboard({
     if (!session) return;
     if (!item?.projectId || !item?.presetId) return;
 
+    unlockAudioSession();
+    updateMediaSessionMetadata({
+      title: item.name || item.projectName || 'Mix',
+      artist: item.artist || item.groupName || 'Apollo Choir',
+      album: 'Apollo Choir Player',
+    });
+    setMediaSessionPlaybackState(true);
+
     setIsRendering(true);
     setCurrentPlaybackLyrics(null);
     setError('');
@@ -1464,6 +1484,11 @@ function PlayerDashboard({
         setActiveIndex(indexForState);
       }
       setNowPlayingLabel(item.name || item.projectName || 'Mix');
+      updateMediaSessionMetadata({
+        title: item.name || item.projectName || 'Mix',
+        artist: item.artist || item.groupName || 'Apollo Choir',
+        album: 'Apollo Choir Player',
+      });
 
       const mixSnapshot = await withLoadStep(
         'Build playback mix snapshot',
@@ -1541,6 +1566,7 @@ function PlayerDashboard({
       setLyricsViewOpen(false);
       setHasRealtimeMetronome(false);
       setIsPlaying(false);
+      setMediaSessionPlaybackState(false);
       setError(error.message || 'Playback failed');
     } finally {
       if (!isCancelled()) {
@@ -1562,6 +1588,7 @@ function PlayerDashboard({
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
+    setMediaSessionPlaybackState(isPlaying);
   }, [isPlaying]);
 
   useEffect(() => {
@@ -1569,11 +1596,30 @@ function PlayerDashboard({
   }, [durationSec]);
 
   useEffect(() => {
+    currentTimeSecRef.current = currentTimeSec;
+  }, [currentTimeSec]);
+
+  useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
+
+  useEffect(() => {
     if (!isPlaying) return undefined;
     const interval = setInterval(() => {
       if (timelineScrubRef.current.active) return;
       const currentMs = Math.max(0, Number(audioManager.getCurrentTime() || 0));
-      setCurrentTimeSec(currentMs / 1000);
+      const currentSec = currentMs / 1000;
+      currentTimeSecRef.current = currentSec;
+      setCurrentTimeSec(currentSec);
+
+      const duration = durationSecRef.current;
+      if (duration > 0) {
+        updateMediaSessionPositionState({
+          durationSec: duration,
+          positionSec: currentSec,
+          playbackRate: playbackSpeedRef.current,
+        });
+      }
 
       const durationMs = Number(realtimePlaybackRef.current?.durationMs || 0);
       if (durationMs <= 0 || currentMs < durationMs) {
@@ -1616,36 +1662,72 @@ function PlayerDashboard({
     setActiveIndex(index);
   }, []);
 
-  const handleTogglePlay = useCallback(async () => {
-    if (isPlaying) {
-      const currentMs = Math.max(0, Math.round((Number(currentTimeSec) || 0) * 1000));
-      await audioManager.pause(currentMs);
-      setIsPlaying(false);
-      return;
-    }
+  const handlePause = useCallback(async () => {
+    playGenerationRef.current += 1;
+    setIsRendering(false);
+    const actualCurrentMs = Math.max(0, Number(audioManager.getCurrentTime() || 0));
+    const actualCurrentSec = actualCurrentMs / 1000;
+    currentTimeSecRef.current = actualCurrentSec;
+    setCurrentTimeSec(actualCurrentSec);
+    await audioManager.pause(actualCurrentMs);
+    setIsPlaying(false);
+    isPlayingRef.current = false;
+    setMediaSessionPlaybackState(false);
+    updateMediaSessionPositionState({
+      durationSec: durationSecRef.current,
+      positionSec: actualCurrentSec,
+      playbackRate: playbackSpeedRef.current,
+      force: true,
+    });
+  }, []);
 
-    if (!activeQueueItems.length) return;
+  const handlePlay = useCallback(async () => {
+    unlockAudioSession();
+    if (!activeQueueRef.current.length) return;
 
     if (
       realtimePlaybackRef.current?.project
       && realtimePlaybackRef.current?.item
-      && currentTimeSec < Math.max(0, durationSec - 0.01)
+      && currentTimeSecRef.current < Math.max(0, durationSecRef.current - 0.01)
     ) {
-      const resumeMs = Math.max(0, Math.round((Number(currentTimeSec) || 0) * 1000));
+      const resumeMs = Math.max(0, Math.round((Number(currentTimeSecRef.current) || 0) * 1000));
       const current = realtimePlaybackRef.current;
+      updateMediaSessionMetadata({
+        title: current.item.name || current.item.projectName || 'Mix',
+        artist: current.item.artist || current.item.groupName || 'Apollo Choir',
+        album: 'Apollo Choir Player',
+      });
+      setMediaSessionPlaybackState(true);
       await applyPlaybackOutputConfig();
-      audioManager.setOutputVolume(Math.max(0, Math.min(100, volume)));
+      audioManager.setOutputVolume(Math.max(0, Math.min(100, volumeRef.current)));
       await audioManager.play(current.project, resumeMs, getPlayerPlayOptions(current, {
         playbackRate: playbackSpeedRef.current,
       }));
       applyPlaybackMixSettings(current.project, current.item);
       setIsPlaying(true);
+      isPlayingRef.current = true;
+      updateMediaSessionPositionState({
+        durationSec: durationSecRef.current,
+        positionSec: resumeMs / 1000,
+        playbackRate: playbackSpeedRef.current,
+        force: true,
+      });
       return;
     }
 
-    const startIndex = activeIndex >= 0 ? activeIndex : 0;
-    await playQueueItem(startIndex);
-  }, [activeIndex, activeQueueItems.length, applyPlaybackMixSettings, applyPlaybackOutputConfig, currentTimeSec, durationSec, isPlaying, playQueueItem, playbackSpeed, volume]);
+    const startIndex = activeIndexRef.current >= 0 ? activeIndexRef.current : 0;
+    if (playQueueItemRef.current) {
+      await playQueueItemRef.current(startIndex);
+    }
+  }, [applyPlaybackMixSettings, applyPlaybackOutputConfig]);
+
+  const handleTogglePlay = useCallback(async () => {
+    if (isPlayingRef.current) {
+      await handlePause();
+    } else {
+      await handlePlay();
+    }
+  }, [handlePause, handlePlay]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -1689,28 +1771,33 @@ function PlayerDashboard({
   ]);
 
   const handleNext = useCallback(async () => {
-    if (!activeQueueItems.length) return;
-    if (shuffleEnabled && activeQueueItems.length > 1) {
-      const randomIndex = pickRandomQueueIndex(activeIndex, activeQueueItems.length);
-      await playQueueItem(randomIndex);
+    const queue = activeQueueRef.current || [];
+    if (!queue.length) return;
+    const currentIdx = activeIndexRef.current >= 0 ? activeIndexRef.current : 0;
+    if (shuffleEnabledRef.current && queue.length > 1) {
+      const randomIndex = pickRandomQueueIndex(currentIdx, queue.length);
+      await playQueueItemRef.current?.(randomIndex);
       return;
     }
-    let nextIndex = activeIndex + 1;
-    if (nextIndex >= activeQueueItems.length) {
-      if (loopMode === PLAYER_LOOP_MODES.ALL) {
+    let nextIndex = currentIdx + 1;
+    if (nextIndex >= queue.length) {
+      if (loopModeRef.current === PLAYER_LOOP_MODES.ALL) {
         nextIndex = 0;
       } else {
         return;
       }
     }
-    await playQueueItem(nextIndex);
-  }, [activeIndex, activeQueueItems.length, loopMode, playQueueItem, shuffleEnabled]);
+    await playQueueItemRef.current?.(nextIndex);
+  }, []);
 
   const handlePrevious = useCallback(async () => {
-    if (!activeQueueItems.length) return;
-    if (currentTimeSec > 3 && realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item) {
+    const queue = activeQueueRef.current || [];
+    if (!queue.length) return;
+    const currentIdx = activeIndexRef.current >= 0 ? activeIndexRef.current : 0;
+    const timeSec = currentTimeSecRef.current;
+    if (timeSec > 3 && realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item) {
       const current = realtimePlaybackRef.current;
-      if (isPlaying) {
+      if (isPlayingRef.current) {
         await audioManager.seek(current.project, 0, getPlayerPlayOptions(current, {
           playbackRate: playbackSpeedRef.current,
         }));
@@ -1718,17 +1805,24 @@ function PlayerDashboard({
       } else {
         await audioManager.pause(0);
       }
+      currentTimeSecRef.current = 0;
       setCurrentTimeSec(0);
+      updateMediaSessionPositionState({
+        durationSec: durationSecRef.current,
+        positionSec: 0,
+        playbackRate: playbackSpeedRef.current,
+        force: true,
+      });
       return;
     }
-    let previousIndex = activeIndex - 1;
+    let previousIndex = currentIdx - 1;
     if (previousIndex < 0) {
-      previousIndex = loopMode === PLAYER_LOOP_MODES.ALL
-        ? activeQueueItems.length - 1
+      previousIndex = loopModeRef.current === PLAYER_LOOP_MODES.ALL
+        ? queue.length - 1
         : 0;
     }
-    await playQueueItem(previousIndex);
-  }, [activeIndex, activeQueueItems.length, applyPlaybackMixSettings, currentTimeSec, isPlaying, loopMode, playQueueItem, playbackSpeed]);
+    await playQueueItemRef.current?.(previousIndex);
+  }, [applyPlaybackMixSettings]);
 
   const previewTimelineTime = useCallback((nextTimeSec) => {
     const { timeSec } = clampPlayerSeek(nextTimeSec, durationSecRef.current);
@@ -1752,8 +1846,20 @@ function PlayerDashboard({
           playbackRate: playbackSpeedRef.current,
         }));
         applyPlaybackMixSettings(current.project, current.item);
+        updateMediaSessionPositionState({
+          durationSec: durationSecRef.current,
+          positionSec: timeSec,
+          playbackRate: playbackSpeedRef.current,
+          force: true,
+        });
       } else {
         await audioManager.pause(timeMs);
+        updateMediaSessionPositionState({
+          durationSec: durationSecRef.current,
+          positionSec: timeSec,
+          playbackRate: playbackSpeedRef.current,
+          force: true,
+        });
       }
     } catch (seekError) {
       setError(seekError.message || 'Seek failed');
@@ -1813,6 +1919,65 @@ function PlayerDashboard({
       }
     });
   }, [commitTimelineSeek]);
+
+  const handleNextRef = useRef(null);
+  const handlePreviousRef = useRef(null);
+  const commitTimelineSeekRef = useRef(null);
+  const handlePlayRef = useRef(null);
+  const handlePauseRef = useRef(null);
+
+  useEffect(() => {
+    handleNextRef.current = handleNext;
+  }, [handleNext]);
+
+  useEffect(() => {
+    handlePreviousRef.current = handlePrevious;
+  }, [handlePrevious]);
+
+  useEffect(() => {
+    commitTimelineSeekRef.current = commitTimelineSeek;
+  }, [commitTimelineSeek]);
+
+  useEffect(() => {
+    handlePlayRef.current = handlePlay;
+  }, [handlePlay]);
+
+  useEffect(() => {
+    handlePauseRef.current = handlePause;
+  }, [handlePause]);
+
+  useEffect(() => {
+    const cleanup = setupMediaSession({
+      onPlay: () => {
+        void handlePlayRef.current?.();
+      },
+      onPause: () => {
+        void handlePauseRef.current?.();
+      },
+      onStop: () => {
+        audioManager.stop();
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+        setMediaSessionPlaybackState(false);
+      },
+      onSeekTo: (timeSec) => {
+        void commitTimelineSeekRef.current?.(timeSec);
+      },
+      onPrevious: () => {
+        void handlePreviousRef.current?.();
+      },
+      onNext: () => {
+        void handleNextRef.current?.();
+      },
+    });
+    return cleanup;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearMediaSession();
+    };
+  }, []);
 
   const restoreStoredVolume = useCallback((ref, fallback) => {
     const stored = Number(ref.current);
@@ -3291,6 +3456,23 @@ function PlayerDashboard({
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
+          {!isStandaloneApp() ? (
+            <a
+              href="/download"
+              onClick={(e) => {
+                if (inRouter && navigate) {
+                  e.preventDefault();
+                  navigate('/download');
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md bg-gray-700 hover:bg-gray-600 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:text-white transition-colors"
+              title="Install App"
+            >
+              <Download size={13} />
+              <span>Install App</span>
+            </a>
+          ) : null}
+
           <div className="flex items-center rounded-lg bg-gray-700 p-0.5">
             <button
               type="button"

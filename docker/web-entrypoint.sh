@@ -9,18 +9,70 @@ USE_HTTPS="${VITE_USE_HTTPS:-false}"
 CERT_PATH="/app/certs/dev.crt"
 KEY_PATH="/app/certs/dev.key"
 
+APK_DOWNLOAD_URL="${APOLLO_APK_DOWNLOAD_URL:-${APOLLO_APK_URL:-}}"
+
 # One worker. `auto` forks one process per host CPU, which blows a small Nomad memory limit.
 if [ -f /etc/nginx/nginx.conf ]; then
   sed -i 's/^worker_processes[[:space:]].*/worker_processes 1;/' /etc/nginx/nginx.conf
 fi
 
 write_common_config() {
+  APK_CONFIG=""
+  if [ -n "${APK_DOWNLOAD_URL}" ]; then
+    APK_CONFIG="  location = /apollo.apk {
+    return 302 ${APK_DOWNLOAD_URL};
+  }"
+  else
+    APK_CONFIG="  location = /apollo.apk {
+    default_type application/vnd.android.package-archive;
+    add_header Content-Type application/vnd.android.package-archive;
+    add_header Content-Disposition \"attachment; filename=\\\"apollo.apk\\\"\";
+    add_header Cache-Control \"no-cache, must-revalidate\";
+  }"
+  fi
+
   cat <<EOF
   root /usr/share/nginx/html;
   index index.html;
   client_max_body_size 500m;
 
+  include /etc/nginx/mime.types;
+  types {
+    audio/wav wav;
+    application/manifest+json webmanifest;
+    application/vnd.android.package-archive apk;
+  }
+
+\${APK_CONFIG}
+
+  location = /sw.js {
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
+    add_header Pragma "no-cache";
+    add_header Expires "0";
+    add_header Service-Worker-Allowed "/";
+  }
+
+  location = /index.html {
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
+    add_header Pragma "no-cache";
+    add_header Expires "0";
+  }
+
+  location = /keepalive.wav {
+    default_type audio/wav;
+    add_header Content-Type audio/wav;
+    add_header Accept-Ranges bytes;
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
+  }
+
+  location = /manifest.webmanifest {
+    default_type application/manifest+json;
+    add_header Content-Type application/manifest+json;
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
+  }
+
   location / {
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
     try_files \$uri \$uri/ /index.html;
   }
 
