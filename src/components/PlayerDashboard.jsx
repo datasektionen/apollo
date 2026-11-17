@@ -27,6 +27,8 @@ import { BrandWordmark } from './BrandLogo';
 import { PlayerSearchBar, PlayerSearchResults, usePlayerSearchResults } from './PlayerSearch';
 import { PlayerLibrarySidebar } from './PlayerLibrarySidebar';
 import { PlayerControlsSidebar } from './PlayerControlsSidebar';
+import { useIsMobile } from '../hooks/useIsMobile';
+import MobilePlayerView from './mobile/MobilePlayerView';
 import {
   formatPlaybackSpeed,
   formatPlaybackTranspose,
@@ -3409,6 +3411,104 @@ function PlayerDashboard({
     await playMixItem(queueItem, row.queueIndex);
   }, [playMixItem, selectedPlaylist]);
 
+  const handlePlayMobileMix = useCallback(async (mix, playlist = null, indexInList = null) => {
+    if (!mix) return;
+
+    // 1. If playing from a playlist (or mix belongs to a specified playlist)
+    if (playlist?.id) {
+      const items = (playlistItemsByPlaylistId[playlist.id] || []).filter((it) => !it.unavailable && (it.mix || it.id));
+      const qIndex = typeof indexInList === 'number' && indexInList >= 0
+        ? indexInList
+        : items.findIndex((it) => String(it.mix?.id || it.id) === String(mix.id || mix.mixId));
+      const targetIndex = qIndex >= 0 ? qIndex : 0;
+      setSelectedPlaylistId(playlist.id);
+      setSelectedFolderId(null);
+      setActiveCollectionType(PLAYER_COLLECTION_TYPES.PLAYLIST);
+      setActiveCollectionId(playlist.id);
+      setActiveIndex(targetIndex);
+      const mixPayload = mix.presetId ? mix : (items[targetIndex]?.mix || { ...mix, presetId: 'tutti' });
+      const qItem = createQueueItemFromMix(mixPayload, PLAYER_COLLECTION_TYPES.PLAYLIST, playlist.id);
+      if (qItem) {
+        await playMixItem(qItem, targetIndex);
+      }
+      return;
+    }
+
+    // 2. Check if it's a Tutti show track (or has showId or presetId === 'tutti' or matches tuttiMixes)
+    const matchTuttiIdx = tuttiMixes.findIndex(
+      (c) => String(c.id) === String(mix.id) || String(c.projectId) === String(mix.projectId || mix.id)
+    );
+    if (matchTuttiIdx >= 0 || mix.showId || mix.presetId === 'tutti' || mix.presetId === 'all_parts') {
+      const target = matchTuttiIdx >= 0 ? tuttiMixes[matchTuttiIdx] : mix;
+      const showId = target.showId || activeTuttiShowId || defaultTuttiShowId;
+      const collectionId = showId ? `show:${showId}` : 'tutti';
+      const qIndex = typeof indexInList === 'number' && indexInList >= 0
+        ? indexInList
+        : (matchTuttiIdx >= 0 ? matchTuttiIdx : 0);
+      setSelectedPlaylistId(null);
+      setSelectedFolderId(null);
+      setActiveCollectionType(PLAYER_COLLECTION_TYPES.TUTTI);
+      setActiveCollectionId(collectionId);
+      setActiveIndex(qIndex);
+      const qItem = createQueueItemFromMix(
+        target.presetId ? target : { ...target, presetId: 'tutti' },
+        PLAYER_COLLECTION_TYPES.TUTTI,
+        collectionId
+      );
+      if (qItem) {
+        await playMixItem(qItem, qIndex);
+      }
+      return;
+    }
+
+    // 3. Check if it's in myMixes
+    const matchMyIdx = myMixes.findIndex((c) => String(c.id) === String(mix.id));
+    if (matchMyIdx >= 0) {
+      const target = myMixes[matchMyIdx];
+      const folderId = target.folderId || null;
+      setSelectedFolderId(folderId);
+      setSelectedPlaylistId(null);
+      setActiveCollectionType(PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES);
+      setActiveCollectionId(folderId || 'root');
+      setActiveIndex(matchMyIdx);
+      const qItem = createQueueItemFromMix(target, PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES, folderId || 'root');
+      if (qItem) {
+        await playMixItem(qItem, matchMyIdx);
+      }
+      return;
+    }
+
+    // 4. Fallback: create queue item with whatever presetId exists or 'tutti'
+    const fallbackMix = mix.presetId ? mix : { ...mix, presetId: 'tutti', projectId: mix.projectId || mix.id };
+    const qItem = createQueueItemFromMix(fallbackMix, PLAYER_COLLECTION_TYPES.TUTTI, 'tutti');
+    if (qItem) {
+      setActiveIndex(0);
+      await playMixItem(qItem, 0);
+    }
+  }, [activeTuttiShowId, defaultTuttiShowId, myMixes, playMixItem, playlistItemsByPlaylistId, tuttiMixes]);
+
+  const handleMobileSearchSelect = useCallback(async (item) => {
+    if (!item) return;
+    if (item.type === 'song' || item.type === 'mix' || item.type === 'tutti') {
+      const mix = item.payload || item;
+      await handlePlayMobileMix(mix);
+      return;
+    }
+    if (item.type === 'playlist' && item.payload) {
+      const playlist = item.payload;
+      const items = (playlistItemsByPlaylistId[playlist.id] || []).filter((it) => !it.unavailable && (it.mix || it.id));
+      if (items.length > 0) {
+        await handlePlayMobileMix(items[0].mix || items[0], playlist, 0);
+      }
+      return;
+    }
+    await handleSearchSelect(item);
+  }, [handlePlayMobileMix, handleSearchSelect, playlistItemsByPlaylistId]);
+
+  const handleMobileSearchPlay = useCallback(async (item) => {
+    await handleMobileSearchSelect(item);
+  }, [handleMobileSearchSelect]);
+
   const handleGoHome = useCallback(() => {
     if (searchDebounceTimerRef.current) {
       clearTimeout(searchDebounceTimerRef.current);
@@ -3428,6 +3528,91 @@ function PlayerDashboard({
       navigate('/player');
     }
   }, [defaultTuttiCollectionId, inRouter, navigate]);
+
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    return (
+      <div className="h-full w-full overflow-hidden bg-gray-950 text-white">
+        <MobilePlayerView
+          session={session}
+          onLogout={onLogout}
+          onOpenProfile={onOpenProfile}
+          onSwitchToDawDashboard={onSwitchToDawDashboard}
+          onOpenAdmin={onOpenAdmin}
+          // Audio settings
+          audioSettings={audioSettings}
+          setAudioSettings={setAudioSettings}
+          audioInputs={audioInputs}
+          audioOutputs={audioOutputs}
+          monoOutputActive={monoOutputActive}
+          outputChannelCount={outputChannelCount}
+          onRefreshAudioDevices={refreshAudioDevices}
+          // Playback state & controls
+          isPlaying={isPlaying}
+          isRendering={isRendering}
+          currentTimeSec={currentTimeSec}
+          durationSec={durationSec}
+          volume={volume}
+          onSetVolume={setVolume}
+          loopMode={loopMode}
+          shuffleEnabled={shuffleEnabled}
+          onTogglePlay={handleTogglePlay}
+          onPrevious={handlePrevious}
+          onNext={handleNext}
+          onSeek={handleSeek}
+          beginTimelineScrub={beginTimelineScrub}
+          endTimelineScrub={endTimelineScrub}
+          onCycleLoopMode={handleCycleLoopMode}
+          onToggleShuffle={() => setShuffleEnabled((p) => !p)}
+          // Active queue
+          activeQueueItem={activeQueueItem}
+          // Library content
+          shows={tuttiShows}
+          playlists={playlists}
+          folders={folders}
+          playlistItemsByPlaylistId={playlistItemsByPlaylistId}
+          tuttiMixes={tuttiMixes}
+          globalMixes={globalMixes}
+          myMixes={myMixes}
+          onPlayMix={handlePlayMobileMix}
+          onPlayLibraryMix={handlePlayMobileMix}
+          onPlayPlaylistRow={(row, playlist, idx) => handlePlayMobileMix(row?.mix || row, playlist, idx)}
+          // Search
+          searchDraft={searchDraft}
+          onSearchDraftChange={handleSearchInputChange}
+          searchType={searchType}
+          onSearchTypeChange={handleSearchTypeChange}
+          searchResults={searchResults}
+          searchSongItems={searchSongItems}
+          focusedSearchCreditId={focusedSearchCreditId}
+          onFocusedCreditChange={setFocusedSearchCreditId}
+          onSelectSearchItem={handleMobileSearchSelect}
+          onPlaySearchItem={handleMobileSearchPlay}
+          // Stem & Choir controls
+          playbackSpeed={playbackSpeed}
+          onSetPlaybackSpeed={setPlaybackSpeed}
+          playbackTranspose={playbackTranspose}
+          onSetPlaybackTranspose={setPlaybackTranspose}
+          practiceFocusControl={practiceFocusControl}
+          onSetPracticeFocusControl={setPracticeFocusControl}
+          practicePanRange={practicePanRange}
+          onSetPracticePanRange={setPracticePanRange}
+          hasRealtimeMetronome={hasRealtimeMetronome}
+          metronomeVolume={metronomeVolume}
+          onSetMetronomeVolume={setMetronomeVolume}
+          // Lyrics & Credits
+          currentPlaybackLyrics={currentPlaybackLyrics}
+          hasCurrentLyrics={hasCurrentLyrics}
+          openCreditsForProject={openCreditsForMix}
+        />
+        <CreditsDialog
+          state={creditsDialog}
+          onClose={() => setCreditsDialog(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-gray-900 text-white">

@@ -24,6 +24,7 @@ export function usePlaybackDeviceSettings(options = {}) {
   const {
     defaults = DEFAULT_PLAYBACK_DEVICE_SETTINGS,
     errorPrefix = 'settings',
+    requestMicrophonePermission = errorPrefix !== 'player-dashboard',
   } = options;
 
   const [audioInputs, setAudioInputs] = useState([]);
@@ -115,21 +116,23 @@ export function usePlaybackDeviceSettings(options = {}) {
 
     let devices = await navigator.mediaDevices.enumerateDevices();
     const hasLabels = devices.some((device) => device.label);
-    if (requestPermissionIfNeeded && !hasLabels) {
+    if (requestPermissionIfNeeded && !hasLabels && requestMicrophonePermission) {
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         devices = await navigator.mediaDevices.enumerateDevices();
       } catch (error) {
-        reportUserError(
-          'Could not access microphone permissions to read device labels.',
-          error,
-          { onceKey: `${errorPrefix}:device-label-permission` }
-        );
+        if (errorPrefix !== 'player-dashboard') {
+          reportUserError(
+            'Could not access microphone permissions to read device labels.',
+            error,
+            { onceKey: `${errorPrefix}:device-label-permission` }
+          );
+        }
       }
     }
 
     applyEnumeratedDevices(devices);
-  }, [applyEnumeratedDevices, errorPrefix]);
+  }, [applyEnumeratedDevices, errorPrefix, requestMicrophonePermission]);
 
   const refreshAudioDevices = useCallback(async () => {
     await listAudioDevices({ requestPermissionIfNeeded: true });
