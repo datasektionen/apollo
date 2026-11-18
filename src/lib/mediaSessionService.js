@@ -24,6 +24,11 @@ let currentPlaybackState = {
   positionSec: 0,
 };
 
+export const PAUSE_DISMISS_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes, same as Spotify
+
+let hasStartedPlayback = false;
+let pauseDismissTimer = null;
+
 // 46-byte minimal silent WAV loop fallback
 const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
 
@@ -185,7 +190,12 @@ export async function requestMediaNotificationPermission() {
 
 if (typeof window !== 'undefined') {
   const primeGesture = () => {
-    unlockAudioSession();
+    // Only request permission for notifications on first user gesture; do not start keep-alive audio element before playback!
+    if ('Notification' in window && Notification.permission === 'default') {
+      try {
+        Notification.requestPermission().catch(() => {});
+      } catch {}
+    }
     window.removeEventListener('pointerdown', primeGesture, true);
     window.removeEventListener('touchstart', primeGesture, true);
     window.removeEventListener('click', primeGesture, true);
@@ -389,49 +399,68 @@ export function updateMediaSessionMetadata({
  * Set playback state ('playing' or 'paused') and manage background keep-alive
  */
 export function setMediaSessionPlaybackState(isPlaying, positionSec = null) {
-  currentPlaybackState.isPlaying = Boolean(isPlaying);
+  const willPlay = Boolean(isPlaying);
+
+  // If app is opened and nothing has ever played, do NOT create a media session or show notification!
+  if (!willPlay && !hasStartedPlayback) {
+    currentPlaybackState.isPlaying = false;
+    if (typeof positionSec === 'number') {
+      currentPlaybackState.positionSec = positionSec;
+    }
+    return;
+  }
+
+  hasStartedPlayback = true;
+  currentPlaybackState.isPlaying = willPlay;
   if (typeof positionSec === 'number') {
     currentPlaybackState.positionSec = positionSec;
+  }
+
+  if (pauseDismissTimer) {
+    clearTimeout(pauseDismissTimer);
+    pauseDismissTimer = null;
   }
 
   if (isNative) {
     try {
       ApolloMedia.setPlaybackState({
-        state: isPlaying ? 'playing' : 'paused',
+        state: willPlay ? 'playing' : 'paused',
         position: currentPlaybackState.positionSec,
       }).catch(() => {});
     } catch {}
   }
 
-  if (typeof window === 'undefined' || !('mediaSession' in navigator) || !navigator.mediaSession) return;
-
-  try {
-    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-  } catch {}
-
-  const keepAlive = getKeepAliveElement();
-  if (!keepAlive) return;
-
-  if (keepAlivePauseTimeout) {
-    clearTimeout(keepAlivePauseTimeout);
-    keepAlivePauseTimeout = null;
+  if (typeof window !== 'undefined' && 'mediaSession' in navigator && navigator.mediaSession) {
+    try {
+      navigator.mediaSession.playbackState = willPlay ? 'playing' : 'paused';
+    } catch {}
   }
 
-  if (isPlaying) {
-    try {
-      const playPromise = keepAlive.play();
-      if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise.catch((err) => {
-          console.warn('[MediaSession] Keep-alive play rejected:', err);
-        });
+  const keepAlive = getKeepAliveElement();
+
+  if (willPlay) {
+    if (keepAlive) {
+      try {
+        const playPromise = keepAlive.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch((err) => {
+            console.warn('[MediaSession] Keep-alive play rejected:', err);
+          });
+        }
+      } catch (err) {
+        console.warn('[MediaSession] Keep-alive play failed:', err);
       }
-    } catch (err) {
-      console.warn('[MediaSession] Keep-alive play failed:', err);
     }
   } else {
-    try {
-      keepAlive.pause();
-    } catch {}
+    if (keepAlive) {
+      try {
+        keepAlive.pause();
+      } catch {}
+    }
+    // Stay visible for 10 minutes after pause, then auto-dismiss (same as Spotify)
+    pauseDismissTimer = setTimeout(() => {
+      clearMediaSession();
+    }, PAUSE_DISMISS_TIMEOUT_MS);
   }
 }
 
@@ -508,15 +537,18 @@ export function updateMediaSessionPositionState({
  * Reset media session and stop keep-alive
  */
 export function clearMediaSession() {
+  hasStartedPlayback = false;
   currentPlaybackState.isPlaying = false;
   currentPlaybackState.positionSec = 0;
 
+  if (pauseDismissTimer) {
+    clearTimeout(pauseDismissTimer);
+    pauseDismissTimer = null;
+  }
+
   if (isNative) {
     try {
-      ApolloMedia.setPlaybackState({
-        state: 'paused',
-        position: 0,
-      }).catch(() => {});
+      ApolloMedia.clear?.().catch(() => {});
     } catch {}
   }
 

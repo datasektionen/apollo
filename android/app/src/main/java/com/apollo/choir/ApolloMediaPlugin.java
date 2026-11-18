@@ -27,6 +27,12 @@ import com.getcapacitor.annotation.Permission;
 public class ApolloMediaPlugin extends Plugin {
     private static final String TAG = "ApolloMediaPlugin";
 
+    private String currentTitle = "Apollo";
+    private String currentArtist = "Apollo Choir";
+    private String currentAlbum = "";
+    private long currentDuration = 0;
+    private String currentArtworkUrl = "";
+
     @Override
     public void load() {
         super.load();
@@ -99,19 +105,18 @@ public class ApolloMediaPlugin extends Plugin {
 
     @PluginMethod
     public void setMetadata(PluginCall call) {
-        String title = call.getString("title", "Apollo");
-        String artist = call.getString("artist", "Apollo Choir");
-        String album = call.getString("album", "");
+        currentTitle = call.getString("title", "Apollo");
+        currentArtist = call.getString("artist", "Apollo Choir");
+        currentAlbum = call.getString("album", "");
         Double durationSec = call.getDouble("duration", 0.0);
-        long durationMs = (durationSec != null) ? (long) (durationSec * 1000) : 0;
-        String artworkUrl = call.getString("artworkUrl", "");
+        currentDuration = (durationSec != null) ? (long) (durationSec * 1000) : 0;
+        currentArtworkUrl = call.getString("artworkUrl", "");
 
         ApolloMediaService service = ApolloMediaService.getInstance();
         if (service != null) {
-            service.updateMetadata(title, artist, album, durationMs, artworkUrl);
-        } else {
-            ensureServiceRunning(title, artist, album, durationMs, 0, false, artworkUrl);
+            service.updateMetadata(currentTitle, currentArtist, currentAlbum, currentDuration, currentArtworkUrl);
         }
+        // Do not auto-start service on metadata update alone (only start when playing)
 
         call.resolve();
     }
@@ -126,10 +131,20 @@ public class ApolloMediaPlugin extends Plugin {
         ApolloMediaService service = ApolloMediaService.getInstance();
         if (service != null) {
             service.updatePlaybackState(isPlaying, positionMs);
-        } else {
-            ensureServiceRunning("Apollo", "Apollo Choir", "", 0, positionMs, isPlaying, "");
+        } else if (isPlaying) {
+            // First time media playback has actually started: start the foreground service
+            ensureServiceRunning(currentTitle, currentArtist, currentAlbum, currentDuration, positionMs, true, currentArtworkUrl);
         }
 
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void clear(PluginCall call) {
+        ApolloMediaService service = ApolloMediaService.getInstance();
+        if (service != null) {
+            service.dismissNotificationAndStop();
+        }
         call.resolve();
     }
 }

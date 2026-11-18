@@ -11,7 +11,9 @@ import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.support.v4.media.MediaMetadataCompat;
@@ -49,6 +51,9 @@ public class ApolloMediaService extends Service {
     public static final String ACTION_PREV = "com.apollo.choir.ACTION_PREV";
     public static final String ACTION_NEXT = "com.apollo.choir.ACTION_NEXT";
     public static final String ACTION_SEEK = "com.apollo.choir.ACTION_SEEK";
+    public static final String ACTION_DISMISS = "com.apollo.choir.ACTION_DISMISS";
+
+    public static final long PAUSE_TIMEOUT_MS = 10 * 60 * 1000L; // 10 minutes, same as Spotify
 
     public static final String EXTRA_TITLE = "extra_title";
     public static final String EXTRA_ARTIST = "extra_artist";
@@ -83,6 +88,44 @@ public class ApolloMediaService extends Service {
     private String currentArtworkUrl = "";
     private Bitmap currentArtworkBitmap = null;
     private Bitmap defaultArtworkBitmap = null;
+
+    private final Handler pauseHandler = new Handler(Looper.getMainLooper());
+    private final Runnable pauseDismissRunnable = new Runnable() {
+        @Override
+        public void run() {
+            dismissNotificationAndStop();
+        }
+    };
+
+    private void schedulePauseDismissTimer() {
+        cancelPauseDismissTimer();
+        pauseHandler.postDelayed(pauseDismissRunnable, PAUSE_TIMEOUT_MS);
+    }
+
+    private void cancelPauseDismissTimer() {
+        pauseHandler.removeCallbacks(pauseDismissRunnable);
+    }
+
+    public void dismissNotificationAndStop() {
+        cancelPauseDismissTimer();
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE);
+            } else {
+                stopForeground(true);
+            }
+            if (notificationManager != null) {
+                notificationManager.cancel(NOTIFICATION_ID);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error dismissing notification: " + e.getMessage());
+        }
+        if (mediaSession != null) {
+            mediaSession.setActive(false);
+        }
+        releaseWakeLock();
+        stopSelf();
+    }
 
     public static void setEventListener(MediaEventListener listener) {
         eventListener = listener;
@@ -219,7 +262,10 @@ public class ApolloMediaService extends Service {
 
         if (intent != null && intent.getAction() != null) {
             String action = intent.getAction();
-            if (ACTION_PLAY.equals(action)) {
+            if (ACTION_DISMISS.equals(action)) {
+                dismissNotificationAndStop();
+                return START_NOT_STICKY;
+            } else if (ACTION_PLAY.equals(action)) {
                 if (mediaSession.getController() != null) {
                     mediaSession.getController().getTransportControls().play();
                 }
@@ -296,9 +342,11 @@ public class ApolloMediaService extends Service {
         this.currentPosition = positionMs;
 
         if (playing) {
+            cancelPauseDismissTimer();
             acquireWakeLock();
         } else {
             releaseWakeLock();
+            schedulePauseDismissTimer();
         }
 
         long actions = PlaybackStateCompat.ACTION_PLAY |
@@ -380,13 +428,24 @@ public class ApolloMediaService extends Service {
 
         Notification notification = buildNotification();
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            if (isPlaying) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+                } else {
+                    startForeground(NOTIFICATION_ID, notification);
+                }
             } else {
-                startForeground(NOTIFICATION_ID, notification);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_DETACH);
+                } else {
+                    stopForeground(false);
+                }
+                if (notificationManager != null) {
+                    notificationManager.notify(NOTIFICATION_ID, notification);
+                }
             }
         } catch (Exception e) {
-            Log.e(TAG, "startForeground error: " + e.getMessage());
+            Log.e(TAG, "Notification error: " + e.getMessage());
             if (notificationManager != null) {
                 notificationManager.notify(NOTIFICATION_ID, notification);
             }
@@ -416,6 +475,11 @@ public class ApolloMediaService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
         );
 
+        PendingIntent dismissPendingIntent = PendingIntent.getService(
+                this, 4, new Intent(this, ApolloMediaService.class).setAction(ACTION_DISMISS),
+                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
+        );
+
         MediaStyle mediaStyle = new MediaStyle()
                 .setMediaSession(mediaSession.getSessionToken())
                 .setShowActionsInCompactView(0, 1, 2);
@@ -429,10 +493,11 @@ public class ApolloMediaService extends Service {
                 .setContentText(currentArtist)
                 .setSubText(currentAlbum.isEmpty() ? null : currentAlbum)
                 .setContentIntent(contentPendingIntent)
+                .setDeleteIntent(dismissPendingIntent)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setColor(0xFFA98C4D) // Apollo Gold
                 .setColorized(true)
-                .setOngoing(true) // Pinned like Spotify
+                .setOngoing(isPlaying)
                 .addAction(R.drawable.ic_skip_previous, "Previous", prevPendingIntent)
                 .addAction(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play_arrow, isPlaying ? "Pause" : "Play", playPausePendingIntent)
                 .addAction(R.drawable.ic_skip_next, "Next", nextPendingIntent);
@@ -452,6 +517,7 @@ public class ApolloMediaService extends Service {
 
     @Override
     public void onDestroy() {
+        cancelPauseDismissTimer();
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();

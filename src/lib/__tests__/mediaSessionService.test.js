@@ -151,4 +151,37 @@ describe('MediaSession API & Mobile Background Audio Service', () => {
   it('safely attempts unlockAudioSession without throwing', () => {
     expect(() => unlockAudioSession()).not.toThrow();
   });
+
+  it('does not activate media session on initial pause state before any playback', () => {
+    clearMediaSession();
+    expect(mockMediaSession.playbackState).toBe('none');
+
+    // App mount calls setMediaSessionPlaybackState(false)
+    setMediaSessionPlaybackState(false);
+    // Should remain none (not paused, no media brick)
+    expect(mockMediaSession.playbackState).toBe('none');
+  });
+
+  it('keeps media session paused for 10 minutes then automatically dismisses', () => {
+    vi.useFakeTimers();
+    clearMediaSession();
+
+    // Start playback
+    setMediaSessionPlaybackState(true);
+    expect(mockMediaSession.playbackState).toBe('playing');
+
+    // Pause playback
+    setMediaSessionPlaybackState(false);
+    expect(mockMediaSession.playbackState).toBe('paused');
+
+    // 5 minutes in - still paused
+    vi.advanceTimersByTime(5 * 60 * 1000);
+    expect(mockMediaSession.playbackState).toBe('paused');
+
+    // After 10 minutes total - dismissed!
+    vi.advanceTimersByTime(5 * 60 * 1000);
+    expect(mockMediaSession.playbackState).toBe('none');
+
+    vi.useRealTimers();
+  });
 });
