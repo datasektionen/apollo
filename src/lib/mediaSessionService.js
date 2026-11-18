@@ -86,6 +86,7 @@ function getSilentAudioUrl() {
 }
 
 function getKeepAliveElement() {
+  if (isNative) return null; // Native Android does not need HTML5 audio keepalive; ApolloMediaService handles foreground playback natively
   if (typeof window === 'undefined' || typeof document === 'undefined') return null;
   if (!keepAliveAudioElement) {
     try {
@@ -262,6 +263,14 @@ export function setupMediaSession(handlers = {}) {
     }
   }
 
+  // On native platforms, ApolloMediaPlugin handles MediaSession natively.
+  // Avoid registering Chromium's navigator.mediaSession to prevent dual-MediaSession conflict.
+  if (isNative) {
+    return () => {
+      currentActionHandlers = {};
+    };
+  }
+
   if (typeof window === 'undefined' || !('mediaSession' in navigator) || !navigator.mediaSession) {
     return () => {
       currentActionHandlers = {};
@@ -375,6 +384,7 @@ export function updateMediaSessionMetadata({
         artworkUrl: isDefaultArtwork ? '' : toAbsoluteUrl(currentMetadata.artworkUrl),
       }).catch(() => {});
     } catch {}
+    return;
   }
 
   if (typeof window === 'undefined' || !('mediaSession' in navigator) || !navigator.mediaSession) return;
@@ -438,6 +448,12 @@ export function setMediaSessionPlaybackState(isPlaying, positionSec = null) {
         position: currentPlaybackState.positionSec,
       }).catch(() => {});
     } catch {}
+    if (!willPlay) {
+      pauseDismissTimer = setTimeout(() => {
+        clearMediaSession();
+      }, PAUSE_DISMISS_TIMEOUT_MS);
+    }
+    return;
   }
 
   if (typeof window !== 'undefined' && 'mediaSession' in navigator && navigator.mediaSession) {
@@ -509,14 +525,18 @@ export function updateMediaSessionPositionState({
     }
   }
 
-  if (isNative && (force || isSeek)) {
-    currentPlaybackState.positionSec = position;
-    try {
-      ApolloMedia.setPlaybackState({
-        state: currentPlaybackState.isPlaying ? 'playing' : 'paused',
-        position: position,
-      }).catch(() => {});
-    } catch {}
+  if (isNative) {
+    if (force || isSeek) {
+      currentPlaybackState.positionSec = position;
+      lastReportedPositionSec = position;
+      try {
+        ApolloMedia.setPlaybackState({
+          state: currentPlaybackState.isPlaying ? 'playing' : 'paused',
+          position: position,
+        }).catch(() => {});
+      } catch {}
+    }
+    return;
   }
 
   if (typeof window === 'undefined' || !('mediaSession' in navigator) || !navigator.mediaSession || typeof navigator.mediaSession.setPositionState !== 'function') {

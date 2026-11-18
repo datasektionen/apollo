@@ -189,17 +189,14 @@ public class ApolloMediaService extends Service {
         mediaSession.setCallback(new MediaSessionCompat.Callback() {
             @Override
             public void onPlay() {
+                updatePlaybackState(true, currentPosition);
                 if (eventListener != null) {
                     eventListener.onPlay();
                 }
-                updatePlaybackState(true, currentPosition);
             }
 
             @Override
             public void onPause() {
-                if (eventListener != null) {
-                    eventListener.onPause();
-                }
                 long now = SystemClock.elapsedRealtime();
                 long elapsed = (isPlaying && lastStateUpdateTime > 0) ? (now - lastStateUpdateTime) : 0;
                 long actualPos = Math.max(0, currentPosition + elapsed);
@@ -207,6 +204,9 @@ public class ApolloMediaService extends Service {
                     actualPos = currentDuration;
                 }
                 updatePlaybackState(false, actualPos);
+                if (eventListener != null) {
+                    eventListener.onPause();
+                }
             }
 
             @Override
@@ -214,7 +214,6 @@ public class ApolloMediaService extends Service {
                 if (eventListener != null) {
                     eventListener.onSkipToNext();
                 }
-                updatePlaybackState(true, 0);
             }
 
             @Override
@@ -222,43 +221,59 @@ public class ApolloMediaService extends Service {
                 if (eventListener != null) {
                     eventListener.onSkipToPrevious();
                 }
-                updatePlaybackState(true, 0);
             }
 
             @Override
             public void onSeekTo(long pos) {
+                updatePlaybackState(isPlaying, pos);
                 if (eventListener != null) {
                     eventListener.onSeekTo(pos);
                 }
-                updatePlaybackState(isPlaying, pos);
             }
 
             @Override
             public boolean onMediaButtonEvent(Intent mediaButtonEvent) {
+                if (mediaButtonEvent == null) return false;
                 KeyEvent keyEvent = mediaButtonEvent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
-                if (keyEvent != null && keyEvent.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyEvent != null) {
+                    int action = keyEvent.getAction();
                     int keyCode = keyEvent.getKeyCode();
-                    switch (keyCode) {
-                        case KeyEvent.KEYCODE_MEDIA_PLAY:
-                            onPlay();
-                            return true;
-                        case KeyEvent.KEYCODE_MEDIA_PAUSE:
-                            onPause();
-                            return true;
-                        case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-                        case KeyEvent.KEYCODE_HEADSETHOOK:
-                            if (isPlaying) {
-                                onPause();
-                            } else {
-                                onPlay();
+                    if (action == KeyEvent.ACTION_DOWN) {
+                        if (keyEvent.getRepeatCount() == 0) {
+                            switch (keyCode) {
+                                case KeyEvent.KEYCODE_MEDIA_PLAY:
+                                    onPlay();
+                                    return true;
+                                case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                                    onPause();
+                                    return true;
+                                case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                                case KeyEvent.KEYCODE_HEADSETHOOK:
+                                    if (isPlaying) {
+                                        onPause();
+                                    } else {
+                                        onPlay();
+                                    }
+                                    return true;
+                                case KeyEvent.KEYCODE_MEDIA_NEXT:
+                                    onSkipToNext();
+                                    return true;
+                                case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                                    onSkipToPrevious();
+                                    return true;
                             }
-                            return true;
-                        case KeyEvent.KEYCODE_MEDIA_NEXT:
-                            onSkipToNext();
-                            return true;
-                        case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
-                            onSkipToPrevious();
-                            return true;
+                        }
+                        return true;
+                    } else if (action == KeyEvent.ACTION_UP) {
+                        switch (keyCode) {
+                            case KeyEvent.KEYCODE_MEDIA_PLAY:
+                            case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                            case KeyEvent.KEYCODE_HEADSETHOOK:
+                            case KeyEvent.KEYCODE_MEDIA_NEXT:
+                            case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                                return true; // Consume ACTION_UP so super does not re-dispatch!
+                        }
                     }
                 }
                 return super.onMediaButtonEvent(mediaButtonEvent);
@@ -303,14 +318,12 @@ public class ApolloMediaService extends Service {
                     mediaSession.getController().getTransportControls().skipToPrevious();
                 } else {
                     if (eventListener != null) eventListener.onSkipToPrevious();
-                    updatePlaybackState(true, 0);
                 }
             } else if (ACTION_NEXT.equals(action)) {
                 if (mediaSession != null && mediaSession.getController() != null) {
                     mediaSession.getController().getTransportControls().skipToNext();
                 } else {
                     if (eventListener != null) eventListener.onSkipToNext();
-                    updatePlaybackState(true, 0);
                 }
             } else if (ACTION_INIT.equals(action)) {
                 currentTitle = intent.getStringExtra(EXTRA_TITLE) != null ? intent.getStringExtra(EXTRA_TITLE) : currentTitle;
@@ -326,12 +339,17 @@ public class ApolloMediaService extends Service {
                 if (isDefault) {
                     currentArtworkUrl = "";
                     currentArtworkBitmap = defaultArtworkBitmap;
-                    updateNotificationAndSession();
+                    updateSessionMetadata();
+                    updatePlaybackState(isPlaying, currentPosition);
+                    updateNotificationUI();
                 } else if (!artworkUrl.equals(currentArtworkUrl)) {
                     currentArtworkUrl = artworkUrl;
+                    updatePlaybackState(isPlaying, currentPosition);
                     loadArtworkAsync(artworkUrl);
                 } else {
-                    updateNotificationAndSession();
+                    updateSessionMetadata();
+                    updatePlaybackState(isPlaying, currentPosition);
+                    updateNotificationUI();
                 }
             }
         }
@@ -350,12 +368,14 @@ public class ApolloMediaService extends Service {
         if (isDefault) {
             this.currentArtworkUrl = "";
             this.currentArtworkBitmap = defaultArtworkBitmap;
-            updateNotificationAndSession();
+            updateSessionMetadata();
+            updateNotificationUI();
         } else if (!artworkUrl.equals(currentArtworkUrl)) {
             this.currentArtworkUrl = artworkUrl;
             loadArtworkAsync(artworkUrl);
         } else {
-            updateNotificationAndSession();
+            updateSessionMetadata();
+            updateNotificationUI();
         }
     }
 
@@ -381,6 +401,7 @@ public class ApolloMediaService extends Service {
     }
 
     public void updatePlaybackState(boolean playing, long positionMs) {
+        boolean playStateChanged = (this.isPlaying != playing);
         this.isPlaying = playing;
         this.currentPosition = positionMs;
         this.lastStateUpdateTime = SystemClock.elapsedRealtime();
@@ -413,7 +434,11 @@ public class ApolloMediaService extends Service {
             mediaSession.setPlaybackState(stateBuilder.build());
         }
 
-        updateNotificationAndSession();
+        // Only re-post notification if playing state changed (toggles play/pause icon)
+        // Never call setMetadata() or notify() on position updates during playback!
+        if (playStateChanged) {
+            updateNotificationUI();
+        }
     }
 
     private void loadArtworkAsync(String urlString) {
@@ -448,7 +473,8 @@ public class ApolloMediaService extends Service {
                 Log.w(TAG, "Failed to load artwork from " + urlString + ": " + e.getMessage());
             }
             currentArtworkBitmap = (bitmap != null) ? ensurePaddedArtworkBitmap(bitmap) : defaultArtworkBitmap;
-            updateNotificationAndSession();
+            updateSessionMetadata();
+            updateNotificationUI();
         });
     }
 
@@ -479,7 +505,26 @@ public class ApolloMediaService extends Service {
         }
     }
 
-    private void updateNotificationAndSession() {
+    private void updateSessionMetadata() {
+        if (mediaSession == null) return;
+
+        Bitmap artwork = (currentArtworkBitmap != null) ? currentArtworkBitmap : defaultArtworkBitmap;
+
+        MediaMetadataCompat.Builder metaBuilder = new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, currentDuration);
+
+        if (artwork != null) {
+            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork);
+            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork);
+        }
+
+        mediaSession.setMetadata(metaBuilder.build());
+    }
+
+    private void updateNotificationUI() {
         if (mediaSession == null) return;
 
         Bitmap artwork = (currentArtworkBitmap != null) ? currentArtworkBitmap : defaultArtworkBitmap;

@@ -1434,8 +1434,8 @@ function PlayerDashboard({
       title: item.name || item.projectName || 'Mix',
       artist: item.artist || item.groupName || 'Apollo Choir',
       album: 'Apollo Choir Player',
+      durationSec: Math.max(0, Number(item.durationMs || 0) / 1000),
     });
-    setMediaSessionPlaybackState(true);
 
     // Stop existing playback immediately so the previous track does not keep playing during load
     audioManager.stop();
@@ -1573,7 +1573,7 @@ function PlayerDashboard({
       if (!hasPlayerLyrics(playbackLyrics)) setLyricsViewOpen(false);
       isPlayingRef.current = true;
       setIsPlaying(true);
-      setMediaSessionPlaybackState(true);
+      setMediaSessionPlaybackState(true, 0);
       updateMediaSessionPositionState({
         durationSec: durationMs / 1000,
         positionSec: 0,
@@ -1614,7 +1614,6 @@ function PlayerDashboard({
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
-    setMediaSessionPlaybackState(isPlaying);
   }, [isPlaying]);
 
   useEffect(() => {
@@ -1692,26 +1691,18 @@ function PlayerDashboard({
     const generation = ++playGenerationRef.current;
     setIsRendering(false);
 
-    // 1. Immediately update playing state synchronously so UI toggles without delay
-    isPlayingRef.current = false;
-    setIsPlaying(false);
-    setMediaSessionPlaybackState(false);
-
-    // 2. Freeze current timeline position
+    // 1. Freeze current timeline position
     const actualCurrentMs = Math.max(0, Number(audioManager.getCurrentTime() || 0));
     const actualCurrentSec = actualCurrentMs / 1000;
     currentTimeSecRef.current = actualCurrentSec;
     setCurrentTimeSec(actualCurrentSec);
 
-    // 3. Update media session scrubber to freeze at current position
-    updateMediaSessionPositionState({
-      durationSec: durationSecRef.current,
-      positionSec: actualCurrentSec,
-      playbackRate: 1.0,
-      force: true,
-    });
+    // 2. Immediately update playing state synchronously so UI toggles without delay
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+    setMediaSessionPlaybackState(false, actualCurrentSec);
 
-    // 4. Pause audio hardware
+    // 3. Pause audio hardware
     try {
       await audioManager.pause(actualCurrentMs);
     } catch (pauseError) {
@@ -1720,7 +1711,6 @@ function PlayerDashboard({
       if (playGenerationRef.current === generation) {
         isPlayingRef.current = false;
         setIsPlaying(false);
-        setMediaSessionPlaybackState(false);
       }
     }
   }, []);
@@ -1739,17 +1729,18 @@ function PlayerDashboard({
       && currentTimeSecRef.current < Math.max(0, durationSecRef.current - 0.01)
     ) {
       const resumeMs = Math.max(0, Math.round((Number(currentTimeSecRef.current) || 0) * 1000));
+      const resumeSec = resumeMs / 1000;
       const current = realtimePlaybackRef.current;
 
-      // Optimistically flip button to Playing immediately
+      // Optimistically flip in-app play button to Playing immediately
       isPlayingRef.current = true;
       setIsPlaying(true);
-      setMediaSessionPlaybackState(true);
 
       updateMediaSessionMetadata({
         title: current.item.name || current.item.projectName || 'Mix',
         artist: current.item.artist || current.item.groupName || 'Apollo Choir',
         album: 'Apollo Choir Player',
+        durationSec: durationSecRef.current,
       });
 
       try {
@@ -1770,9 +1761,10 @@ function PlayerDashboard({
         applyPlaybackMixSettings(current.project, current.item);
         isPlayingRef.current = true;
         setIsPlaying(true);
+        setMediaSessionPlaybackState(true, resumeSec);
         updateMediaSessionPositionState({
           durationSec: durationSecRef.current,
-          positionSec: resumeMs / 1000,
+          positionSec: resumeSec,
           playbackRate: playbackSpeedRef.current,
           force: true,
         });
@@ -1781,7 +1773,7 @@ function PlayerDashboard({
         if (!isCancelled()) {
           isPlayingRef.current = false;
           setIsPlaying(false);
-          setMediaSessionPlaybackState(false);
+          setMediaSessionPlaybackState(false, resumeSec);
           try {
             await audioManager.pause(resumeMs);
           } catch {}
