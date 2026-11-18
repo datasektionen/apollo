@@ -256,6 +256,7 @@ public class ApolloMediaService extends Service {
             }
         });
 
+        mediaSession.setPlaybackToLocal(android.media.AudioManager.STREAM_MUSIC);
         mediaSession.setActive(true);
     }
 
@@ -530,7 +531,7 @@ public class ApolloMediaService extends Service {
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setStyle(mediaStyle)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_notification_small)
                 .setContentTitle(currentTitle)
                 .setContentText(currentArtist)
                 .setSubText(currentAlbum.isEmpty() ? null : currentAlbum)
