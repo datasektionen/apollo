@@ -67,8 +67,7 @@ export function MobileMiniPlayer({
               e.stopPropagation();
               onTogglePlay();
             }}
-            disabled={isRendering}
-            className="flex h-10 w-10 items-center justify-center text-white hover:text-blue-400 active:scale-90 transition-transform disabled:opacity-50"
+            className="flex h-10 w-10 items-center justify-center text-white hover:text-blue-400 active:scale-90 transition-transform"
             aria-label={isPlaying ? 'Pause' : 'Play'}
           >
             {isRendering ? (

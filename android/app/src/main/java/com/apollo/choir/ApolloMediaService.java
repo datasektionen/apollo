@@ -91,6 +91,7 @@ public class ApolloMediaService extends Service {
     private String currentArtworkUrl = "";
     private Bitmap currentArtworkBitmap = null;
     private Bitmap defaultArtworkBitmap = null;
+    private long lastStateUpdateTime = 0;
 
     private final Handler pauseHandler = new Handler(Looper.getMainLooper());
     private final Runnable pauseDismissRunnable = new Runnable() {
@@ -199,7 +200,13 @@ public class ApolloMediaService extends Service {
                 if (eventListener != null) {
                     eventListener.onPause();
                 }
-                updatePlaybackState(false, currentPosition);
+                long now = SystemClock.elapsedRealtime();
+                long elapsed = (isPlaying && lastStateUpdateTime > 0) ? (now - lastStateUpdateTime) : 0;
+                long actualPos = Math.max(0, currentPosition + elapsed);
+                if (currentDuration > 0 && actualPos > currentDuration) {
+                    actualPos = currentDuration;
+                }
+                updatePlaybackState(false, actualPos);
             }
 
             @Override
@@ -207,6 +214,7 @@ public class ApolloMediaService extends Service {
                 if (eventListener != null) {
                     eventListener.onSkipToNext();
                 }
+                updatePlaybackState(true, 0);
             }
 
             @Override
@@ -214,6 +222,7 @@ public class ApolloMediaService extends Service {
                 if (eventListener != null) {
                     eventListener.onSkipToPrevious();
                 }
+                updatePlaybackState(true, 0);
             }
 
             @Override
@@ -270,20 +279,38 @@ public class ApolloMediaService extends Service {
                 dismissNotificationAndStop();
                 return START_NOT_STICKY;
             } else if (ACTION_PLAY.equals(action)) {
-                if (mediaSession.getController() != null) {
+                if (mediaSession != null && mediaSession.getController() != null) {
                     mediaSession.getController().getTransportControls().play();
+                } else {
+                    if (eventListener != null) eventListener.onPlay();
+                    updatePlaybackState(true, currentPosition);
                 }
             } else if (ACTION_PAUSE.equals(action)) {
-                if (mediaSession.getController() != null) {
+                if (mediaSession != null && mediaSession.getController() != null) {
                     mediaSession.getController().getTransportControls().pause();
+                } else {
+                    if (eventListener != null) eventListener.onPause();
+                    long now = SystemClock.elapsedRealtime();
+                    long elapsed = (isPlaying && lastStateUpdateTime > 0) ? (now - lastStateUpdateTime) : 0;
+                    long actualPos = Math.max(0, currentPosition + elapsed);
+                    if (currentDuration > 0 && actualPos > currentDuration) {
+                        actualPos = currentDuration;
+                    }
+                    updatePlaybackState(false, actualPos);
                 }
             } else if (ACTION_PREV.equals(action)) {
-                if (mediaSession.getController() != null) {
+                if (mediaSession != null && mediaSession.getController() != null) {
                     mediaSession.getController().getTransportControls().skipToPrevious();
+                } else {
+                    if (eventListener != null) eventListener.onSkipToPrevious();
+                    updatePlaybackState(true, 0);
                 }
             } else if (ACTION_NEXT.equals(action)) {
-                if (mediaSession.getController() != null) {
+                if (mediaSession != null && mediaSession.getController() != null) {
                     mediaSession.getController().getTransportControls().skipToNext();
+                } else {
+                    if (eventListener != null) eventListener.onSkipToNext();
+                    updatePlaybackState(true, 0);
                 }
             } else if (ACTION_INIT.equals(action)) {
                 currentTitle = intent.getStringExtra(EXTRA_TITLE) != null ? intent.getStringExtra(EXTRA_TITLE) : currentTitle;
@@ -356,6 +383,7 @@ public class ApolloMediaService extends Service {
     public void updatePlaybackState(boolean playing, long positionMs) {
         this.isPlaying = playing;
         this.currentPosition = positionMs;
+        this.lastStateUpdateTime = SystemClock.elapsedRealtime();
 
         if (playing) {
             cancelPauseDismissTimer();
@@ -478,11 +506,8 @@ public class ApolloMediaService extends Service {
                     startForeground(NOTIFICATION_ID, notification);
                 }
             } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_DETACH);
-                } else {
-                    stopForeground(false);
-                }
+                // Keep the service in foreground so the background process is not frozen by the OS while paused.
+                // The 10-minute pause timer will call dismissNotificationAndStop() when it expires.
                 if (notificationManager != null) {
                     notificationManager.notify(NOTIFICATION_ID, notification);
                 }
@@ -504,22 +529,23 @@ public class ApolloMediaService extends Service {
         );
 
         PendingIntent prevPendingIntent = PendingIntent.getService(
-                this, 1, new Intent(this, ApolloMediaService.class).setAction(ACTION_PREV),
+                this, 10, new Intent(this, ApolloMediaService.class).setAction(ACTION_PREV),
                 PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
         );
 
+        int playPauseReqCode = isPlaying ? 20 : 21;
         PendingIntent playPausePendingIntent = PendingIntent.getService(
-                this, 2, new Intent(this, ApolloMediaService.class).setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY),
+                this, playPauseReqCode, new Intent(this, ApolloMediaService.class).setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY),
                 PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
         );
 
         PendingIntent nextPendingIntent = PendingIntent.getService(
-                this, 3, new Intent(this, ApolloMediaService.class).setAction(ACTION_NEXT),
+                this, 30, new Intent(this, ApolloMediaService.class).setAction(ACTION_NEXT),
                 PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
         );
 
         PendingIntent dismissPendingIntent = PendingIntent.getService(
-                this, 4, new Intent(this, ApolloMediaService.class).setAction(ACTION_DISMISS),
+                this, 40, new Intent(this, ApolloMediaService.class).setAction(ACTION_DISMISS),
                 PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
         );
 

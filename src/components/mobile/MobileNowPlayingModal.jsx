@@ -227,8 +227,7 @@ export function MobileNowPlayingModal({
             <button
               type="button"
               onClick={onPrevious}
-              disabled={isRendering}
-              className="flex h-12 w-12 items-center justify-center text-white active:scale-90 transition-transform disabled:opacity-40"
+              className="flex h-12 w-12 items-center justify-center text-white active:scale-90 transition-transform"
               aria-label="Previous track"
             >
               <SkipBack size={32} className="fill-current" />
@@ -238,8 +237,7 @@ export function MobileNowPlayingModal({
             <button
               type="button"
               onClick={onTogglePlay}
-              disabled={isRendering}
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-2xl active:scale-95 transition-transform hover:scale-105 disabled:opacity-50"
+              className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-2xl active:scale-95 transition-transform hover:scale-105"
               aria-label={isPlaying ? 'Pause' : 'Play'}
             >
               {isRendering ? (
@@ -255,8 +253,7 @@ export function MobileNowPlayingModal({
             <button
               type="button"
               onClick={onNext}
-              disabled={isRendering}
-              className="flex h-12 w-12 items-center justify-center text-white active:scale-90 transition-transform disabled:opacity-40"
+              className="flex h-12 w-12 items-center justify-center text-white active:scale-90 transition-transform"
               aria-label="Next track"
             >
               <SkipForward size={32} className="fill-current" />

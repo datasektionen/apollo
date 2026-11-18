@@ -242,12 +242,15 @@ export function setupMediaSession(handlers = {}) {
             currentActionHandlers.onPause?.();
             break;
           case 'next':
+          case 'nexttrack':
             currentActionHandlers.onNext?.();
             break;
           case 'previous':
+          case 'previoustrack':
             currentActionHandlers.onPrevious?.();
             break;
           case 'seek':
+          case 'seekto':
             if (typeof data.position === 'number') {
               currentActionHandlers.onSeekTo?.(data.position);
             }
@@ -418,9 +421,10 @@ export function setMediaSessionPlaybackState(isPlaying, positionSec = null) {
 
   hasStartedPlayback = true;
   currentPlaybackState.isPlaying = willPlay;
-  if (typeof positionSec === 'number') {
-    currentPlaybackState.positionSec = positionSec;
-  }
+  const effectivePos = (typeof positionSec === 'number' && Number.isFinite(positionSec))
+    ? positionSec
+    : Math.max(0, Number(audioManager?.getCurrentTime?.() || 0) / 1000);
+  currentPlaybackState.positionSec = effectivePos;
 
   if (pauseDismissTimer) {
     clearTimeout(pauseDismissTimer);

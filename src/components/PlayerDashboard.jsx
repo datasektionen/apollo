@@ -1437,6 +1437,19 @@ function PlayerDashboard({
     });
     setMediaSessionPlaybackState(true);
 
+    // Stop existing playback immediately so the previous track does not keep playing during load
+    audioManager.stop();
+    realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
+    realtimeEndInFlightRef.current = false;
+    currentTimeSecRef.current = 0;
+    setCurrentTimeSec(0);
+    setDurationSec(Math.max(0, Number(item.durationMs || 0) / 1000));
+    if (typeof indexForState === 'number' && indexForState >= 0) {
+      activeIndexRef.current = indexForState;
+      setActiveIndex(indexForState);
+    }
+    setNowPlayingLabel(item.name || item.projectName || 'Mix');
+
     setIsRendering(true);
     setCurrentPlaybackLyrics(null);
     setError('');
@@ -1474,15 +1487,14 @@ function PlayerDashboard({
       if (isCancelled()) throw createStaleAudioLoadError();
       summarizeProjectForLoadLog(snapshot, 'Project snapshot');
       const songHasMetronome = hasSnapshotMetronome(snapshot);
-      await withLoadStep('Stop current playback', async () => {
-        audioManager.stop();
-      });
+      audioManager.stop();
       realtimePlaybackRef.current = { project: null, item: null, durationMs: 0 };
       realtimeEndInFlightRef.current = false;
 
       setCurrentTimeSec(0);
       setDurationSec(Math.max(0, Number(item.durationMs || 0) / 1000));
       if (typeof indexForState === 'number' && indexForState >= 0) {
+        activeIndexRef.current = indexForState;
         setActiveIndex(indexForState);
       }
       setNowPlayingLabel(item.name || item.projectName || 'Mix');
@@ -1545,6 +1557,10 @@ function PlayerDashboard({
           playbackRate: playbackSpeedRef.current,
         }))
       );
+      if (isCancelled()) {
+        audioManager.stop();
+        return;
+      }
       applyPlaybackMixSettings(playbackSnapshot, item, realtimeControlOverrides);
       realtimePlaybackRef.current = {
         project: playbackSnapshot,
@@ -1555,7 +1571,15 @@ function PlayerDashboard({
       const playbackLyrics = playbackSnapshot?.lyrics || null;
       setCurrentPlaybackLyrics(playbackLyrics);
       if (!hasPlayerLyrics(playbackLyrics)) setLyricsViewOpen(false);
+      isPlayingRef.current = true;
       setIsPlaying(true);
+      setMediaSessionPlaybackState(true);
+      updateMediaSessionPositionState({
+        durationSec: durationMs / 1000,
+        positionSec: 0,
+        playbackRate: playbackSpeedRef.current,
+        force: true,
+      });
     } catch (error) {
       if (error?.name === 'StaleAudioLoad' || isCancelled()) {
         return;
@@ -1665,27 +1689,49 @@ function PlayerDashboard({
   }, []);
 
   const handlePause = useCallback(async () => {
-    playGenerationRef.current += 1;
+    const generation = ++playGenerationRef.current;
     setIsRendering(false);
+
+    // 1. Immediately update playing state synchronously so UI toggles without delay
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+    setMediaSessionPlaybackState(false);
+
+    // 2. Freeze current timeline position
     const actualCurrentMs = Math.max(0, Number(audioManager.getCurrentTime() || 0));
     const actualCurrentSec = actualCurrentMs / 1000;
     currentTimeSecRef.current = actualCurrentSec;
     setCurrentTimeSec(actualCurrentSec);
-    await audioManager.pause(actualCurrentMs);
-    setIsPlaying(false);
-    isPlayingRef.current = false;
-    setMediaSessionPlaybackState(false);
+
+    // 3. Update media session scrubber to freeze at current position
     updateMediaSessionPositionState({
       durationSec: durationSecRef.current,
       positionSec: actualCurrentSec,
-      playbackRate: playbackSpeedRef.current,
+      playbackRate: 1.0,
       force: true,
     });
+
+    // 4. Pause audio hardware
+    try {
+      await audioManager.pause(actualCurrentMs);
+    } catch (pauseError) {
+      console.warn('[PlayerDashboard] audioManager.pause failed:', pauseError);
+    } finally {
+      if (playGenerationRef.current === generation) {
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+        setMediaSessionPlaybackState(false);
+      }
+    }
   }, []);
 
   const handlePlay = useCallback(async () => {
     unlockAudioSession();
     if (!activeQueueRef.current.length) return;
+    if (isPlayingRef.current) return;
+
+    const generation = ++playGenerationRef.current;
+    const isCancelled = () => playGenerationRef.current !== generation;
 
     if (
       realtimePlaybackRef.current?.project
@@ -1694,26 +1740,53 @@ function PlayerDashboard({
     ) {
       const resumeMs = Math.max(0, Math.round((Number(currentTimeSecRef.current) || 0) * 1000));
       const current = realtimePlaybackRef.current;
+
+      // Optimistically flip button to Playing immediately
+      isPlayingRef.current = true;
+      setIsPlaying(true);
+      setMediaSessionPlaybackState(true);
+
       updateMediaSessionMetadata({
         title: current.item.name || current.item.projectName || 'Mix',
         artist: current.item.artist || current.item.groupName || 'Apollo Choir',
         album: 'Apollo Choir Player',
       });
-      setMediaSessionPlaybackState(true);
-      await applyPlaybackOutputConfig();
-      audioManager.setOutputVolume(Math.max(0, Math.min(100, volumeRef.current)));
-      await audioManager.play(current.project, resumeMs, getPlayerPlayOptions(current, {
-        playbackRate: playbackSpeedRef.current,
-      }));
-      applyPlaybackMixSettings(current.project, current.item);
-      setIsPlaying(true);
-      isPlayingRef.current = true;
-      updateMediaSessionPositionState({
-        durationSec: durationSecRef.current,
-        positionSec: resumeMs / 1000,
-        playbackRate: playbackSpeedRef.current,
-        force: true,
-      });
+
+      try {
+        await applyPlaybackOutputConfig();
+        if (isCancelled()) return;
+
+        audioManager.setOutputVolume(Math.max(0, Math.min(100, volumeRef.current)));
+        await audioManager.play(current.project, resumeMs, getPlayerPlayOptions(current, {
+          playbackRate: playbackSpeedRef.current,
+        }));
+        if (isCancelled()) {
+          try {
+            await audioManager.pause(resumeMs);
+          } catch {}
+          return;
+        }
+
+        applyPlaybackMixSettings(current.project, current.item);
+        isPlayingRef.current = true;
+        setIsPlaying(true);
+        updateMediaSessionPositionState({
+          durationSec: durationSecRef.current,
+          positionSec: resumeMs / 1000,
+          playbackRate: playbackSpeedRef.current,
+          force: true,
+        });
+      } catch (playError) {
+        console.error('[PlayerDashboard] handlePlay failed:', playError);
+        if (!isCancelled()) {
+          isPlayingRef.current = false;
+          setIsPlaying(false);
+          setMediaSessionPlaybackState(false);
+          try {
+            await audioManager.pause(resumeMs);
+          } catch {}
+        }
+      }
       return;
     }
 
@@ -1724,12 +1797,12 @@ function PlayerDashboard({
   }, [applyPlaybackMixSettings, applyPlaybackOutputConfig]);
 
   const handleTogglePlay = useCallback(async () => {
-    if (isPlayingRef.current) {
+    if (isPlayingRef.current || isRendering) {
       await handlePause();
     } else {
       await handlePlay();
     }
-  }, [handlePause, handlePlay]);
+  }, [handlePause, handlePlay, isRendering]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -1776,21 +1849,25 @@ function PlayerDashboard({
     const queue = activeQueueRef.current || [];
     if (!queue.length) return;
     const currentIdx = activeIndexRef.current >= 0 ? activeIndexRef.current : 0;
+    let nextIndex;
     if (shuffleEnabledRef.current && queue.length > 1) {
-      const randomIndex = pickRandomQueueIndex(currentIdx, queue.length);
-      await playQueueItemRef.current?.(randomIndex);
-      return;
-    }
-    let nextIndex = currentIdx + 1;
-    if (nextIndex >= queue.length) {
-      if (loopModeRef.current === PLAYER_LOOP_MODES.ALL) {
-        nextIndex = 0;
-      } else {
-        return;
+      nextIndex = pickRandomQueueIndex(currentIdx, queue.length);
+    } else {
+      nextIndex = currentIdx + 1;
+      if (nextIndex >= queue.length) {
+        if (loopModeRef.current === PLAYER_LOOP_MODES.ALL) {
+          nextIndex = 0;
+        } else {
+          await handlePause();
+          return;
+        }
       }
     }
+    // Update active index immediately so rapid taps advance 1 -> 2 -> 3
+    activeIndexRef.current = nextIndex;
+    setActiveIndex(nextIndex);
     await playQueueItemRef.current?.(nextIndex);
-  }, []);
+  }, [handlePause]);
 
   const handlePrevious = useCallback(async () => {
     const queue = activeQueueRef.current || [];
@@ -1799,22 +1876,28 @@ function PlayerDashboard({
     const timeSec = currentTimeSecRef.current;
     if (timeSec > 3 && realtimePlaybackRef.current?.project && realtimePlaybackRef.current?.item) {
       const current = realtimePlaybackRef.current;
+      currentTimeSecRef.current = 0;
+      setCurrentTimeSec(0);
       if (isPlayingRef.current) {
         await audioManager.seek(current.project, 0, getPlayerPlayOptions(current, {
           playbackRate: playbackSpeedRef.current,
         }));
         applyPlaybackMixSettings(current.project, current.item);
+        updateMediaSessionPositionState({
+          durationSec: durationSecRef.current,
+          positionSec: 0,
+          playbackRate: playbackSpeedRef.current,
+          force: true,
+        });
       } else {
         await audioManager.pause(0);
+        updateMediaSessionPositionState({
+          durationSec: durationSecRef.current,
+          positionSec: 0,
+          playbackRate: 1.0,
+          force: true,
+        });
       }
-      currentTimeSecRef.current = 0;
-      setCurrentTimeSec(0);
-      updateMediaSessionPositionState({
-        durationSec: durationSecRef.current,
-        positionSec: 0,
-        playbackRate: playbackSpeedRef.current,
-        force: true,
-      });
       return;
     }
     let previousIndex = currentIdx - 1;
@@ -1823,6 +1906,8 @@ function PlayerDashboard({
         ? queue.length - 1
         : 0;
     }
+    activeIndexRef.current = previousIndex;
+    setActiveIndex(previousIndex);
     await playQueueItemRef.current?.(previousIndex);
   }, [applyPlaybackMixSettings]);
 
@@ -4510,7 +4595,7 @@ function PlayerDashboard({
 	                <button
 	                  onClick={handlePrevious}
 	                  className="rounded bg-gray-700 hover:bg-gray-600 p-3 disabled:opacity-50"
-	                  disabled={!activeQueueItems.length || isRendering}
+	                  disabled={!activeQueueItems.length}
 	                  title="Previous"
 	                >
 	                  <SkipBack size={20} />
@@ -4518,15 +4603,15 @@ function PlayerDashboard({
 	                <button
 	                  onClick={handleTogglePlay}
 	                  className="rounded bg-blue-600 hover:bg-blue-700 p-3 disabled:opacity-50"
-	                  disabled={!activeQueueItems.length || isRendering}
-	                  title={isRendering ? 'Loading mix...' : (isPlaying ? 'Pause' : 'Play')}
+	                  disabled={!activeQueueItems.length}
+	                  title={isRendering ? 'Loading mix (click to cancel)...' : (isPlaying ? 'Pause' : 'Play')}
 	                >
 	                  {isRendering ? <Loader2 size={20} className="animate-spin" /> : (isPlaying ? <Pause size={20} /> : <Play size={20} />)}
 	                </button>
 	                <button
 	                  onClick={handleNext}
 	                  className="rounded bg-gray-700 hover:bg-gray-600 p-3 disabled:opacity-50"
-	                  disabled={!activeQueueItems.length || isRendering}
+	                  disabled={!activeQueueItems.length}
 	                  title="Next"
 	                >
 	                  <SkipForward size={20} />
@@ -4535,7 +4620,7 @@ function PlayerDashboard({
 	                  onClick={handleCycleLoopMode}
 	                  className={`rounded bg-gray-700 hover:bg-gray-600 p-3 disabled:opacity-50 ${loopButtonClass}`}
 	                  title={`${loopLabel} (click to cycle off -> all -> one)`}
-	                  disabled={!activeQueueItems.length || isRendering}
+	                  disabled={!activeQueueItems.length}
 	                >
 	                  <LoopIcon size={20} />
 	                </button>
