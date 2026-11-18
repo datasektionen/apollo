@@ -764,8 +764,12 @@ function PlayerDashboard({
     errorPrefix: 'player-dashboard',
   });
   useAudioDeviceAutoPause((timeMs) => {
-    setCurrentTimeSec((Number(timeMs) || 0) / 1000);
+    const sec = (Number(timeMs) || 0) / 1000;
+    currentTimeSecRef.current = sec;
+    setCurrentTimeSec(sec);
+    isPlayingRef.current = false;
     setIsPlaying(false);
+    setMediaSessionPlaybackState(false, sec);
   });
 
   useEffect(() => {
@@ -1719,20 +1723,29 @@ function PlayerDashboard({
 
   const handlePlay = useCallback(async () => {
     unlockAudioSession();
-    if (!activeQueueRef.current.length) return;
+    const current = realtimePlaybackRef.current;
+    const hasLoadedProject = Boolean(current?.project && current?.item);
+
+    if (!hasLoadedProject && !activeQueueRef.current.length) {
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+      setMediaSessionPlaybackState(false);
+      return;
+    }
     if (isPlayingRef.current && audioManager.isPlaying) return;
 
     const generation = ++playGenerationRef.current;
     const isCancelled = () => playGenerationRef.current !== generation;
 
-    if (
-      realtimePlaybackRef.current?.project
-      && realtimePlaybackRef.current?.item
-      && currentTimeSecRef.current < Math.max(0, durationSecRef.current - 0.01)
-    ) {
-      const resumeMs = Math.max(0, Math.round((Number(currentTimeSecRef.current) || 0) * 1000));
-      const resumeSec = resumeMs / 1000;
-      const current = realtimePlaybackRef.current;
+    if (hasLoadedProject) {
+      let resumeSec = Number(currentTimeSecRef.current) || 0;
+      const duration = Number(durationSecRef.current) || 0;
+      if (duration > 0 && resumeSec >= Math.max(0, duration - 0.05)) {
+        resumeSec = 0;
+      }
+      const resumeMs = Math.max(0, Math.round(resumeSec * 1000));
+      currentTimeSecRef.current = resumeSec;
+      setCurrentTimeSec(resumeSec);
 
       // Optimistically flip in-app play button to Playing immediately
       isPlayingRef.current = true;
@@ -2006,6 +2019,7 @@ function PlayerDashboard({
   const commitTimelineSeekRef = useRef(null);
   const handlePlayRef = useRef(null);
   const handlePauseRef = useRef(null);
+  const handleTogglePlayRef = useRef(null);
 
   useEffect(() => {
     handleNextRef.current = handleNext;
@@ -2028,7 +2042,22 @@ function PlayerDashboard({
   }, [handlePause]);
 
   useEffect(() => {
+    handleTogglePlayRef.current = handleTogglePlay;
+  }, [handleTogglePlay]);
+
+  useEffect(() => {
     const cleanup = setupMediaSession({
+      onToggle: () => {
+        void handleTogglePlayRef.current?.();
+      },
+      onDeviceConnected: async () => {
+        console.log('[PlayerDashboard] Audio output device connected, recreating AudioContext');
+        try {
+          await audioManager.recreateAudioContext();
+        } catch (err) {
+          console.warn('[PlayerDashboard] Failed to recreate AudioContext on device connect:', err);
+        }
+      },
       onPlay: () => {
         void handlePlayRef.current?.();
       },
@@ -2052,19 +2081,6 @@ function PlayerDashboard({
       },
     });
     return cleanup;
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = audioManager.subscribePlaybackInterrupted?.(({ reason, timeMs }) => {
-      console.warn('[PlayerDashboard] Playback interrupted:', reason);
-      const timeSec = (Number(timeMs) || 0) / 1000;
-      currentTimeSecRef.current = timeSec;
-      setCurrentTimeSec(timeSec);
-      isPlayingRef.current = false;
-      setIsPlaying(false);
-      setMediaSessionPlaybackState(false, timeSec);
-    });
-    return () => unsubscribe?.();
   }, []);
 
   useEffect(() => {

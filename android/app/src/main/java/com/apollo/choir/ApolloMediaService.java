@@ -16,6 +16,8 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.media.AudioAttributes;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.os.Build;
@@ -74,9 +76,11 @@ public class ApolloMediaService extends Service {
     public interface MediaEventListener {
         void onPlay();
         void onPause();
+        void onToggle();
         void onSkipToNext();
         void onSkipToPrevious();
         void onSeekTo(long positionMs);
+        void onDeviceConnected();
     }
 
     private static MediaEventListener eventListener;
@@ -91,6 +95,21 @@ public class ApolloMediaService extends Service {
     private AudioFocusRequest audioFocusRequest;
     private boolean hasAudioFocus = false;
     private boolean isBecomingNoisyRegistered = false;
+    private AudioDeviceCallback audioDeviceCallback;
+    private boolean isAudioDeviceCallbackRegistered = false;
+
+    private boolean isAudioHeadsetOrBluetooth(AudioDeviceInfo device) {
+        if (device == null || !device.isSink()) return false;
+        int type = device.getType();
+        return type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+               type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+               type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+               type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+               type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+               type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+               type == 26 /* TYPE_BLE_HEADSET */ ||
+               type == 27 /* TYPE_BLE_SPEAKER */;
+    }
 
     private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
         @Override
@@ -200,6 +219,62 @@ public class ApolloMediaService extends Service {
         }
     }
 
+    private void registerAudioDeviceCallback() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isAudioDeviceCallbackRegistered) {
+            if (audioManagerSystem == null) {
+                audioManagerSystem = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            }
+            if (audioManagerSystem != null) {
+                try {
+                    audioDeviceCallback = new AudioDeviceCallback() {
+                        @Override
+                        public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                            if (addedDevices == null) return;
+                            for (AudioDeviceInfo device : addedDevices) {
+                                if (isAudioHeadsetOrBluetooth(device)) {
+                                    Log.d(TAG, "Audio device connected (type=" + device.getType() + "), notifying JS to rebind AudioContext");
+                                    if (eventListener != null) {
+                                        eventListener.onDeviceConnected();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+
+                        @Override
+                        public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                            if (removedDevices == null) return;
+                            for (AudioDeviceInfo device : removedDevices) {
+                                if (isAudioHeadsetOrBluetooth(device)) {
+                                    Log.d(TAG, "Audio device disconnected (type=" + device.getType() + "), auto-pausing Apollo");
+                                    pauseInternal();
+                                    break;
+                                }
+                            }
+                        }
+                    };
+                    audioManagerSystem.registerAudioDeviceCallback(audioDeviceCallback, new Handler(Looper.getMainLooper()));
+                    isAudioDeviceCallbackRegistered = true;
+                    Log.d(TAG, "AudioDeviceCallback registered successfully");
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to register audio device callback: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    private void unregisterAudioDeviceCallback() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && isAudioDeviceCallbackRegistered) {
+            if (audioManagerSystem != null && audioDeviceCallback != null) {
+                try {
+                    audioManagerSystem.unregisterAudioDeviceCallback(audioDeviceCallback);
+                    Log.d(TAG, "AudioDeviceCallback unregistered");
+                } catch (Exception ignored) {}
+            }
+            isAudioDeviceCallbackRegistered = false;
+        }
+    }
+
     private void playInternal() {
         requestAudioFocusInternal();
         updatePlaybackState(true, currentPosition);
@@ -253,6 +328,7 @@ public class ApolloMediaService extends Service {
         cancelPauseDismissTimer();
         abandonAudioFocusInternal();
         unregisterBecomingNoisyReceiver();
+        unregisterAudioDeviceCallback();
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE);
@@ -303,6 +379,7 @@ public class ApolloMediaService extends Service {
 
         createNotificationChannel();
         initMediaSession();
+        registerAudioDeviceCallback();
     }
 
     private void createNotificationChannel() {
@@ -386,10 +463,15 @@ public class ApolloMediaService extends Service {
                                     return true;
                                 case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
                                 case KeyEvent.KEYCODE_HEADSETHOOK:
-                                    if (isPlaying) {
-                                        onPause();
+                                    requestAudioFocusInternal();
+                                    if (eventListener != null) {
+                                        eventListener.onToggle();
                                     } else {
-                                        onPlay();
+                                        if (isPlaying) {
+                                            pauseInternal();
+                                        } else {
+                                            playInternal();
+                                        }
                                     }
                                     return true;
                                 case KeyEvent.KEYCODE_MEDIA_NEXT:
@@ -759,6 +841,7 @@ public class ApolloMediaService extends Service {
         cancelPauseDismissTimer();
         abandonAudioFocusInternal();
         unregisterBecomingNoisyReceiver();
+        unregisterAudioDeviceCallback();
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();

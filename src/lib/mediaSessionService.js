@@ -236,6 +236,12 @@ export function setupMediaSession(handlers = {}) {
       ApolloMedia.addListener('mediaAction', (data) => {
         if (!data || !data.action) return;
         switch (data.action) {
+          case 'toggle':
+            currentActionHandlers.onToggle?.();
+            break;
+          case 'device-connected':
+            currentActionHandlers.onDeviceConnected?.();
+            break;
           case 'play':
             currentActionHandlers.onPlay?.();
             break;

@@ -144,6 +144,8 @@ export class AudioManager {
     };
     this.workletLastError = null;
     this.lastDiagLogTime = 0;
+    this.isRecreatingContext = false;
+    this.contextResumeFailureCount = 0;
   }
 
   /**
@@ -1757,6 +1759,90 @@ export class AudioManager {
     this.boundDeviceChange = null;
   }
 
+  /**
+   * Recreates the AudioContext to rebind to a new hardware output route
+   * (e.g. when Bluetooth earbuds connect mid-playback). Seamlessly restores
+   * playback position and active sources at the new hardware sample rate.
+   */
+  async recreateAudioContext() {
+    if (this.isRecreatingContext) return;
+    this.isRecreatingContext = true;
+
+    try {
+      console.info('[AudioManager] Recreating AudioContext for updated audio route/sample rate');
+      const wasPlaying = Boolean(this.isPlaying);
+      const currentTimelineMs = this.getCurrentTime();
+      const currentProject = this.currentProject;
+      const currentOptions = this.currentPlayOptions ? { ...this.currentPlayOptions } : null;
+      const currentRate = this.currentPlaybackRate || 1.0;
+
+      // 1. Stop active buffer sources and pause routing element
+      this.stopActiveSources('Failed to stop sources for context recreate.', 'audio:recreate-stop');
+      this.pauseOutputRoutingElement();
+
+      // 2. Disconnect and release stretch engine
+      if (this.stretchNode) {
+        try {
+          this.stretchNode.disconnect();
+        } catch {}
+        this.stretchNode = null;
+      }
+      for (const trackNode of this.trackStretchNodes.values()) {
+        try {
+          trackNode.disconnect();
+        } catch {}
+      }
+      this.trackStretchNodes.clear();
+      this.stretchNodePromise = null;
+      this.isStretchConnected = false;
+
+      // 3. Disconnect master stage
+      this.disconnectMasterOutput();
+      if (this.masterGainNode) {
+        try {
+          this.masterGainNode.disconnect();
+        } catch {}
+        this.masterGainNode = null;
+      }
+      this.masterLimiterNode = null;
+      this.masterCeilingNode = null;
+      this.masterOutputNode = null;
+      this.masterSafetyInputNode = null;
+
+      // 4. Teardown and close old AudioContext
+      const oldContext = this.audioContext;
+      this.audioContext = null;
+      if (oldContext) {
+        this.detachHardwareLifecycleListeners();
+        try {
+          await oldContext.close().catch(() => {});
+        } catch {}
+      }
+
+      this.outputStreamDestination = null;
+      this.outputTargetNode = null;
+      this.outputClockPrimed = false;
+      this.contextResumeFailureCount = 0;
+
+      // 5. Initialize fresh AudioContext on the new audio hardware route
+      await this.init();
+
+      // 6. Resume playback seamlessly if it was playing
+      if (wasPlaying && currentProject) {
+        await this.play(currentProject, currentTimelineMs, {
+          ...(currentOptions || {}),
+          playbackRate: currentRate,
+        });
+      } else {
+        this.pauseTime = currentTimelineMs;
+      }
+    } catch (err) {
+      console.error('[AudioManager] Failed to recreate AudioContext:', err);
+    } finally {
+      this.isRecreatingContext = false;
+    }
+  }
+
   handleAudioContextStateChange() {
     const state = this.audioContext?.state;
     if (state === 'suspended' || state === 'interrupted') {
@@ -1764,7 +1850,14 @@ export class AudioManager {
         const now = Date.now();
         if (now - (this.lastContextResumeAttemptMs || 0) > 300) {
           this.lastContextResumeAttemptMs = now;
-          this.audioContext.resume().catch(() => {});
+          this.audioContext.resume().then(() => {
+            this.contextResumeFailureCount = 0;
+          }).catch(() => {
+            this.contextResumeFailureCount = (this.contextResumeFailureCount || 0) + 1;
+            if (this.contextResumeFailureCount >= 2) {
+              void this.recreateAudioContext();
+            }
+          });
         }
         return;
       }
@@ -1772,6 +1865,8 @@ export class AudioManager {
         return;
       }
       this.handlePlaybackInterrupted(`context-${state}`);
+    } else if (state === 'running') {
+      this.contextResumeFailureCount = 0;
     }
   }
 
@@ -1802,6 +1897,10 @@ export class AudioManager {
         })
       ) {
         this.handlePlaybackInterrupted('output-device-removed');
+      } else if (!primeOnly && this.previousOutputDeviceIds.size > 0 && currentIds.size > this.previousOutputDeviceIds.size) {
+        // Output device was added (e.g. Bluetooth earbuds connected)
+        console.log('[AudioManager] Output device added, recreating AudioContext');
+        void this.recreateAudioContext();
       } else if (!primeOnly && this.isPlaying && this.audioContext && this.audioContext.state !== 'running') {
         await this.audioContext.resume().catch(() => {});
       }

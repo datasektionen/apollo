@@ -53,6 +53,20 @@ public class ApolloMediaPlugin extends Plugin {
             }
 
             @Override
+            public void onToggle() {
+                JSObject data = new JSObject();
+                data.put("action", "toggle");
+                notifyListeners("mediaAction", data);
+            }
+
+            @Override
+            public void onDeviceConnected() {
+                JSObject data = new JSObject();
+                data.put("action", "device-connected");
+                notifyListeners("mediaAction", data);
+            }
+
+            @Override
             public void onSkipToNext() {
                 JSObject data = new JSObject();
                 data.put("action", "next");
