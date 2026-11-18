@@ -432,8 +432,8 @@ public class ApolloMediaService extends Service {
             Bitmap padded = Bitmap.createBitmap(targetDim, targetDim, Bitmap.Config.ARGB_8888);
             Canvas canvas = new Canvas(padded);
 
-            // Scale to ~93% of canvas for 'a few pixels margin' (~18px margin on 512x512)
-            float margin = targetDim * (18f / 512f);
+            // Scale to ~89% of canvas for 'a few pixels margin' (~28px margin on 512x512)
+            float margin = targetDim * (28f / 512f);
             float contentDim = targetDim - 2f * margin;
             float scale = Math.min(contentDim / w, contentDim / h);
             float destW = w * scale;
