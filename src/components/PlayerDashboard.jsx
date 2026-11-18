@@ -1014,6 +1014,8 @@ function PlayerDashboard({
         nextIndex = 0;
       } else {
         setIsPlaying(false);
+        isPlayingRef.current = false;
+        setMediaSessionPlaybackState(false);
         return;
       }
     }
@@ -1718,7 +1720,7 @@ function PlayerDashboard({
   const handlePlay = useCallback(async () => {
     unlockAudioSession();
     if (!activeQueueRef.current.length) return;
-    if (isPlayingRef.current) return;
+    if (isPlayingRef.current && audioManager.isPlaying) return;
 
     const generation = ++playGenerationRef.current;
     const isCancelled = () => playGenerationRef.current !== generation;
@@ -2050,6 +2052,19 @@ function PlayerDashboard({
       },
     });
     return cleanup;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = audioManager.subscribePlaybackInterrupted?.(({ reason, timeMs }) => {
+      console.warn('[PlayerDashboard] Playback interrupted:', reason);
+      const timeSec = (Number(timeMs) || 0) / 1000;
+      currentTimeSecRef.current = timeSec;
+      setCurrentTimeSec(timeSec);
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+      setMediaSessionPlaybackState(false, timeSec);
+    });
+    return () => unsubscribe?.();
   }, []);
 
   useEffect(() => {

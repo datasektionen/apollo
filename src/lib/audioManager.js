@@ -1762,7 +1762,7 @@ export class AudioManager {
     if (state === 'suspended' || state === 'interrupted') {
       if (this.isPlaying && state === 'suspended') {
         const now = Date.now();
-        if (now - (this.lastContextResumeAttemptMs || 0) > 1000) {
+        if (now - (this.lastContextResumeAttemptMs || 0) > 300) {
           this.lastContextResumeAttemptMs = now;
           this.audioContext.resume().catch(() => {});
         }
@@ -1802,6 +1802,8 @@ export class AudioManager {
         })
       ) {
         this.handlePlaybackInterrupted('output-device-removed');
+      } else if (!primeOnly && this.isPlaying && this.audioContext && this.audioContext.state !== 'running') {
+        await this.audioContext.resume().catch(() => {});
       }
       this.previousOutputDeviceIds = currentIds;
     } catch (error) {

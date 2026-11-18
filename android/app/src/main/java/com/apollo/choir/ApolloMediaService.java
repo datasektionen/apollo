@@ -5,14 +5,19 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -82,6 +87,140 @@ public class ApolloMediaService extends Service {
     private PowerManager.WakeLock wakeLock;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
+    private AudioManager audioManagerSystem;
+    private AudioFocusRequest audioFocusRequest;
+    private boolean hasAudioFocus = false;
+    private boolean isBecomingNoisyRegistered = false;
+
+    private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
+                Log.d(TAG, "Audio becoming noisy (earbuds disconnected), auto-pausing Apollo");
+                pauseInternal();
+            }
+        }
+    };
+
+    private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = new AudioManager.OnAudioFocusChangeListener() {
+        @Override
+        public void onAudioFocusChange(int focusChange) {
+            Log.d(TAG, "onAudioFocusChange: " + focusChange);
+            switch (focusChange) {
+                case AudioManager.AUDIOFOCUS_LOSS:
+                case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                    // Another app (e.g. Spotify, YouTube, Phone call) started playing or requested focus
+                    if (isPlaying) {
+                        Log.d(TAG, "Audio focus lost (" + focusChange + "), auto-pausing Apollo");
+                        pauseInternal();
+                    }
+                    hasAudioFocus = false;
+                    break;
+                case AudioManager.AUDIOFOCUS_GAIN:
+                    hasAudioFocus = true;
+                    break;
+            }
+        }
+    };
+
+    private boolean requestAudioFocusInternal() {
+        if (hasAudioFocus) return true;
+        if (audioManagerSystem == null) {
+            audioManagerSystem = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        }
+        if (audioManagerSystem == null) return false;
+
+        int res;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                AudioAttributes playbackAttributes = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build();
+                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                        .setAudioAttributes(playbackAttributes)
+                        .setAcceptsDelayedFocusGain(false)
+                        .setOnAudioFocusChangeListener(audioFocusChangeListener, new Handler(Looper.getMainLooper()))
+                        .build();
+                res = audioManagerSystem.requestAudioFocus(audioFocusRequest);
+            } else {
+                res = audioManagerSystem.requestAudioFocus(
+                        audioFocusChangeListener,
+                        AudioManager.STREAM_MUSIC,
+                        AudioManager.AUDIOFOCUS_GAIN
+                );
+            }
+            hasAudioFocus = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+            Log.d(TAG, "requestAudioFocus result: " + res + " (hasAudioFocus=" + hasAudioFocus + ")");
+        } catch (Exception e) {
+            Log.w(TAG, "Error requesting audio focus: " + e.getMessage());
+            hasAudioFocus = false;
+        }
+        return hasAudioFocus;
+    }
+
+    private void abandonAudioFocusInternal() {
+        if (!hasAudioFocus) return;
+        if (audioManagerSystem != null) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
+                    audioManagerSystem.abandonAudioFocusRequest(audioFocusRequest);
+                } else {
+                    audioManagerSystem.abandonAudioFocus(audioFocusChangeListener);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error abandoning audio focus: " + e.getMessage());
+            }
+        }
+        hasAudioFocus = false;
+    }
+
+    private void registerBecomingNoisyReceiver() {
+        if (!isBecomingNoisyRegistered) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(becomingNoisyReceiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), Context.RECEIVER_NOT_EXPORTED);
+                } else {
+                    registerReceiver(becomingNoisyReceiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
+                }
+                isBecomingNoisyRegistered = true;
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to register becoming noisy receiver: " + e.getMessage());
+            }
+        }
+    }
+
+    private void unregisterBecomingNoisyReceiver() {
+        if (isBecomingNoisyRegistered) {
+            try {
+                unregisterReceiver(becomingNoisyReceiver);
+            } catch (Exception ignored) {}
+            isBecomingNoisyRegistered = false;
+        }
+    }
+
+    private void playInternal() {
+        requestAudioFocusInternal();
+        updatePlaybackState(true, currentPosition);
+        if (eventListener != null) {
+            eventListener.onPlay();
+        }
+    }
+
+    private void pauseInternal() {
+        long now = SystemClock.elapsedRealtime();
+        long elapsed = (isPlaying && lastStateUpdateTime > 0) ? (now - lastStateUpdateTime) : 0;
+        long actualPos = Math.max(0, currentPosition + elapsed);
+        if (currentDuration > 0 && actualPos > currentDuration) {
+            actualPos = currentDuration;
+        }
+        updatePlaybackState(false, actualPos);
+        if (eventListener != null) {
+            eventListener.onPause();
+        }
+    }
+
     private String currentTitle = "Apollo";
     private String currentArtist = "Apollo Choir";
     private String currentAlbum = "";
@@ -112,6 +251,8 @@ public class ApolloMediaService extends Service {
 
     public void dismissNotificationAndStop() {
         cancelPauseDismissTimer();
+        abandonAudioFocusInternal();
+        unregisterBecomingNoisyReceiver();
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE);
@@ -126,9 +267,17 @@ public class ApolloMediaService extends Service {
         }
         if (mediaSession != null) {
             mediaSession.setActive(false);
+            mediaSession.release();
         }
         releaseWakeLock();
         stopSelf();
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        Log.d(TAG, "onTaskRemoved: App task swiped away/closed, dismissing notification brick");
+        dismissNotificationAndStop();
     }
 
     public static void setEventListener(MediaEventListener listener) {
@@ -189,24 +338,12 @@ public class ApolloMediaService extends Service {
         mediaSession.setCallback(new MediaSessionCompat.Callback() {
             @Override
             public void onPlay() {
-                updatePlaybackState(true, currentPosition);
-                if (eventListener != null) {
-                    eventListener.onPlay();
-                }
+                playInternal();
             }
 
             @Override
             public void onPause() {
-                long now = SystemClock.elapsedRealtime();
-                long elapsed = (isPlaying && lastStateUpdateTime > 0) ? (now - lastStateUpdateTime) : 0;
-                long actualPos = Math.max(0, currentPosition + elapsed);
-                if (currentDuration > 0 && actualPos > currentDuration) {
-                    actualPos = currentDuration;
-                }
-                updatePlaybackState(false, actualPos);
-                if (eventListener != null) {
-                    eventListener.onPause();
-                }
+                pauseInternal();
             }
 
             @Override
@@ -294,25 +431,9 @@ public class ApolloMediaService extends Service {
                 dismissNotificationAndStop();
                 return START_NOT_STICKY;
             } else if (ACTION_PLAY.equals(action)) {
-                if (mediaSession != null && mediaSession.getController() != null) {
-                    mediaSession.getController().getTransportControls().play();
-                } else {
-                    if (eventListener != null) eventListener.onPlay();
-                    updatePlaybackState(true, currentPosition);
-                }
+                playInternal();
             } else if (ACTION_PAUSE.equals(action)) {
-                if (mediaSession != null && mediaSession.getController() != null) {
-                    mediaSession.getController().getTransportControls().pause();
-                } else {
-                    if (eventListener != null) eventListener.onPause();
-                    long now = SystemClock.elapsedRealtime();
-                    long elapsed = (isPlaying && lastStateUpdateTime > 0) ? (now - lastStateUpdateTime) : 0;
-                    long actualPos = Math.max(0, currentPosition + elapsed);
-                    if (currentDuration > 0 && actualPos > currentDuration) {
-                        actualPos = currentDuration;
-                    }
-                    updatePlaybackState(false, actualPos);
-                }
+                pauseInternal();
             } else if (ACTION_PREV.equals(action)) {
                 if (mediaSession != null && mediaSession.getController() != null) {
                     mediaSession.getController().getTransportControls().skipToPrevious();
@@ -409,8 +530,12 @@ public class ApolloMediaService extends Service {
         if (playing) {
             cancelPauseDismissTimer();
             acquireWakeLock();
+            requestAudioFocusInternal();
+            registerBecomingNoisyReceiver();
         } else {
             releaseWakeLock();
+            abandonAudioFocusInternal();
+            unregisterBecomingNoisyReceiver();
             schedulePauseDismissTimer();
         }
 
@@ -632,6 +757,8 @@ public class ApolloMediaService extends Service {
     @Override
     public void onDestroy() {
         cancelPauseDismissTimer();
+        abandonAudioFocusInternal();
+        unregisterBecomingNoisyReceiver();
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();
