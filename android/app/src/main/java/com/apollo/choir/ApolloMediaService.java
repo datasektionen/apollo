@@ -10,6 +10,9 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -290,7 +293,13 @@ public class ApolloMediaService extends Service {
                 isPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, isPlaying);
 
                 String artworkUrl = intent.getStringExtra(EXTRA_ARTWORK_URL);
-                if (artworkUrl != null && !artworkUrl.equals(currentArtworkUrl)) {
+                boolean isDefault = (artworkUrl == null || artworkUrl.trim().isEmpty() ||
+                                     artworkUrl.contains("icon-512") || artworkUrl.contains("icon-192"));
+                if (isDefault) {
+                    currentArtworkUrl = "";
+                    currentArtworkBitmap = defaultArtworkBitmap;
+                    updateNotificationAndSession();
+                } else if (!artworkUrl.equals(currentArtworkUrl)) {
                     currentArtworkUrl = artworkUrl;
                     loadArtworkAsync(artworkUrl);
                 } else {
@@ -308,7 +317,13 @@ public class ApolloMediaService extends Service {
         this.currentAlbum = album != null ? album : "";
         this.currentDuration = durationMs;
 
-        if (artworkUrl != null && !artworkUrl.equals(currentArtworkUrl)) {
+        boolean isDefault = (artworkUrl == null || artworkUrl.trim().isEmpty() ||
+                             artworkUrl.contains("icon-512") || artworkUrl.contains("icon-192"));
+        if (isDefault) {
+            this.currentArtworkUrl = "";
+            this.currentArtworkBitmap = defaultArtworkBitmap;
+            updateNotificationAndSession();
+        } else if (!artworkUrl.equals(currentArtworkUrl)) {
             this.currentArtworkUrl = artworkUrl;
             loadArtworkAsync(artworkUrl);
         } else {
@@ -403,9 +418,35 @@ public class ApolloMediaService extends Service {
             } catch (Exception e) {
                 Log.w(TAG, "Failed to load artwork from " + urlString + ": " + e.getMessage());
             }
-            currentArtworkBitmap = (bitmap != null) ? bitmap : defaultArtworkBitmap;
+            currentArtworkBitmap = (bitmap != null) ? ensurePaddedArtworkBitmap(bitmap) : defaultArtworkBitmap;
             updateNotificationAndSession();
         });
+    }
+
+    private Bitmap ensurePaddedArtworkBitmap(Bitmap src) {
+        if (src == null) return null;
+        try {
+            int w = src.getWidth();
+            int h = src.getHeight();
+            int targetDim = Math.max(Math.max(w, h), 512);
+            Bitmap padded = Bitmap.createBitmap(targetDim, targetDim, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(padded);
+
+            // Scale to 65% of canvas for comfortable margins matching Apollo standard
+            float contentDim = targetDim * 0.65f;
+            float scale = Math.min(contentDim / w, contentDim / h);
+            float destW = w * scale;
+            float destH = h * scale;
+            float left = (targetDim - destW) / 2f;
+            float top = (targetDim - destH) / 2f;
+
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            canvas.drawBitmap(src, null, new RectF(left, top, left + destW, top + destH), paint);
+            return padded;
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to pad artwork bitmap: " + e.getMessage());
+            return src;
+        }
     }
 
     private void updateNotificationAndSession() {

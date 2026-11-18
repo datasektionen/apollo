@@ -357,13 +357,19 @@ export function updateMediaSessionMetadata({
   };
 
   if (isNative) {
+    const isDefaultArtwork = !artworkUrl ||
+      artworkUrl === '/icon-512.png' ||
+      artworkUrl === '/icon-192.png' ||
+      artworkUrl.endsWith('/icon-512.png') ||
+      artworkUrl.endsWith('/icon-192.png');
+
     try {
       ApolloMedia.setMetadata({
         title: currentMetadata.title,
         artist: currentMetadata.artist,
         album: currentMetadata.album,
         duration: currentMetadata.durationSec,
-        artworkUrl: toAbsoluteUrl(currentMetadata.artworkUrl),
+        artworkUrl: isDefaultArtwork ? '' : toAbsoluteUrl(currentMetadata.artworkUrl),
       }).catch(() => {});
     } catch {}
   }
