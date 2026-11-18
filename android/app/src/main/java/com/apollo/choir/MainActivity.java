@@ -16,14 +16,46 @@ import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
 
 public class MainActivity extends BridgeActivity {
-    private static final String PREFS_NAME = "apollo_prefs";
-    private static final String PREF_SERVER_URL = "server_url";
-    private static final String DEFAULT_SERVER_URL = "https://apollo.metaspexet.se";
+    public static final String PREFS_NAME = "apollo_prefs";
+    public static final String PREF_SERVER_URL = "server_url";
+    public static final String PROD_SERVER_URL = "https://apollo.metaspexet.se";
+    public static final String DEV_SERVER_URL = "https://192.168.1.218:3000";
+    public static final String DEFAULT_SERVER_URL = BuildConfig.DEBUG ? DEV_SERVER_URL : PROD_SERVER_URL;
+
+    private static MainActivity instance;
+
+    public static MainActivity getInstance() {
+        return instance;
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        instance = this;
         registerPlugin(ApolloMediaPlugin.class);
         super.onCreate(savedInstanceState);
+    }
+
+    public String getCurrentServerUrl() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        return prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER_URL);
+    }
+
+    public void setServerUrl(String newUrl) {
+        if (newUrl == null || newUrl.trim().isEmpty()) return;
+        String url = newUrl.trim();
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        prefs.edit().putString(PREF_SERVER_URL, url).apply();
+        if (this.bridge != null && this.bridge.getWebView() != null) {
+            runOnUiThread(() -> this.bridge.getWebView().loadUrl(url));
+        }
+    }
+
+    public void resetServerUrl() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        prefs.edit().remove(PREF_SERVER_URL).apply();
+        if (this.bridge != null && this.bridge.getWebView() != null) {
+            runOnUiThread(() -> this.bridge.getWebView().loadUrl(DEFAULT_SERVER_URL));
+        }
     }
 
     @Override
@@ -43,9 +75,12 @@ public class MainActivity extends BridgeActivity {
             cookieManager.setAcceptThirdPartyCookies(webView, true);
 
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            String customUrl = prefs.getString(PREF_SERVER_URL, null);
-            if (customUrl != null && !customUrl.trim().isEmpty() && !customUrl.equals(DEFAULT_SERVER_URL)) {
-                webView.loadUrl(customUrl.trim());
+            String targetUrl = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER_URL);
+            String currentUrl = webView.getUrl();
+            if (targetUrl != null && !targetUrl.trim().isEmpty()) {
+                if (currentUrl == null || !currentUrl.startsWith(targetUrl.trim())) {
+                    webView.loadUrl(targetUrl.trim());
+                }
             }
 
             webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
@@ -115,8 +150,8 @@ public class MainActivity extends BridgeActivity {
 
     public void showServerConfigDialog(String message) {
         if (isFinishing()) return;
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        String currentUrl = prefs.getString(PREF_SERVER_URL, DEFAULT_SERVER_URL);
+        String currentUrl = getCurrentServerUrl();
+        boolean isDev = currentUrl.contains("3000") || currentUrl.contains("localhost") || !currentUrl.contains("apollo.metaspexet.se");
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Apollo Server Connection");
@@ -130,18 +165,16 @@ public class MainActivity extends BridgeActivity {
         builder.setPositiveButton("Connect", (dialog, which) -> {
             String newUrl = input.getText().toString().trim();
             if (!newUrl.isEmpty()) {
-                prefs.edit().putString(PREF_SERVER_URL, newUrl).apply();
-                if (bridge != null && bridge.getWebView() != null) {
-                    bridge.getWebView().loadUrl(newUrl);
-                }
+                setServerUrl(newUrl);
             }
         });
 
-        builder.setNegativeButton("Reset to Default", (dialog, which) -> {
-            prefs.edit().putString(PREF_SERVER_URL, DEFAULT_SERVER_URL).apply();
-            if (bridge != null && bridge.getWebView() != null) {
-                bridge.getWebView().loadUrl(DEFAULT_SERVER_URL);
-            }
+        builder.setNegativeButton("Reset", (dialog, which) -> {
+            resetServerUrl();
+        });
+
+        builder.setNeutralButton(isDev ? "Use Prod" : "Use Dev (LAN)", (dialog, which) -> {
+            setServerUrl(isDev ? PROD_SERVER_URL : DEV_SERVER_URL);
         });
 
         builder.setCancelable(true);

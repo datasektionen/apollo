@@ -53,16 +53,27 @@ config.server.url = '$SERVER_URL';
 fs.writeFileSync(path, JSON.stringify(config, null, 2) + '\n');
 "
 
-# 2. Update DEFAULT_SERVER_URL in MainActivity.java
+# 2. Update server URLs in MainActivity.java
 MAIN_ACTIVITY="android/app/src/main/java/com/apollo/choir/MainActivity.java"
 if [ -f "$MAIN_ACTIVITY" ]; then
   node -e "
 const fs = require('fs');
 const file = '$MAIN_ACTIVITY';
 let content = fs.readFileSync(file, 'utf8');
+if ('$MODE' === 'dev') {
+  content = content.replace(
+    /(public|private)?\s*static\s*final\s*String\s*DEV_SERVER_URL\s*=\s*\".*?\";/,
+    'public static final String DEV_SERVER_URL = \"$SERVER_URL\";'
+  );
+} else {
+  content = content.replace(
+    /(public|private)?\s*static\s*final\s*String\s*PROD_SERVER_URL\s*=\s*\".*?\";/,
+    'public static final String PROD_SERVER_URL = \"$SERVER_URL\";'
+  );
+}
 content = content.replace(
-  /private static final String DEFAULT_SERVER_URL = \".*?\";/,
-  'private static final String DEFAULT_SERVER_URL = \"$SERVER_URL\";'
+  /(public|private)?\s*static\s*final\s*String\s*DEFAULT_SERVER_URL\s*=\s*.*?;/,
+  'public static final String DEFAULT_SERVER_URL = \"$SERVER_URL\";'
 );
 fs.writeFileSync(file, content);
 "

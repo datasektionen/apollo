@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { registerPlugin } from '@capacitor/core';
 import {
   X,
   CircleUserRound,
@@ -11,8 +12,10 @@ import {
   ChevronRight,
   Headphones,
 } from 'lucide-react';
-import { isStandaloneApp } from '../../utils/platform';
+import { isStandaloneApp, isNativePlatform } from '../../utils/platform';
 import { PlaybackDevicesSettingsPanel } from '../SettingsPanels';
+
+const ApolloMedia = registerPlugin('ApolloMedia');
 
 export function MobileUserMenuModal({
   isOpen,
@@ -184,6 +187,56 @@ export function MobileUserMenuModal({
                 </div>
                 <ChevronRight size={18} className="text-gray-500" />
               </a>
+            )}
+
+            {/* Native Environment Switcher */}
+            {isNativePlatform() && (
+              <div className="border-t border-gray-800/80 pt-2 mt-2 px-1">
+                <div className="flex items-center justify-between text-xs py-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-block h-2 w-2 rounded-full ${
+                        typeof window !== 'undefined' &&
+                        (window.location.origin.includes('3000') || window.location.origin.includes('localhost'))
+                          ? 'bg-amber-400'
+                          : 'bg-emerald-400'
+                      }`}
+                    />
+                    <span className="text-gray-400">
+                      Env:{' '}
+                      <strong className="text-gray-200">
+                        {typeof window !== 'undefined' &&
+                        (window.location.origin.includes('3000') || window.location.origin.includes('localhost'))
+                          ? 'Dev (Mock SSO)'
+                          : 'Production'}
+                      </strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      onClose();
+                      const isDev =
+                        typeof window !== 'undefined' &&
+                        (window.location.origin.includes('3000') || window.location.origin.includes('localhost'));
+                      const target = isDev
+                        ? 'https://apollo.metaspexet.se'
+                        : 'https://192.168.1.218:3000';
+                      try {
+                        await ApolloMedia.setServerUrl?.({ url: target });
+                      } catch {
+                        window.location.assign(target);
+                      }
+                    }}
+                    className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    {typeof window !== 'undefined' &&
+                    (window.location.origin.includes('3000') || window.location.origin.includes('localhost'))
+                      ? 'Switch to Prod'
+                      : 'Switch to Dev'}
+                  </button>
+                </div>
+              </div>
             )}
 
             {/* Log out */}

@@ -106,6 +106,11 @@ export function detectPlatform() {
   };
 }
 
+export function isNativePlatform() {
+  if (typeof window === 'undefined') return false;
+  return Boolean(window.Capacitor?.isNativePlatform?.());
+}
+
 export function isStandaloneApp() {
   if (typeof window === 'undefined') return false;
   // Capacitor Android app

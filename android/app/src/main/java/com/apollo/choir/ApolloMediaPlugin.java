@@ -147,4 +147,41 @@ public class ApolloMediaPlugin extends Plugin {
         }
         call.resolve();
     }
+
+    @PluginMethod
+    public void getServerConfig(PluginCall call) {
+        MainActivity activity = MainActivity.getInstance();
+        String currentUrl = activity != null ? activity.getCurrentServerUrl() : MainActivity.DEFAULT_SERVER_URL;
+        JSObject ret = new JSObject();
+        ret.put("currentUrl", currentUrl);
+        ret.put("defaultUrl", MainActivity.DEFAULT_SERVER_URL);
+        ret.put("devUrl", MainActivity.DEV_SERVER_URL);
+        ret.put("prodUrl", MainActivity.PROD_SERVER_URL);
+        boolean isDev = currentUrl.contains("3000") || currentUrl.contains("localhost") || !currentUrl.contains("apollo.metaspexet.se");
+        ret.put("isDev", isDev);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void setServerUrl(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.trim().isEmpty()) {
+            call.reject("URL must not be empty");
+            return;
+        }
+        MainActivity activity = MainActivity.getInstance();
+        if (activity != null) {
+            activity.setServerUrl(url.trim());
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void resetServerUrl(PluginCall call) {
+        MainActivity activity = MainActivity.getInstance();
+        if (activity != null) {
+            activity.resetServerUrl();
+        }
+        call.resolve();
+    }
 }
