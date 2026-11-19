@@ -239,4 +239,36 @@ describe('PlayerLibrarySidebar', () => {
     expect(document.body.querySelector('button[aria-label="Sort descending"]')).toBeTruthy();
     view.unmount();
   });
+
+  it('positions header toggle icon to match collapsed horizontal position without shift', () => {
+    const view = render(
+      <PlayerLibrarySidebar
+        folders={folders}
+        playlists={playlists}
+        myMixes={myMixes}
+        playlistItemsByPlaylistId={{}}
+        onSelectEntry={() => {}}
+      />
+    );
+
+    const headerContainer = view.container.querySelector('div.border-b.border-gray-700');
+    expect(headerContainer.className).toContain('pl-[15px]');
+
+    const collapseBtn = view.container.querySelector('button[aria-label="Collapse Your Library"]');
+    expect(collapseBtn.className).toContain('pl-1.5');
+
+    act(() => {
+      collapseBtn.click();
+    });
+    flushToggleAnimation();
+
+    const minimizedContainer = view.container.querySelector('div.border-b.border-gray-700');
+    expect(minimizedContainer.className).toContain('justify-center');
+
+    const expandBtn = view.container.querySelector('button[aria-label="Expand Your Library"]');
+    expect(expandBtn.className).toContain('justify-center');
+    expect(expandBtn.className).toContain('w-8');
+
+    view.unmount();
+  });
 });

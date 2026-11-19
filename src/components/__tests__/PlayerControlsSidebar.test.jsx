@@ -528,5 +528,106 @@ describe('PlayerControlsSidebar', () => {
 
       view.unmount();
     });
+
+    it('mirrors library sidebar behavior by showing collapse icon on header hover across entire button', () => {
+      let animationNow = 0;
+      const rafCallbacks = [];
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+        rafCallbacks.push(callback);
+        return rafCallbacks.length;
+      });
+      vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+      vi.spyOn(performance, 'now').mockImplementation(() => animationNow);
+
+      const flushToggleAnimation = (nowMs = 200) => {
+        act(() => {
+          animationNow = nowMs;
+          const callbacks = [...rafCallbacks];
+          rafCallbacks.length = 0;
+          callbacks.forEach((callback) => callback(nowMs));
+        });
+      };
+
+      const view = render(
+        <PlayerControlsSidebar
+          speedControlsEnabled={true}
+        />
+      );
+
+      const headerButton = view.container.querySelector('button[aria-label="Collapse Controls"]');
+      expect(headerButton).toBeTruthy();
+      expect(headerButton.textContent).toContain('Controls');
+      expect(headerButton.className).toContain('flex-1');
+      expect(headerButton.className).toContain('justify-between');
+
+      // Icon slot has fixed 20px width without horizontal motion
+      const iconSpan = headerButton.querySelector('span.relative.h-5');
+      expect(iconSpan.className).toContain('w-5');
+
+      const closeIcon = iconSpan.querySelector('svg.lucide-panel-right-close');
+      expect(closeIcon).toBeTruthy();
+      expect(closeIcon.style.opacity).toBe('0');
+
+      // Hover anywhere on the button
+      act(() => {
+        headerButton.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      });
+
+      // Close icon becomes visible (opacity 1) without shifting width
+      expect(closeIcon.style.opacity).toBe('1');
+
+      // Mouse leave hides the collapse icon slot
+      act(() => {
+        headerButton.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+      });
+      expect(closeIcon.style.opacity).toBe('0');
+
+      // Click anywhere on the header button collapses the sidebar
+      act(() => {
+        headerButton.click();
+      });
+      flushToggleAnimation();
+
+      const expandButton = view.container.querySelector('button[aria-label="Expand Controls"]');
+      expect(expandButton).toBeTruthy();
+      expect(expandButton.textContent).not.toContain('Controls');
+      expect(expandButton.className).toContain('h-8');
+      expect(expandButton.className).toContain('w-8');
+
+      // When hovering minimized button, open icon becomes visible
+      const minimizedIconSpan = expandButton.querySelector('span.relative.h-5');
+      expect(minimizedIconSpan.className).toContain('w-5');
+      act(() => {
+        expandButton.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      });
+      const openIcon = minimizedIconSpan.querySelector('svg.lucide-panel-right-open');
+      expect(openIcon).toBeTruthy();
+      expect(openIcon.style.opacity).toBe('1');
+
+      // Click expands the sidebar back
+      act(() => {
+        expandButton.click();
+      });
+      flushToggleAnimation(400);
+      expect(view.container.querySelector('button[aria-label="Collapse Controls"]')).toBeTruthy();
+
+      view.unmount();
+    });
+
+    it('positions header toggle icon to match collapsed horizontal position without shift', () => {
+      const view = render(
+        <PlayerControlsSidebar
+          speedControlsEnabled={true}
+        />
+      );
+
+      const headerContainer = view.container.querySelector('div.border-b.border-gray-700');
+      expect(headerContainer.className).toContain('pr-[15px]');
+
+      const collapseBtn = view.container.querySelector('button[aria-label="Collapse Controls"]');
+      expect(collapseBtn.className).toContain('pr-1.5');
+
+      view.unmount();
+    });
   });
 });
