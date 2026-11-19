@@ -46,19 +46,10 @@ function HeaderToggleIcon({ progress, hovering, instant, animating }) {
   const closeOpacity = snap
     ? 0
     : (showHover ? progress : 0);
-  const slotOpen = snap ? minimized : (progress < 1 || showHover);
   const iconMotion = snap || animating ? 'none' : 'opacity 150ms linear';
-  const slotMotion = snap || animating ? 'none' : 'width 150ms linear, margin 150ms linear';
 
   return (
-    <span
-      className="relative h-5 shrink-0 overflow-hidden"
-      style={{
-        width: slotOpen ? HEADER_ICON_SIZE : 0,
-        marginLeft: slotOpen && progress > 0 ? 6 : 0,
-        transition: slotMotion,
-      }}
-    >
+    <span className="relative h-5 w-5 shrink-0 overflow-hidden">
       <SlidersHorizontal
         size={HEADER_ICON_SIZE}
         className="pointer-events-none absolute left-0 top-0"
@@ -384,32 +375,34 @@ export function PlayerControlsSidebar({
       <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-gray-700 bg-gray-800/80">
         {/* Header */}
         <div className={`relative z-10 flex h-11 min-h-11 max-h-11 shrink-0 items-center border-b border-gray-700 ${
-          fullyMinimized ? 'justify-center px-1' : 'justify-between px-3'
+          fullyMinimized ? 'justify-center px-1' : 'pl-2 pr-[15px]'
         }`}>
-          {fullyMinimized ? null : (
-            <span
-              className="truncate text-base font-semibold leading-none text-gray-200"
-              style={{
-                opacity: progress,
-                maxWidth: lerp(0, 180, progress),
-                overflow: 'hidden',
-              }}
-            >
-              Controls
-            </span>
-          )}
-
           <button
             type="button"
             onClick={toggleMode}
             onMouseEnter={() => setHeaderHover(true)}
             onMouseLeave={() => setHeaderHover(false)}
-            className={`flex items-center rounded-md py-1 text-left hover:bg-gray-700 ${
-              fullyMinimized ? 'h-8 w-8 justify-center px-0' : 'p-1.5'
+            className={`group/toggle flex items-center rounded-md py-1 text-left hover:bg-gray-700 ${
+              fullyMinimized ? 'h-8 w-8 justify-center px-0' : 'min-w-0 flex-1 justify-between pl-2 pr-1.5'
             }`}
             title={fullyMinimized ? 'Expand Controls' : 'Collapse Controls'}
             aria-label={fullyMinimized ? 'Expand Controls' : 'Collapse Controls'}
           >
+            {fullyMinimized ? null : (
+              <span
+                className="truncate text-base font-semibold leading-none text-gray-200"
+                style={{
+                  opacity: progress,
+                  maxWidth: lerp(0, 180, progress),
+                  minWidth: 0,
+                  flexGrow: 0,
+                  flexShrink: 1,
+                  overflow: 'hidden',
+                }}
+              >
+                Controls
+              </span>
+            )}
             <HeaderToggleIcon
               progress={progress}
               hovering={headerHover}

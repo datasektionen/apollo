@@ -127,19 +127,10 @@ function HeaderToggleIcon({ progress, hovering, instant, animating }) {
   const closeOpacity = snap
     ? 0
     : (showHover ? progress : 0);
-  const slotOpen = snap ? minimized : (progress < 1 || showHover);
   const iconMotion = snap || animating ? 'none' : 'opacity 150ms linear';
-  const slotMotion = snap || animating ? 'none' : 'width 150ms linear, margin 150ms linear';
 
   return (
-    <span
-      className="relative h-5 shrink-0 overflow-hidden"
-      style={{
-        width: slotOpen ? HEADER_ICON_SIZE : 0,
-        marginRight: slotOpen && progress > 0 ? 6 : 0,
-        transition: slotMotion,
-      }}
-    >
+    <span className="relative h-5 w-5 shrink-0 overflow-hidden">
       <LibraryBig
         size={HEADER_ICON_SIZE}
         className="pointer-events-none absolute left-0 top-0"
@@ -608,7 +599,7 @@ export function PlayerLibrarySidebar({
     >
       <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-gray-700 bg-gray-800/80">
         <div className={`relative z-20 flex h-11 min-h-11 max-h-11 shrink-0 items-center border-b border-gray-700 ${
-          fullyMinimized ? 'justify-center px-1' : 'gap-1 px-2'
+          fullyMinimized ? 'justify-center px-1' : 'gap-1 pl-[15px] pr-2'
         }`}>
           <button
             type="button"
@@ -616,7 +607,7 @@ export function PlayerLibrarySidebar({
             onMouseEnter={() => setHeaderHover(true)}
             onMouseLeave={() => setHeaderHover(false)}
             className={`group/toggle flex items-center rounded-md py-1 text-left hover:bg-gray-700 ${
-              fullyMinimized ? 'h-8 w-8 justify-center px-0' : 'min-w-0 flex-1 px-1'
+              fullyMinimized ? 'h-8 w-8 justify-center px-0' : 'min-w-0 flex-1 gap-1.5 pl-1.5 pr-1'
             }`}
             title={fullyMinimized ? 'Expand Your Library' : 'Collapse Your Library'}
             aria-label={fullyMinimized ? 'Expand Your Library' : 'Collapse Your Library'}
