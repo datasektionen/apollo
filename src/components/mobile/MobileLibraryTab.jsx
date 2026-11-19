@@ -141,9 +141,15 @@ export function MobileLibraryTab({
               return (
                 <div
                   key={row.id}
-                  onClick={() => onPlayPlaylistRow(row, drilledPlaylist, idx)}
+                  onClick={() => {
+                    if (isThisPlaying && onTogglePlay) {
+                      onTogglePlay();
+                    } else {
+                      onPlayPlaylistRow(row, drilledPlaylist, idx);
+                    }
+                  }}
                   data-active={isThisPlaying ? 'true' : 'false'}
-                  className={`relative flex min-h-[64px] items-center justify-between px-4 py-3 transition-colors cursor-pointer active:bg-[var(--player-pressed)] ${
+                  className={`relative flex min-h-[60px] items-center justify-between px-4 py-2.5 transition-colors cursor-pointer active:bg-[var(--player-pressed)] ${
                     isThisPlaying ? 'bg-[var(--player-row-active)]' : 'hover:bg-[var(--player-hover)]'
                   }`}
                   role="button"
@@ -152,11 +158,11 @@ export function MobileLibraryTab({
                   {isThisPlaying ? (
                     <span
                       aria-hidden="true"
-                      className="absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full bg-[var(--player-accent)]"
+                      className="absolute left-1.5 top-3 bottom-3 w-[2.5px] rounded-full bg-[var(--player-accent)]"
                     />
                   ) : null}
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="flex w-7 shrink-0 items-center justify-center">
+                  <div className="flex items-center gap-3 min-w-0 flex-1 pl-1">
+                    <div className="flex w-6 shrink-0 items-center justify-center">
                       {activeAndPlaying ? (
                         <span className="flex items-end gap-[2px] h-3.5" aria-hidden="true">
                           <span className="player-eq-bar" />
@@ -183,33 +189,10 @@ export function MobileLibraryTab({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                  <div className="shrink-0 ml-3">
                     <span className="text-xs text-[var(--player-text-muted)] tabular-nums">
                       {formatDurationMs(row.mix?.durationMs)}
                     </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (isThisPlaying && onTogglePlay) {
-                          onTogglePlay();
-                        } else {
-                          onPlayPlaylistRow(row, drilledPlaylist, idx);
-                        }
-                      }}
-                      className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors active:scale-90 ${
-                        isThisPlaying
-                          ? 'text-[var(--player-accent-text)]'
-                          : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
-                      }`}
-                      aria-label={activeAndPlaying ? 'Pause track' : 'Play track'}
-                    >
-                      {activeAndPlaying ? (
-                        <Pause size={16} className="fill-current" />
-                      ) : (
-                        <Play size={16} className="fill-current translate-x-[1px]" />
-                      )}
-                    </button>
                   </div>
                 </div>
               );

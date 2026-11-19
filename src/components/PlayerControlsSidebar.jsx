@@ -32,14 +32,23 @@ import {
 const HEADER_ICON_SIZE = 20;
 const RESIZE_GAP_PX = 12;
 
+function formatFocusReadout(step) {
+  if (step === 'omitted') return 'Omitted';
+  if (step === 'solo') return 'Solo';
+  const numeric = Number(step);
+  if (!Number.isFinite(numeric)) return '0 dB';
+  if (numeric === 0) return '0 dB';
+  return `${numeric > 0 ? '+' : ''}${numeric} dB`;
+}
+
 function HeaderToggleIcon({ progress, hovering, instant, animating }) {
   const showHover = hovering && !instant;
   const snap = instant;
   const minimized = progress <= 0;
 
   const slidersOpacity = snap
-    ? (minimized ? 1 : 0)
-    : (showHover ? 0 : 1 - progress);
+    ? (minimized ? 1 : 0.72)
+    : (showHover ? 0 : Math.max(0.72, 1 - progress));
   const openOpacity = snap
     ? 0
     : (showHover ? 1 - progress : 0);
@@ -368,6 +377,9 @@ export function PlayerControlsSidebar({
   const isTransposeActive = Math.abs(Number(playbackTranspose) || 0) > 1e-4;
   const isSpeedActive = Math.abs((Number(playbackSpeed) || 1) - 1) > 0.005;
   const isFocusActive = focusStep === 'omitted' || focusStep === 'solo' || Number(focusStep) !== 0;
+  const isPanActive = practicePanRange !== 100 && !panControlDisabled;
+  const focusReadout = formatFocusReadout(focusStep);
+  const labelRowHeight = fullyMinimized ? 0 : lerp(0, 18, progress);
 
   const metronomePct = Math.max(0, Math.min(100, Number(metronomeVolume) || 0));
   const speedPct = Math.max(
@@ -433,63 +445,84 @@ export function PlayerControlsSidebar({
           </button>
         </div>
 
-        {/* Content list: Horizontal rows with Icon to the left of the slider, no numbers displayed */}
-        <div className="relative z-30 flex-1 pt-2.5 pb-3 flex flex-col gap-3">
+        {/* Content list */}
+        <div className="relative z-30 flex-1 overflow-y-auto pt-3 pb-3 flex flex-col gap-3.5">
           {/* 1. Metronome */}
           {metronomeControlsEnabled ? (
-            <div
-              className="flex items-center h-8"
-              style={{
-                paddingLeft: rowPaddingLeft,
-                gap: rowGap,
-              }}
-            >
-              <button
-                type="button"
-                onClick={onToggleMetronomeMute}
-                disabled={isRendering}
-                data-active={isMetronomeMuted ? 'false' : 'true'}
-                className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 hover:bg-[var(--player-hover)] ${
-                  isMetronomeMuted
-                    ? 'text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]'
-                    : 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                }`}
-                title={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
-                aria-label="Metronome"
-              >
-                <Metronome size={20} />
-              </button>
-
+            <div className="flex flex-col">
+              {!fullyMinimized ? (
+                <div
+                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  style={{
+                    paddingLeft: rowPaddingLeft,
+                    paddingRight: 16,
+                    height: labelRowHeight,
+                    opacity: sliderOpacity,
+                  }}
+                >
+                  <span className="truncate text-[var(--player-text-secondary)]">Metronome</span>
+                  <span
+                    className={`shrink-0 tabular-nums font-semibold ${
+                      isMetronomeMuted ? 'text-[var(--player-text-muted)]' : 'text-[var(--player-accent-text)]'
+                    }`}
+                  >
+                    {isMetronomeMuted ? 'Muted' : `${Math.round(metronomeVolume)}%`}
+                  </span>
+                </div>
+              ) : null}
               <div
-                className="relative h-7 shrink-0 flex items-center"
+                className="flex items-center h-8"
                 style={{
-                  width: sliderWidth,
-                  maxWidth: 160,
-                  opacity: sliderOpacity,
-                  overflow: progress < 1 ? 'hidden' : 'visible',
-                  pointerEvents: progress > 0.8 ? 'auto' : 'none',
+                  paddingLeft: rowPaddingLeft,
+                  gap: rowGap,
                 }}
               >
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={metronomeVolume}
-                  readOnly
-                  onMouseDown={(event) => beginSliderDrag?.(event, {
-                    kind: 'metronome',
-                    value: metronomeVolume,
-                    min: 0,
-                    max: 100,
-                    step: 1,
-                    disabled: isRendering,
-                  })}
-                  onDoubleClick={() => openSliderEdit?.('metronome', metronomeVolume, isRendering)}
-                  className="w-40 h-7 player-range volume-slider volume-slider-lg cursor-pointer block"
-                  style={{ '--player-range-pct': `${metronomePct}%` }}
-                  title="Metronome level (double-click for numeric input)"
-                />
+                <button
+                  type="button"
+                  onClick={onToggleMetronomeMute}
+                  disabled={isRendering}
+                  data-active={isMetronomeMuted ? 'false' : 'true'}
+                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 hover:bg-[var(--player-hover)] ${
+                    isMetronomeMuted
+                      ? 'text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]'
+                      : 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                  }`}
+                  title={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
+                  aria-label="Metronome"
+                >
+                  <Metronome size={20} />
+                </button>
+
+                <div
+                  className="relative h-7 shrink-0 flex items-center"
+                  style={{
+                    width: sliderWidth,
+                    maxWidth: 160,
+                    opacity: sliderOpacity,
+                    overflow: progress < 1 ? 'hidden' : 'visible',
+                    pointerEvents: progress > 0.8 ? 'auto' : 'none',
+                  }}
+                >
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={metronomeVolume}
+                    readOnly
+                    onMouseDown={(event) => beginSliderDrag?.(event, {
+                      kind: 'metronome',
+                      value: metronomeVolume,
+                      min: 0,
+                      max: 100,
+                      step: 1,
+                      disabled: isRendering,
+                    })}
+                    onDoubleClick={() => openSliderEdit?.('metronome', metronomeVolume, isRendering)}
+                    className="w-40 h-5 player-range cursor-pointer block"
+                    style={{ '--player-range-pct': `${metronomePct}%` }}
+                    title="Metronome level (double-click for numeric input)"
+                  />
                 {sliderDragTooltip?.kind === 'metronome' && (
                   <div
                     className="player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs tabular-nums rounded text-center z-50"
@@ -523,74 +556,105 @@ export function PlayerControlsSidebar({
                 )}
               </div>
             </div>
+            </div>
           ) : null}
 
           {/* 2. Practice Focus */}
           {practiceControlsEnabled ? (
-            <div
-              className="flex items-center h-8"
-              style={{
-                paddingLeft: rowPaddingLeft,
-                gap: rowGap,
-              }}
-            >
-              <button
-                type="button"
-                onClick={onTogglePracticeFocus}
-                disabled={focusControlDisabled}
-                data-active={isFocusActive ? 'true' : 'false'}
-                className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--player-hover)] ${
-                  isFocusActive
-                    ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                    : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
-                }`}
-                title="Cycle practice focus: stored dB → Solo → Omitted"
-                aria-label="Practice focus"
-              >
-                <FocusIcon size={20} />
-              </button>
-
+            <div className="flex flex-col">
+              {!fullyMinimized ? (
+                <div
+                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  style={{
+                    paddingLeft: rowPaddingLeft,
+                    paddingRight: 16,
+                    height: labelRowHeight,
+                    opacity: sliderOpacity,
+                  }}
+                >
+                  <span className="truncate text-[var(--player-text-secondary)]">Practice Focus</span>
+                  <span
+                    className={`shrink-0 tabular-nums font-semibold ${
+                      isFocusActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-primary)]'
+                    }`}
+                  >
+                    {focusReadout}
+                  </span>
+                </div>
+              ) : null}
               <div
-                className="relative h-7 shrink-0"
+                className="flex items-center h-8"
                 style={{
-                  width: sliderWidth,
-                  maxWidth: 160,
-                  opacity: sliderOpacity,
-                  overflow: progress < 1 ? 'hidden' : 'visible',
-                  pointerEvents: progress > 0.8 ? 'auto' : 'none',
+                  paddingLeft: rowPaddingLeft,
+                  gap: rowGap,
                 }}
               >
-                <div
-                  className={`relative w-40 h-7 ${focusControlDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-                  onMouseDown={(event) => {
-                    if (event.detail > 1) return;
-                    if (focusControlDisabled) return;
-                    onFocusSliderClick?.(event);
-                  }}
-                  onDoubleClick={() => openSliderEdit?.('focus', practiceFocusControl, focusControlDisabled)}
-                  title="Practice focus"
+                <button
+                  type="button"
+                  onClick={onTogglePracticeFocus}
+                  disabled={focusControlDisabled}
+                  data-active={isFocusActive ? 'true' : 'false'}
+                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--player-hover)] ${
+                    isFocusActive
+                      ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                      : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                  }`}
+                  title="Cycle practice focus: stored dB → Solo → Omitted"
+                  aria-label="Practice focus"
                 >
-                  <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-slider-track)] pointer-events-none z-0" />
+                  <FocusIcon size={20} />
+                </button>
+
+                <div
+                  className="relative h-7 shrink-0"
+                  style={{
+                    width: sliderWidth,
+                    maxWidth: 160,
+                    opacity: sliderOpacity,
+                    overflow: progress < 1 ? 'hidden' : 'visible',
+                    pointerEvents: progress > 0.8 ? 'auto' : 'none',
+                  }}
+                >
                   <div
-                    className={`absolute left-0 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full pointer-events-none z-10 transition-colors ${
-                      focusStep === 'omitted'
-                        ? 'bg-[var(--player-accent)] ring-2 ring-[var(--player-focus-ring)]'
-                        : 'bg-[var(--player-border-strong)]'
-                    }`}
-                  />
-                  <div
-                    className={`absolute right-0 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full pointer-events-none z-10 transition-colors ${
-                      focusStep === 'solo'
-                        ? 'bg-[var(--player-accent)] ring-2 ring-[var(--player-focus-ring)]'
-                        : 'bg-[var(--player-border-strong)]'
-                    }`}
-                  />
-                  <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none z-20">
+                    className={`relative w-40 h-7 ${focusControlDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                    onMouseDown={(event) => {
+                      if (event.detail > 1) return;
+                      if (focusControlDisabled) return;
+                      onFocusSliderClick?.(event);
+                    }}
+                    onDoubleClick={() => openSliderEdit?.('focus', practiceFocusControl, focusControlDisabled)}
+                    title="Practice focus"
+                  >
+                    <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-slider-track)] pointer-events-none z-0" />
+                    <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none z-10">
+                      <div
+                        className="absolute top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-accent)] transition-all"
+                        style={{
+                          left: `${Math.min(50, focusSliderPosition)}%`,
+                          width: `${Math.abs(focusSliderPosition - 50)}%`,
+                        }}
+                      />
+                    </div>
                     <div
-                      className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-slider-thumb)] shadow-sm transition-transform"
-                      style={{ left: `${focusSliderPosition}%` }}
+                      className={`absolute left-0 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full pointer-events-none z-10 transition-colors ${
+                        focusStep === 'omitted'
+                          ? 'bg-[var(--player-accent)] ring-2 ring-[var(--player-focus-ring)]'
+                          : 'bg-[var(--player-border-strong)]'
+                      }`}
                     />
-                  </div>
+                    <div
+                      className={`absolute right-0 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full pointer-events-none z-10 transition-colors ${
+                        focusStep === 'solo'
+                          ? 'bg-[var(--player-accent)] ring-2 ring-[var(--player-focus-ring)]'
+                          : 'bg-[var(--player-border-strong)]'
+                      }`}
+                    />
+                    <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none z-20">
+                      <div
+                        className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-slider-thumb)] shadow-sm transition-transform"
+                        style={{ left: `${focusSliderPosition}%` }}
+                      />
+                    </div>
                   {sliderDragTooltip?.kind === 'focus' && (
                     <div
                       className="player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs tabular-nums rounded text-center z-50"
@@ -625,32 +689,54 @@ export function PlayerControlsSidebar({
                 </div>
               </div>
             </div>
+            </div>
           ) : null}
 
           {/* 3. Transformed Pan Range */}
           {practiceControlsEnabled ? (
-            <div
-              className="flex items-center h-8"
-              style={{
-                paddingLeft: rowPaddingLeft,
-                gap: rowGap,
-              }}
-            >
-              <button
-                type="button"
-                onClick={onTogglePracticePanRange}
-                disabled={panControlDisabled || isRendering}
-                data-active={practicePanRange !== 100 && !panControlDisabled ? 'true' : 'false'}
-                className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--player-hover)] ${
-                  practicePanRange !== 100 && !panControlDisabled
-                    ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                    : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
-                }`}
-                title="Jump transformed pan range to the farthest extreme"
-                aria-label="Transformed pan range"
+            <div className="flex flex-col">
+              {!fullyMinimized ? (
+                <div
+                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  style={{
+                    paddingLeft: rowPaddingLeft,
+                    paddingRight: 16,
+                    height: labelRowHeight,
+                    opacity: sliderOpacity,
+                  }}
+                >
+                  <span className="truncate text-[var(--player-text-secondary)]">Choir Width</span>
+                  <span
+                    className={`shrink-0 tabular-nums font-semibold ${
+                      isPanActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-primary)]'
+                    }`}
+                  >
+                    {panControlDisabled ? 'Fixed' : `${Math.round(practicePanRange)}%`}
+                  </span>
+                </div>
+              ) : null}
+              <div
+                className="flex items-center h-8"
+                style={{
+                  paddingLeft: rowPaddingLeft,
+                  gap: rowGap,
+                }}
               >
-                <ChevronsLeftRightEllipsis size={20} />
-              </button>
+                <button
+                  type="button"
+                  onClick={onTogglePracticePanRange}
+                  disabled={panControlDisabled || isRendering}
+                  data-active={isPanActive ? 'true' : 'false'}
+                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--player-hover)] ${
+                    isPanActive
+                      ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                      : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                  }`}
+                  title="Jump transformed pan range to the farthest extreme"
+                  aria-label="Transformed pan range"
+                >
+                  <ChevronsLeftRightEllipsis size={20} />
+                </button>
 
               <div
                 className={`relative h-7 shrink-0 ${panControlDisabled ? 'opacity-40' : ''}`}
@@ -740,76 +826,98 @@ export function PlayerControlsSidebar({
                 </div>
               </div>
             </div>
+            </div>
           ) : null}
 
           {/* 4. Playback Speed */}
           {speedControlsEnabled ? (
-            <div
-              className="flex items-center h-8"
-              style={{
-                paddingLeft: rowPaddingLeft,
-                gap: rowGap,
-              }}
-            >
-              <div className="relative flex items-center justify-center shrink-0">
-                <button
-                  type="button"
-                  onClick={handleSpeedButtonClick}
-                  disabled={isRendering}
-                  data-active={isSpeedActive ? 'true' : 'false'}
-                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 hover:bg-[var(--player-hover)] ${
-                    isSpeedActive
-                      ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                      : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
-                  }`}
-                  title={`Playback speed: ${speedFormatted} (click for ${nextSpeedFormatted})`}
-                  aria-label="Playback speed"
+            <div className="flex flex-col">
+              {!fullyMinimized ? (
+                <div
+                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  style={{
+                    paddingLeft: rowPaddingLeft,
+                    paddingRight: 16,
+                    height: labelRowHeight,
+                    opacity: sliderOpacity,
+                  }}
                 >
-                  <Gauge size={20} />
-                </button>
-                {Boolean(flashSpeed) && fullyMinimized && (
-                  <div
-                    data-testid="speed-flash-badge"
-                    className={`player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs tabular-nums rounded text-center z-50 pointer-events-none transition-all duration-300 ease-out ${
-                      flashFading ? 'opacity-0 -translate-y-1' : 'opacity-100 translate-y-0'
+                  <span className="truncate text-[var(--player-text-secondary)]">Playback Speed</span>
+                  <span
+                    className={`shrink-0 tabular-nums font-semibold ${
+                      isSpeedActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-primary)]'
                     }`}
-                    style={{ marginBottom: '6px' }}
                   >
-                    {flashSpeed}
-                  </div>
-                )}
-              </div>
-
+                    {speedFormatted}x
+                  </span>
+                </div>
+              ) : null}
               <div
-                className="relative h-7 shrink-0 flex items-center"
+                className="flex items-center h-8"
                 style={{
-                  width: sliderWidth,
-                  maxWidth: 160,
-                  opacity: sliderOpacity,
-                  overflow: progress < 1 ? 'hidden' : 'visible',
-                  pointerEvents: progress > 0.8 ? 'auto' : 'none',
+                  paddingLeft: rowPaddingLeft,
+                  gap: rowGap,
                 }}
               >
-                <input
-                  type="range"
-                  min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
-                  max={PLAYBACK_SPEED_DRAG_BOUNDS.MAX}
-                  step={PLAYBACK_SPEED_DRAG_BOUNDS.STEP}
-                  value={speedRangeValue}
-                  readOnly
-                  onMouseDown={(event) => beginSliderDrag?.(event, {
-                    kind: 'speed',
-                    value: speedRangeValue,
-                    min: PLAYBACK_SPEED_DRAG_BOUNDS.MIN,
-                    max: PLAYBACK_SPEED_DRAG_BOUNDS.MAX,
-                    step: PLAYBACK_SPEED_DRAG_BOUNDS.STEP,
-                    disabled: isRendering,
-                  })}
-                  onDoubleClick={() => openSliderEdit?.('speed', playbackSpeed, isRendering)}
-                  className="w-40 h-7 player-range volume-slider volume-slider-lg cursor-pointer block"
-                  style={{ '--player-range-pct': `${speedPct}%` }}
-                  title="Playback speed (double-click for numeric input)"
-                />
+                <div className="relative flex items-center justify-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleSpeedButtonClick}
+                    disabled={isRendering}
+                    data-active={isSpeedActive ? 'true' : 'false'}
+                    className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 hover:bg-[var(--player-hover)] ${
+                      isSpeedActive
+                        ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                        : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                    }`}
+                    title={`Playback speed: ${speedFormatted} (click for ${nextSpeedFormatted})`}
+                    aria-label="Playback speed"
+                  >
+                    <Gauge size={20} />
+                  </button>
+                  {Boolean(flashSpeed) && fullyMinimized && (
+                    <div
+                      data-testid="speed-flash-badge"
+                      className={`player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs tabular-nums rounded text-center z-50 pointer-events-none transition-all duration-300 ease-out ${
+                        flashFading ? 'opacity-0 -translate-y-1' : 'opacity-100 translate-y-0'
+                      }`}
+                      style={{ marginBottom: '6px' }}
+                    >
+                      {flashSpeed}
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  className="relative h-7 shrink-0 flex items-center"
+                  style={{
+                    width: sliderWidth,
+                    maxWidth: 160,
+                    opacity: sliderOpacity,
+                    overflow: progress < 1 ? 'hidden' : 'visible',
+                    pointerEvents: progress > 0.8 ? 'auto' : 'none',
+                  }}
+                >
+                  <input
+                    type="range"
+                    min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
+                    max={PLAYBACK_SPEED_DRAG_BOUNDS.MAX}
+                    step={PLAYBACK_SPEED_DRAG_BOUNDS.STEP}
+                    value={speedRangeValue}
+                    readOnly
+                    onMouseDown={(event) => beginSliderDrag?.(event, {
+                      kind: 'speed',
+                      value: speedRangeValue,
+                      min: PLAYBACK_SPEED_DRAG_BOUNDS.MIN,
+                      max: PLAYBACK_SPEED_DRAG_BOUNDS.MAX,
+                      step: PLAYBACK_SPEED_DRAG_BOUNDS.STEP,
+                      disabled: isRendering,
+                    })}
+                    onDoubleClick={() => openSliderEdit?.('speed', playbackSpeed, isRendering)}
+                    className="w-40 h-5 player-range cursor-pointer block"
+                    style={{ '--player-range-pct': `${speedPct}%` }}
+                    title="Playback speed (double-click for numeric input)"
+                  />
                 {sliderDragTooltip?.kind === 'speed' && (
                   <div
                     className="player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs tabular-nums rounded text-center z-50 pointer-events-none"
@@ -854,78 +962,100 @@ export function PlayerControlsSidebar({
                 )}
               </div>
             </div>
+            </div>
           ) : null}
 
           {/* 5. Pitch Transpose - shown alongside playback speed when enabled */}
           {transposeControlsEnabled && speedControlsEnabled ? (
-            <div
-              className="flex items-center h-8"
-              style={{
-                paddingLeft: rowPaddingLeft,
-                gap: rowGap,
-              }}
-            >
-              <div className="relative flex items-center justify-center shrink-0">
-                <button
-                  type="button"
-                  onClick={handleTransposeButtonClick}
-                  disabled={isRendering}
-                  data-active={isTransposeActive ? 'true' : 'false'}
-                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 hover:bg-[var(--player-hover)] ${
-                    isTransposeActive
-                      ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                      : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
-                  }`}
-                  title={isTransposeActive
-                    ? `Pitch transpose: ${transposeFormatted}`
-                    : `Pitch transpose: ${transposeFormatted} (click to restore ${formatPlaybackTranspose(lastPlaybackTranspose || 1)})`}
-                  aria-label="Pitch transpose"
+            <div className="flex flex-col">
+              {!fullyMinimized ? (
+                <div
+                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  style={{
+                    paddingLeft: rowPaddingLeft,
+                    paddingRight: 16,
+                    height: labelRowHeight,
+                    opacity: sliderOpacity,
+                  }}
                 >
-                  <Music2 size={20} />
-                </button>
-                {Boolean(flashTranspose) && fullyMinimized && (
-                  <div
-                    data-testid="transpose-flash-badge"
-                    className={`player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-16 px-1 py-0.5 text-xs tabular-nums rounded text-center z-50 pointer-events-none transition-all duration-300 ease-out ${
-                      flashTransposeFading ? 'opacity-0 -translate-y-1' : 'opacity-100 translate-y-0'
+                  <span className="truncate text-[var(--player-text-secondary)]">Pitch Transpose</span>
+                  <span
+                    className={`shrink-0 tabular-nums font-semibold ${
+                      isTransposeActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-primary)]'
                     }`}
-                    style={{ marginBottom: '6px' }}
                   >
-                    {flashTranspose}
-                  </div>
-                )}
-              </div>
-
+                    {transposeFormatted}
+                  </span>
+                </div>
+              ) : null}
               <div
-                className="relative h-7 shrink-0 flex items-center"
+                className="flex items-center h-8"
                 style={{
-                  width: sliderWidth,
-                  maxWidth: 160,
-                  opacity: sliderOpacity,
-                  overflow: progress < 1 ? 'hidden' : 'visible',
-                  pointerEvents: progress > 0.8 ? 'auto' : 'none',
+                  paddingLeft: rowPaddingLeft,
+                  gap: rowGap,
                 }}
               >
-                <input
-                  type="range"
-                  min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
-                  max={PLAYBACK_TRANSPOSE_BOUNDS.MAX}
-                  step={PLAYBACK_TRANSPOSE_BOUNDS.STEP}
-                  value={transposeRangeValue}
-                  readOnly
-                  onMouseDown={(event) => beginSliderDrag?.(event, {
-                    kind: 'transpose',
-                    value: transposeRangeValue,
-                    min: PLAYBACK_TRANSPOSE_BOUNDS.MIN,
-                    max: PLAYBACK_TRANSPOSE_BOUNDS.MAX,
-                    step: PLAYBACK_TRANSPOSE_BOUNDS.STEP,
-                    disabled: isRendering,
-                  })}
-                  onDoubleClick={() => openSliderEdit?.('transpose', playbackTranspose, isRendering)}
-                  className="w-40 h-7 player-range volume-slider volume-slider-lg cursor-pointer block"
-                  style={{ '--player-range-pct': `${transposePct}%` }}
-                  title="Pitch transpose (double-click for numeric input)"
-                />
+                <div className="relative flex items-center justify-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleTransposeButtonClick}
+                    disabled={isRendering}
+                    data-active={isTransposeActive ? 'true' : 'false'}
+                    className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 hover:bg-[var(--player-hover)] ${
+                      isTransposeActive
+                        ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                        : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                    }`}
+                    title={isTransposeActive
+                      ? `Pitch transpose: ${transposeFormatted}`
+                      : `Pitch transpose: ${transposeFormatted} (click to restore ${formatPlaybackTranspose(lastPlaybackTranspose || 1)})`}
+                    aria-label="Pitch transpose"
+                  >
+                    <Music2 size={20} />
+                  </button>
+                  {Boolean(flashTranspose) && fullyMinimized && (
+                    <div
+                      data-testid="transpose-flash-badge"
+                      className={`player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-16 px-1 py-0.5 text-xs tabular-nums rounded text-center z-50 pointer-events-none transition-all duration-300 ease-out ${
+                        flashTransposeFading ? 'opacity-0 -translate-y-1' : 'opacity-100 translate-y-0'
+                      }`}
+                      style={{ marginBottom: '6px' }}
+                    >
+                      {flashTranspose}
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  className="relative h-7 shrink-0 flex items-center"
+                  style={{
+                    width: sliderWidth,
+                    maxWidth: 160,
+                    opacity: sliderOpacity,
+                    overflow: progress < 1 ? 'hidden' : 'visible',
+                    pointerEvents: progress > 0.8 ? 'auto' : 'none',
+                  }}
+                >
+                  <input
+                    type="range"
+                    min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
+                    max={PLAYBACK_TRANSPOSE_BOUNDS.MAX}
+                    step={PLAYBACK_TRANSPOSE_BOUNDS.STEP}
+                    value={transposeRangeValue}
+                    readOnly
+                    onMouseDown={(event) => beginSliderDrag?.(event, {
+                      kind: 'transpose',
+                      value: transposeRangeValue,
+                      min: PLAYBACK_TRANSPOSE_BOUNDS.MIN,
+                      max: PLAYBACK_TRANSPOSE_BOUNDS.MAX,
+                      step: PLAYBACK_TRANSPOSE_BOUNDS.STEP,
+                      disabled: isRendering,
+                    })}
+                    onDoubleClick={() => openSliderEdit?.('transpose', playbackTranspose, isRendering)}
+                    className="w-40 h-5 player-range cursor-pointer block"
+                    style={{ '--player-range-pct': `${transposePct}%` }}
+                    title="Pitch transpose (double-click for numeric input)"
+                  />
                 {sliderDragTooltip?.kind === 'transpose' && (
                   <div
                     className="player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-16 px-1 py-0.5 text-xs tabular-nums rounded text-center z-50 pointer-events-none"
@@ -969,6 +1099,30 @@ export function PlayerControlsSidebar({
                   />
                 )}
               </div>
+            </div>
+            </div>
+          ) : null}
+
+          {!fullyMinimized && progress > 0.85 ? (
+            <div className="mt-auto mx-3 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3 py-2.5 text-[11px] leading-relaxed text-[var(--player-text-muted)]">
+              {practiceControlsEnabled ? (
+                <div className="space-y-1">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--player-accent-text)]">
+                    Active Session
+                  </div>
+                  <div className="text-[var(--player-text-secondary)] tabular-nums">
+                    {focusReadout} · {panControlDisabled ? 'Fixed width' : `${Math.round(practicePanRange)}% width`} · {speedFormatted}x
+                  </div>
+                  <div>Double-click any slider bar for exact numeric input.</div>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-secondary)]">
+                    Practice Tools
+                  </div>
+                  <div>Start any track to unlock Focus, Choir Width, and Pitch controls.</div>
+                </div>
+              )}
             </div>
           ) : null}
 

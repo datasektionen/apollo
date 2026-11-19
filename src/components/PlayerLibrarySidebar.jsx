@@ -120,8 +120,8 @@ function HeaderToggleIcon({ progress, hovering, instant, animating }) {
   const minimized = progress <= 0;
 
   const libraryOpacity = snap
-    ? (minimized ? 1 : 0)
-    : (showHover ? 0 : 1 - progress);
+    ? (minimized ? 1 : 0.78)
+    : (showHover ? 0 : Math.max(0.78, 1 - progress));
   const openOpacity = snap
     ? 0
     : (showHover ? 1 - progress : 0);

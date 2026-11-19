@@ -38,7 +38,7 @@ describe('PlayerControlsSidebar', () => {
     document.body.innerHTML = '';
   });
 
-  it('renders all 4 controls with icons and sliders but no static numbers or text labels displayed', () => {
+  it('renders all 4 controls with icons, sliders, descriptive labels, and tabular readouts', () => {
     const view = render(
       <PlayerControlsSidebar
         playbackSpeed={1}
@@ -50,17 +50,15 @@ describe('PlayerControlsSidebar', () => {
       />
     );
 
-    // Header has "Controls"
+    // Header has "Controls" and labeled controls + tabular readouts when expanded
     expect(view.container.textContent).toContain('Controls');
-
-    // But NO inline numbers or text labels should be displayed on the surface
-    expect(view.container.textContent).not.toContain('Speed');
-    expect(view.container.textContent).not.toContain('1.00x');
-    expect(view.container.textContent).not.toContain('Metronome');
-    expect(view.container.textContent).not.toContain('80');
-    expect(view.container.textContent).not.toContain('Focus');
-    expect(view.container.textContent).not.toContain('Pan Range');
-    expect(view.container.textContent).not.toContain('100%');
+    expect(view.container.textContent).toContain('Playback Speed');
+    expect(view.container.textContent).toContain('1x');
+    expect(view.container.textContent).toContain('Metronome');
+    expect(view.container.textContent).toContain('80%');
+    expect(view.container.textContent).toContain('Practice Focus');
+    expect(view.container.textContent).toContain('Choir Width');
+    expect(view.container.textContent).toContain('100%');
 
     // All 4 buttons with icons exist
     const speedBtn = view.container.querySelector('button[aria-label="Playback speed"]');

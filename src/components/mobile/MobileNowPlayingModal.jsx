@@ -84,6 +84,7 @@ export function MobileNowPlayingModal({
   const [isMuted, setIsMuted] = useState(false);
   const previousVolumeRef = useRef(volume);
   const [creditsState, setCreditsState] = useState({ status: 'idle', data: null, error: '' });
+  const [activeSection, setActiveSection] = useState('practice');
   const practiceSectionRef = useRef(null);
   const lyricsSectionRef = useRef(null);
   const creditsSectionRef = useRef(null);
@@ -232,7 +233,8 @@ export function MobileNowPlayingModal({
     }
   };
 
-  const scrollToSection = (ref) => {
+  const scrollToSection = (sectionId, ref) => {
+    setActiveSection(sectionId);
     ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -286,18 +288,18 @@ export function MobileNowPlayingModal({
             </div>
 
             {lyricPreview ? (
-              <div className="my-4 space-y-2 border-l-2 border-[var(--player-accent)] pl-3.5">
+              <div className="my-4 space-y-2">
                 <p
-                  className={`text-lg font-bold leading-snug line-clamp-3 ${
+                  className={`border-l-2 pl-3.5 text-lg font-bold leading-snug line-clamp-3 ${
                     lyricPreview.mode === 'synced'
-                      ? 'text-[var(--player-text-primary)]'
-                      : 'text-[var(--player-lyric-upcoming)]'
+                      ? 'border-[var(--player-accent)] text-[var(--player-text-primary)]'
+                      : 'border-[var(--player-border-strong)] text-[var(--player-lyric-upcoming)]'
                   }`}
                 >
                   {lyricPreview.primary}
                 </p>
                 {lyricPreview.secondary ? (
-                  <p className="text-xs font-medium leading-snug text-[var(--player-lyric-past)] line-clamp-2">
+                  <p className="pl-4 text-xs font-medium leading-snug text-[var(--player-lyric-past)] line-clamp-2">
                     {lyricPreview.secondary}
                   </p>
                 ) : null}
@@ -441,30 +443,29 @@ export function MobileNowPlayingModal({
 
           {/* Interactive Section Anchor Bar */}
           <div className="grid grid-cols-3 gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => scrollToSection(practiceSectionRef)}
-              className="flex items-center justify-center gap-1.5 rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] py-2 text-xs font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-[0.98] transition-all"
-            >
-              <Sliders size={13} className="text-[var(--player-accent-text)]" />
-              <span>Practice</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection(lyricsSectionRef)}
-              className="flex items-center justify-center gap-1.5 rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] py-2 text-xs font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-[0.98] transition-all"
-            >
-              <MicVocal size={13} className="text-[var(--player-accent-text)]" />
-              <span>Lyrics</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection(creditsSectionRef)}
-              className="flex items-center justify-center gap-1.5 rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] py-2 text-xs font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-[0.98] transition-all"
-            >
-              <Info size={13} className="text-[var(--player-accent-text)]" />
-              <span>Credits</span>
-            </button>
+            {[
+              { id: 'practice', label: 'Practice', Icon: Sliders, ref: practiceSectionRef },
+              { id: 'lyrics', label: 'Lyrics', Icon: MicVocal, ref: lyricsSectionRef },
+              { id: 'credits', label: 'Credits', Icon: Info, ref: creditsSectionRef },
+            ].map(({ id, label, Icon, ref }) => {
+              const selected = activeSection === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => scrollToSection(id, ref)}
+                  className={`flex items-center justify-center gap-1.5 rounded-full border py-2 text-xs font-semibold transition-colors active:scale-[0.98] ${
+                    selected
+                      ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                      : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                  }`}
+                >
+                  <Icon size={13} className="text-[var(--player-accent-text)]" />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
           </div>
         </section>
 
@@ -476,8 +477,8 @@ export function MobileNowPlayingModal({
           className="space-y-5 rounded-2xl bg-[var(--player-bg-surface)] border border-[var(--player-border-subtle)] p-5 scroll-mt-16"
         >
           <div className="flex items-center gap-2 border-b border-[var(--player-border-subtle)] pb-3">
-            <Sliders size={18} className="text-[var(--player-accent-text)]" />
-            <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--player-text-primary)]">
+            <Sliders size={17} className="shrink-0 text-[var(--player-accent-text)]" />
+            <h2 className="text-[15px] font-bold tracking-tight text-[var(--player-text-primary)] whitespace-nowrap">
               Choir Practice & Sound Controls
             </h2>
           </div>
@@ -704,8 +705,8 @@ export function MobileNowPlayingModal({
           className="space-y-3 rounded-2xl bg-[var(--player-bg-surface)] border border-[var(--player-border-subtle)] p-5 scroll-mt-16"
         >
           <div className="flex items-center gap-2 border-b border-[var(--player-border-subtle)] pb-3">
-            <MicVocal size={18} className="text-[var(--player-accent-text)]" />
-            <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--player-text-primary)]">
+            <MicVocal size={17} className="shrink-0 text-[var(--player-accent-text)]" />
+            <h2 className="text-[15px] font-bold tracking-tight text-[var(--player-text-primary)]">
               Lyrics
             </h2>
           </div>
@@ -736,8 +737,8 @@ export function MobileNowPlayingModal({
           className="space-y-4 rounded-2xl bg-[var(--player-bg-surface)] border border-[var(--player-border-subtle)] p-5 scroll-mt-16"
         >
           <div className="flex items-center gap-2 border-b border-[var(--player-border-subtle)] pb-3">
-            <Info size={18} className="text-[var(--player-accent-text)]" />
-            <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--player-text-primary)]">
+            <Info size={17} className="shrink-0 text-[var(--player-accent-text)]" />
+            <h2 className="text-[15px] font-bold tracking-tight text-[var(--player-text-primary)]">
               Credits
             </h2>
           </div>

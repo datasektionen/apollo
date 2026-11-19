@@ -195,7 +195,7 @@ export function PlayerSearchBar({
             onFocus?.();
           }}
           onKeyDown={handleKeyDown}
-          className="h-10 w-full min-w-0 box-border rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] py-0 pl-10 pr-10 text-sm leading-none text-[var(--player-text-primary)] placeholder:text-[var(--player-text-muted)] transition-colors focus:border-[var(--player-accent-border)] focus:outline-none focus:ring-1 focus:ring-[var(--player-focus-ring)]"
+          className="h-10 w-full min-w-0 box-border rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] py-0 pl-10 pr-10 text-sm leading-none text-[var(--player-text-primary)] placeholder:text-[var(--player-text-muted)] transition-colors hover:border-[var(--player-border-default)] hover:bg-[var(--player-bg-popover)] focus:border-[var(--player-accent-border)] focus:bg-[var(--player-bg-popover)] focus:outline-none focus:ring-1 focus:ring-[var(--player-focus-ring)]"
         />
         {loading ? (
           <Loader2 size={14} className="absolute right-3.5 animate-spin text-[var(--player-accent-text)]" />

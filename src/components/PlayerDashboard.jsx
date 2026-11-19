@@ -4076,16 +4076,30 @@ function PlayerDashboard({
                       </button>
                     </div>
                   </header>
-                  <div className="grid h-10 min-h-10 max-h-10 shrink-0 grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
-                    <div className="translate-x-px">#</div>
-                    <div>Title</div>
-                    <div className="flex items-center justify-end">
-                      <span title="Length" aria-label="Length" className="inline-flex items-center -translate-x-1">
-                        <Clock size={14} />
-                      </span>
+                  {isPlaylistCollectionView ? (
+                    <div className="grid h-10 min-h-10 max-h-10 shrink-0 grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
+                      <div className="translate-x-px">#</div>
+                      <div>Title</div>
+                      <div className="flex items-center justify-end">
+                        <span title="Length" aria-label="Length" className="inline-flex items-center -translate-x-1">
+                          <Clock size={14} />
+                        </span>
+                      </div>
+                      <div />
                     </div>
-                    <div />
-                  </div>
+                  ) : (
+                    <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[44px_60px_minmax(0,1fr)_88px_34px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
+                      <div className="translate-x-px">#</div>
+                      <div>No.</div>
+                      <div>Title</div>
+                      <div className="flex items-center justify-end">
+                        <span title="Length" aria-label="Length" className="inline-flex items-center -translate-x-1">
+                          <Clock size={14} />
+                        </span>
+                      </div>
+                      <div />
+                    </div>
+                  )}
                   <div className="flex-1 overflow-auto px-2 py-2">
                     {selectedPlaylist && activeCollectionType === PLAYER_COLLECTION_TYPES.PLAYLIST ? (
                       <>
@@ -4307,12 +4321,12 @@ function PlayerDashboard({
                                 handleSelectItem(PLAYER_COLLECTION_TYPES.TUTTI, collectionId, index);
                                 setProjectContextMenu({ mix, x: event.clientX, y: event.clientY });
                               }}
-                              className="player-track-row group relative grid grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center rounded-lg px-4 py-2.5 min-h-[52px] text-sm cursor-pointer"
+                              className="player-track-row group relative grid grid-cols-[44px_60px_minmax(0,1fr)_88px_34px] items-center rounded-lg px-4 py-1.5 min-h-[44px] text-sm cursor-pointer"
                             >
                               {isActive ? (
                                 <span
                                   aria-hidden="true"
-                                  className="absolute left-0 top-2.5 bottom-2.5 w-[2.5px] rounded-r-full bg-[var(--player-accent)]"
+                                  className="absolute left-0 top-2 bottom-2 w-[2.5px] rounded-r-full bg-[var(--player-accent)]"
                                 />
                               ) : null}
                               <div className="flex items-center pl-0.5">
@@ -4341,21 +4355,22 @@ function PlayerDashboard({
                                   <Play size={14} className="fill-current" />
                                 </button>
                               </div>
+                              <div className={`tabular-nums text-xs font-medium ${
+                                isActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)]'
+                              }`}>
+                                <span aria-hidden="true">{mix.musicalNumber || '0.0'}</span>
+                              </div>
                               <div className="min-w-0 truncate">
                                 <span className="sr-only">{listTitle}</span>
-                                <span aria-hidden="true" className="inline-flex items-baseline gap-3 min-w-0 max-w-full">
-                                  <span className={`w-9 shrink-0 tabular-nums text-xs font-medium ${
-                                    isActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)]'
-                                  }`}>
-                                    {mix.musicalNumber || '0.0'}
-                                  </span>
-                                  <span className={`truncate ${
+                                <span
+                                  aria-hidden="true"
+                                  className={`truncate ${
                                     isActive
                                       ? 'text-[var(--player-accent-text)] font-semibold'
                                       : 'text-[var(--player-text-primary)] font-medium'
-                                  }`}>
-                                    {mix.projectName || mix.name || 'Untitled Project'}
-                                  </span>
+                                  }`}
+                                >
+                                  {mix.projectName || mix.name || 'Untitled Project'}
                                 </span>
                               </div>
                               <div className="text-right text-xs text-[var(--player-text-secondary)] tabular-nums">
@@ -4917,7 +4932,7 @@ function PlayerDashboard({
                 onPointerUp={endTimelineScrub}
                 onPointerCancel={endTimelineScrub}
                 onChange={(e) => handleSeek(Number(e.target.value), e)}
-                className="flex-1 h-5 player-range volume-slider volume-slider-lg cursor-pointer block"
+                className="flex-1 h-5 player-range cursor-pointer block"
                 style={{ '--player-range-pct': `${timelinePct}%` }}
               />
               <span className="w-10 text-left text-[11px] font-medium text-[var(--player-text-muted)] tabular-nums">
@@ -4973,7 +4988,7 @@ function PlayerDashboard({
                     disabled: isRendering,
                   })}
                   onDoubleClick={() => openSliderEdit('master', volume, isRendering)}
-                  className="w-40 h-7 player-range volume-slider volume-slider-lg cursor-pointer block"
+                  className="w-36 h-5 player-range cursor-pointer block"
                   style={{ '--player-range-pct': `${masterVolumePct}%` }}
                   title="Master Volume (double-click for numeric input)"
                 />

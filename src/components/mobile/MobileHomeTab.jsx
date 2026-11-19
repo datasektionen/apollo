@@ -56,56 +56,54 @@ export function MobileHomeTab({
         <BrandMark className="ml-auto h-6 w-6 opacity-90" alt="" />
       </div>
 
-      {/* Editorial Show Hero (Typography-First, Zero Fake Artwork) */}
+      {/* Editorial Show Hero (Typography-First, Stacked Parity with Playlist & Desktop) */}
       {tuttiMixes.length > 0 ? (
         <section className="player-hero-surface border-b border-[var(--player-border-subtle)] px-4 pt-5 pb-4">
-          <div className="flex items-end justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
-                Show
-              </div>
-              <h2 className="mt-1 truncate text-3xl font-extrabold leading-tight tracking-[-0.02em] text-[var(--player-text-primary)]">
-                {showName}
-              </h2>
-              <p className="mt-1 text-xs font-medium text-[var(--player-text-secondary)] tabular-nums">
-                {heroMeta}
-              </p>
-            </div>
-            <div className="flex items-center gap-2.5 shrink-0">
-              {onToggleShuffle ? (
-                <button
-                  type="button"
-                  onClick={onToggleShuffle}
-                  aria-pressed={shuffleEnabled}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border transition-colors active:scale-95 ${
-                    shuffleEnabled
-                      ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                      : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]'
-                  }`}
-                  aria-label={shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
-                >
-                  <Shuffle size={17} />
-                </button>
-              ) : null}
+          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
+            Show
+          </div>
+          <h2 className="mt-1 text-3xl font-extrabold leading-tight tracking-[-0.02em] text-[var(--player-text-primary)]">
+            {showName}
+          </h2>
+          <p className="mt-1 text-xs font-medium text-[var(--player-text-secondary)] tabular-nums">
+            {heroMeta}
+          </p>
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                if (isShowTrackActive && onTogglePlay) {
+                  onTogglePlay();
+                } else {
+                  onPlayMix?.(tuttiMixes[0], null, 0);
+                }
+              }}
+              className="player-play-cta inline-flex h-10 items-center gap-2 rounded-full px-5 text-sm font-bold"
+              aria-label={isShowPlaying ? `Pause ${showName}` : `Play ${showName}`}
+            >
+              {isShowPlaying ? (
+                <Pause size={16} className="fill-current" />
+              ) : (
+                <Play size={16} className="fill-current translate-x-[1px]" />
+              )}
+              <span>{isShowPlaying ? 'Pause' : 'Play'}</span>
+            </button>
+            {onToggleShuffle ? (
               <button
                 type="button"
-                onClick={() => {
-                  if (isShowTrackActive && onTogglePlay) {
-                    onTogglePlay();
-                  } else {
-                    onPlayMix?.(tuttiMixes[0], null, 0);
-                  }
-                }}
-                className="player-play-cta flex h-12 w-12 items-center justify-center rounded-full"
-                aria-label={isShowPlaying ? `Pause ${showName}` : `Play ${showName}`}
+                onClick={onToggleShuffle}
+                aria-pressed={shuffleEnabled}
+                className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-xs font-semibold transition-colors active:scale-95 ${
+                  shuffleEnabled
+                    ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                    : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]'
+                }`}
+                aria-label={shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
               >
-                {isShowPlaying ? (
-                  <Pause size={20} className="fill-current" />
-                ) : (
-                  <Play size={20} className="fill-current translate-x-[1px]" />
-                )}
+                <Shuffle size={14} />
+                <span>Shuffle</span>
               </button>
-            </div>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -125,9 +123,15 @@ export function MobileHomeTab({
             return (
               <div
                 key={mix.id}
-                onClick={() => onPlayMix(mix, null, idx)}
+                onClick={() => {
+                  if (isThisPlaying && onTogglePlay) {
+                    onTogglePlay();
+                  } else {
+                    onPlayMix(mix, null, idx);
+                  }
+                }}
                 data-active={isThisPlaying ? 'true' : 'false'}
-                className={`relative flex min-h-[64px] items-center justify-between px-4 py-3 transition-colors cursor-pointer active:bg-[var(--player-pressed)] ${
+                className={`relative flex min-h-[60px] items-center justify-between px-4 py-2.5 transition-colors cursor-pointer active:bg-[var(--player-pressed)] ${
                   isThisPlaying ? 'bg-[var(--player-row-active)]' : 'hover:bg-[var(--player-hover)]'
                 }`}
                 role="button"
@@ -136,11 +140,11 @@ export function MobileHomeTab({
                 {isThisPlaying ? (
                   <span
                     aria-hidden="true"
-                    className="absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full bg-[var(--player-accent)]"
+                    className="absolute left-1.5 top-3 bottom-3 w-[2.5px] rounded-full bg-[var(--player-accent)]"
                   />
                 ) : null}
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="flex w-7 shrink-0 items-center justify-center">
+                <div className="flex items-center gap-3 min-w-0 flex-1 pl-1">
+                  <div className="flex w-6 shrink-0 items-center justify-center">
                     {activeAndPlaying ? (
                       <span className="flex items-end gap-[2px] h-3.5" aria-hidden="true">
                         <span className="player-eq-bar" />
@@ -162,38 +166,15 @@ export function MobileHomeTab({
                       {mix.name || mix.projectName}
                     </div>
                     <div className="mt-0.5 truncate text-xs text-[var(--player-text-secondary)] tabular-nums">
-                      {[mix.musicalNumber ? `No. ${mix.musicalNumber}` : null, mix.showName].filter(Boolean).join(' · ') || 'Choir number'}
+                      {mix.musicalNumber ? `No. ${mix.musicalNumber}` : (mix.showName || 'Choir number')}
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0 ml-3">
+                <div className="shrink-0 ml-3">
                   <span className="text-xs text-[var(--player-text-muted)] tabular-nums">
                     {formatDurationMs(mix.durationMs)}
                   </span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (isThisPlaying && onTogglePlay) {
-                        onTogglePlay();
-                      } else {
-                        onPlayMix(mix, null, idx);
-                      }
-                    }}
-                    className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors active:scale-90 ${
-                      isThisPlaying
-                        ? 'text-[var(--player-accent-text)]'
-                        : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
-                    }`}
-                    aria-label={activeAndPlaying ? `Pause ${mix.name || mix.projectName}` : `Play ${mix.name || mix.projectName}`}
-                  >
-                    {activeAndPlaying ? (
-                      <Pause size={16} className="fill-current" />
-                    ) : (
-                      <Play size={16} className="fill-current translate-x-[1px]" />
-                    )}
-                  </button>
                 </div>
               </div>
             );
