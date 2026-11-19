@@ -14,7 +14,15 @@ function CircleChevronsIcon({ direction }) {
   );
 }
 
-function PlayerLyricsView({ lyrics, currentTimeMs = 0, durationMs = 0, isLoading = false, songTitle = '', onSeek }) {
+function PlayerLyricsView({
+  lyrics,
+  currentTimeMs = 0,
+  durationMs = 0,
+  isLoading = false,
+  songTitle = '',
+  showHeader = true,
+  onSeek,
+}) {
   const lines = Array.isArray(lyrics?.lines) ? lyrics.lines : [];
   const isSynced = lyrics?.useSyncedLyrics === true;
   const placedLines = useMemo(() => getPlacedLyricLines(lines), [lines]);
@@ -181,26 +189,41 @@ function PlayerLyricsView({ lyrics, currentTimeMs = 0, durationMs = 0, isLoading
 
   return (
     <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden" aria-label="Lyrics">
-      <header className="flex min-h-11 shrink-0 items-center justify-between border-b border-gray-700 px-4">
-        <div className="text-sm font-semibold text-gray-100">Lyrics</div>
-        {songTitle ? <div className="truncate text-xs text-gray-400">{songTitle}</div> : null}
-      </header>
+      {showHeader ? (
+        <header className="player-hero-surface flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--player-border-subtle)] px-6 py-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
+              Lyrics
+            </div>
+            {songTitle ? (
+              <div className="mt-0.5 truncate text-base font-bold tracking-tight text-[var(--player-text-primary)]">
+                {songTitle}
+              </div>
+            ) : null}
+          </div>
+          {isSynced && placedLines.length > 0 ? (
+            <span className="shrink-0 rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--player-accent-text)]">
+              Synced
+            </span>
+          ) : null}
+        </header>
+      ) : null}
       <div
         ref={scrollContainerRef}
-        className="min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-4 sm:px-8"
+        className="player-scrollfade min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-4 sm:px-10"
         aria-label="Lyrics lines"
         onScroll={handleScroll}
       >
         {isLoading && lines.length === 0 ? (
-          <div className="mx-auto max-w-3xl text-lg text-gray-400">Loading lyrics…</div>
+          <div className="mx-auto max-w-3xl py-6 text-lg text-[var(--player-text-secondary)]">Loading lyrics…</div>
         ) : lines.length === 0 ? (
-          <div className="mx-auto max-w-3xl text-lg text-gray-400">No lyrics available for this song.</div>
+          <div className="mx-auto max-w-3xl py-6 text-lg text-[var(--player-text-muted)]">No lyrics available for this song.</div>
         ) : (
-          <div className="mx-auto max-w-3xl space-y-4">
+          <div className="mx-auto max-w-3xl space-y-5">
             {lines.map((line, index) => {
               const text = String(line?.text ?? '');
               if (!text.trim()) {
-                return <div key={line?.id || `blank-${index}`} className="h-3" aria-hidden="true" />;
+                return <div key={line?.id || `blank-${index}`} className="h-4" aria-hidden="true" />;
               }
               const lineStartMs = line?.startMs == null || line.startMs === '' ? null : Number(line.startMs);
               const isCurrent = isSynced && line.id === currentLineId;
@@ -208,14 +231,22 @@ function PlayerLyricsView({ lyrics, currentTimeMs = 0, durationMs = 0, isLoading
                 && currentStartMs != null
                 && Number.isFinite(lineStartMs)
                 && lineStartMs < currentStartMs;
+              const lyricState = !isSynced
+                ? 'static'
+                : (isCurrent ? 'current' : (isPast ? 'past' : 'upcoming'));
               const colorClass = !isSynced
-                ? 'text-gray-100'
-                : (isCurrent ? 'text-white' : (isPast ? 'text-gray-400' : 'text-gray-300'));
+                ? 'text-[var(--player-text-primary)]'
+                : (isCurrent
+                    ? 'text-[var(--player-text-primary)] border-l-2 border-[var(--player-accent)] pl-4 -ml-4'
+                    : (isPast
+                        ? 'text-[var(--player-lyric-past)]'
+                        : 'text-[var(--player-lyric-upcoming)]'));
               const canSeek = Number.isFinite(lineStartMs);
               return (
                 <button
                   key={line?.id || `line-${index}`}
                   data-lyric-id={line?.id || undefined}
+                  data-lyric-state={lyricState}
                   ref={(element) => {
                     if (!line?.id) return;
                     if (element) lineElementsRef.current.set(line.id, element);
@@ -226,7 +257,7 @@ function PlayerLyricsView({ lyrics, currentTimeMs = 0, durationMs = 0, isLoading
                   aria-current={isCurrent ? 'true' : undefined}
                   title={canSeek ? 'Jump to this lyric' : undefined}
                   onClick={() => handleSeekLine(line)}
-                  className={`block w-full whitespace-pre-wrap break-words rounded-lg text-left text-[1.75rem] font-bold leading-snug transition-colors sm:text-[2.125rem] disabled:cursor-default disabled:opacity-100 ${colorClass} ${canSeek ? 'cursor-pointer hover:text-white' : 'cursor-default'}`}
+                  className={`block w-full whitespace-pre-wrap break-words rounded-lg text-left text-[1.5rem] font-extrabold leading-[1.25] tracking-tight transition-colors sm:text-[2rem] disabled:cursor-default disabled:opacity-100 ${colorClass} ${canSeek ? 'cursor-pointer hover:text-[var(--player-text-primary)]' : 'cursor-default'}`}
                 >
                   {text}
                 </button>
@@ -239,7 +270,7 @@ function PlayerLyricsView({ lyrics, currentTimeMs = 0, durationMs = 0, isLoading
         <button
           type="button"
           onClick={handleResync}
-          className="absolute bottom-5 left-1/2 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-gray-600 bg-gray-900 px-4 py-2 text-sm font-medium text-white shadow-lg transition-colors hover:bg-gray-800"
+          className="player-menu absolute bottom-5 left-1/2 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-[var(--player-accent-border)] px-4 py-2 text-sm font-semibold text-[var(--player-accent-text)] transition-colors hover:bg-[var(--player-bg-elevated)]"
           title="Sync"
           aria-label="Sync to current lyric"
         >

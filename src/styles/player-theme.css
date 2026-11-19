@@ -1,0 +1,396 @@
+/*
+ * Apollo /player Scoped Multi-Theme Token Contract & Component Primitives
+ *
+ * Strictly scoped under `.player-theme` so `/admin`, `/daw`, and shared styles
+ * remain 100% isolated even after SPA navigation.
+ *
+ * Adding a new theme (e.g. `[data-player-theme="light-gold"]`) only requires
+ * defining a new `[data-player-theme="..."]` variable block below.
+ */
+
+.player-theme,
+.player-theme[data-player-theme='dark-gold'] {
+  color-scheme: dark;
+
+  /* Brand Gold Scale (extracted from src/assets/brand/mark.svg & wordmark.svg) */
+  --player-gold-900: #675328;
+  --player-gold-800: #7a622e;
+  --player-gold-700: #887037;
+  --player-gold-600: #aa893c;
+  --player-gold-500: #c69b39;
+  --player-gold-300: #d9b76d;
+
+  /* Obsidian Surfaces (zero blue/slate tint) */
+  --player-bg-canvas: #050506;
+  --player-bg-canvas-translucent: rgba(5, 5, 6, 0.9);
+  --player-bg-surface: #0c0c0e;
+  --player-bg-surface-subtle: #09090b;
+  --player-bg-elevated: #141416;
+  --player-bg-popover: #1b1b1e;
+  --player-bg-active-segment: #242428;
+  --player-bg-scrim: rgba(0, 0, 0, 0.74);
+
+  /* Crisp Hairline Borders */
+  --player-border-subtle: rgba(255, 255, 255, 0.07);
+  --player-border-default: rgba(255, 255, 255, 0.13);
+  --player-border-strong: rgba(255, 255, 255, 0.22);
+
+  /* Typography Ink Hierarchy */
+  --player-text-primary: #f5f5f4;
+  --player-text-secondary: #a1a1a6;
+  --player-text-muted: #7a7a82;
+  --player-text-disabled: #4b4b52;
+
+  /* Semantic Apollo Gold Accent */
+  --player-accent: var(--player-gold-500);
+  --player-accent-hover: var(--player-gold-300);
+  --player-accent-pressed: var(--player-gold-600);
+  --player-accent-text: var(--player-gold-300);
+  --player-accent-foreground: #0a0a0b;
+  --player-accent-soft: rgba(198, 155, 57, 0.13);
+  --player-accent-softer: rgba(198, 155, 57, 0.07);
+  --player-accent-border: rgba(198, 155, 57, 0.42);
+  --player-accent-metallic: linear-gradient(
+    135deg,
+    #887037 6%,
+    #c69b39 38%,
+    #d9b76d 52%,
+    #887037 89%,
+    #aa893c 100%
+  );
+  --player-hero-glow: radial-gradient(
+    120% 95% at 0% 0%,
+    rgba(198, 155, 57, 0.12),
+    rgba(136, 112, 55, 0.03) 42%,
+    transparent 70%
+  );
+  --player-focus-ring: rgba(217, 183, 109, 0.65);
+
+  /* Interactive States & Chips */
+  --player-hover: rgba(255, 255, 255, 0.06);
+  --player-pressed: rgba(255, 255, 255, 0.11);
+  --player-row-active: var(--player-accent-softer);
+  --player-pill-bg: var(--player-bg-elevated);
+  --player-pill-fg: var(--player-text-secondary);
+  --player-pill-active-bg: var(--player-text-primary);
+  --player-pill-active-fg: #0a0a0b;
+
+  /* Sliders & Lyrics */
+  --player-slider-track: rgba(255, 255, 255, 0.15);
+  --player-slider-fill: var(--player-accent);
+  --player-slider-thumb: var(--player-text-primary);
+  --player-lyric-past: rgba(245, 245, 244, 0.36);
+  --player-lyric-upcoming: rgba(245, 245, 244, 0.64);
+
+  /* Status & Feedback */
+  --player-danger: #f87171;
+  --player-danger-soft: rgba(248, 113, 113, 0.12);
+  --player-danger-border: rgba(248, 113, 113, 0.34);
+  --player-warning-text: var(--player-gold-300);
+  --player-warning-soft: var(--player-accent-soft);
+  --player-warning-border: var(--player-accent-border);
+
+  /* Elevation */
+  --player-shadow-elevated: 0 12px 32px rgba(0, 0, 0, 0.56);
+  --player-shadow-popover: 0 18px 44px -12px rgba(0, 0, 0, 0.82), 0 0 0 1px var(--player-border-default);
+  --player-shadow-sheet: 0 -12px 40px rgba(0, 0, 0, 0.65);
+  --player-shadow-accent: 0 6px 20px rgba(198, 155, 57, 0.28);
+
+  /* Typography & Motion */
+  --player-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'SF Pro Text', 'Segoe UI', sans-serif;
+  --player-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  font-family: var(--player-font-sans);
+  color: var(--player-text-primary);
+}
+
+/* Editorial Hero Ambient Gold Wash */
+.player-theme .player-hero-surface {
+  background-image: var(--player-hero-glow);
+}
+
+/* Primary Apollo Metallic / Gold Play CTA */
+.player-theme .player-play-cta {
+  background: var(--player-accent-metallic);
+  color: var(--player-accent-foreground);
+  box-shadow: var(--player-shadow-accent);
+  transition: transform 150ms var(--player-ease), filter 150ms var(--player-ease), box-shadow 150ms var(--player-ease);
+}
+
+.player-theme .player-play-cta:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: scale(1.04);
+}
+
+.player-theme .player-play-cta:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.player-theme .player-play-cta:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Interactive Rows & Menus */
+.player-theme .player-library-row {
+  color: var(--player-text-secondary);
+  transition: background-color 140ms var(--player-ease), color 140ms var(--player-ease);
+}
+
+.player-theme .player-library-row:hover {
+  background-color: var(--player-hover);
+  color: var(--player-text-primary);
+}
+
+.player-theme .player-library-row[data-active='true'] {
+  background-color: var(--player-bg-elevated);
+  color: var(--player-text-primary);
+}
+
+.player-theme .player-track-row {
+  transition: background-color 140ms var(--player-ease);
+}
+
+.player-theme .player-track-row:hover {
+  background-color: var(--player-hover);
+}
+
+.player-theme .player-track-row[data-active='true'] {
+  background-color: var(--player-row-active);
+}
+
+.player-theme .player-menu {
+  background-color: var(--player-bg-popover);
+  border: 1px solid var(--player-border-default);
+  color: var(--player-text-primary);
+  box-shadow: var(--player-shadow-popover);
+}
+
+.player-theme .player-menu-item {
+  color: var(--player-text-primary);
+  transition: background-color 120ms var(--player-ease);
+}
+
+.player-theme .player-menu-item:hover {
+  background-color: var(--player-hover);
+}
+
+/* Precision Range Sliders (overrides legacy src/index.css .volume-slider rules inside .player-theme) */
+.player-theme input[type='range'].player-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
+
+.player-theme input[type='range'].player-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  border: none;
+  box-sizing: border-box;
+  background: linear-gradient(
+    to right,
+    var(--player-slider-fill) 0%,
+    var(--player-slider-fill) var(--player-range-pct, 0%),
+    var(--player-slider-track) var(--player-range-pct, 0%),
+    var(--player-slider-track) 100%
+  );
+  transition: height 120ms var(--player-ease);
+}
+
+.player-theme input[type='range'].player-range::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  border: none;
+  box-sizing: border-box;
+  background: var(--player-slider-track);
+}
+
+.player-theme input[type='range'].player-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--player-slider-fill);
+}
+
+.player-theme input[type='range'].player-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--player-slider-thumb);
+  border: none;
+  box-sizing: border-box;
+  margin-top: -4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+  transition: transform 120ms var(--player-ease), background-color 120ms var(--player-ease);
+}
+
+.player-theme input[type='range'].player-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--player-slider-thumb);
+  border: none;
+  box-sizing: border-box;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+  transition: transform 120ms var(--player-ease), background-color 120ms var(--player-ease);
+}
+
+.player-theme input[type='range'].player-range:hover:not(:disabled)::-webkit-slider-thumb,
+.player-theme input[type='range'].player-range:focus-visible:not(:disabled)::-webkit-slider-thumb {
+  transform: scale(1.18);
+  background: var(--player-accent-hover);
+}
+
+.player-theme input[type='range'].player-range:hover:not(:disabled)::-moz-range-thumb,
+.player-theme input[type='range'].player-range:focus-visible:not(:disabled)::-moz-range-thumb {
+  transform: scale(1.18);
+  background: var(--player-accent-hover);
+}
+
+.player-theme input[type='range'].player-range.player-range-touch::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+}
+
+.player-theme input[type='range'].player-range.player-range-touch::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+/* Soft vertical scroll mask for lyrics panel */
+.player-theme .player-scrollfade {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 4%,
+    #000 94%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 4%,
+    #000 94%,
+    transparent 100%
+  );
+}
+
+/* Animated equalizer bars for active playing track */
+@keyframes player-eq-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.player-theme .player-eq-bar {
+  display: inline-block;
+  width: 2.5px;
+  height: 12px;
+  border-radius: 9999px;
+  background-color: var(--player-accent-text);
+  transform-origin: bottom;
+  animation: player-eq-bounce 0.9s var(--player-ease) infinite;
+}
+
+.player-theme .player-eq-bar:nth-child(2) {
+  animation-delay: 0.22s;
+}
+
+.player-theme .player-eq-bar:nth-child(3) {
+  animation-delay: 0.45s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-theme .player-eq-bar {
+    animation: none;
+    transform: scaleY(0.75);
+  }
+}
+
+/* Thin obsidian scrollbars inside /player */
+.player-theme ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.player-theme ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.player-theme ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.player-theme ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.26);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Shared SettingsPanels.jsx isolation host (keeps SettingsPanels.jsx untouched for /daw) */
+.player-theme .player-settings-host {
+  color: var(--player-text-primary);
+}
+
+.player-theme .player-settings-host .bg-gray-900,
+.player-theme .player-settings-host .bg-gray-900\/60 {
+  background-color: var(--player-bg-elevated);
+}
+
+.player-theme .player-settings-host .bg-gray-950,
+.player-theme .player-settings-host .bg-gray-800 {
+  background-color: var(--player-bg-popover);
+}
+
+.player-theme .player-settings-host .border-gray-700,
+.player-theme .player-settings-host .border-gray-600 {
+  border-color: var(--player-border-default);
+}
+
+.player-theme .player-settings-host .text-gray-100,
+.player-theme .player-settings-host .text-gray-200 {
+  color: var(--player-text-primary);
+}
+
+.player-theme .player-settings-host .text-gray-300,
+.player-theme .player-settings-host .text-gray-400 {
+  color: var(--player-text-secondary);
+}
+
+.player-theme .player-settings-host .text-gray-500 {
+  color: var(--player-text-muted);
+}
+
+.player-theme .player-settings-host .bg-blue-600 {
+  background-color: var(--player-accent);
+  color: var(--player-accent-foreground);
+}
+
+.player-theme .player-settings-host .hover\:bg-blue-500:hover {
+  background-color: var(--player-accent-hover);
+}
+
+.player-theme .player-settings-host input,
+.player-theme .player-settings-host select {
+  accent-color: var(--player-accent);
+}
+
+.player-theme .player-settings-host input:focus,
+.player-theme .player-settings-host select:focus {
+  border-color: var(--player-accent-border);
+  box-shadow: 0 0 0 2px var(--player-focus-ring);
+}

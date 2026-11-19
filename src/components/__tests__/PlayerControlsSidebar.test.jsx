@@ -405,7 +405,7 @@ describe('PlayerControlsSidebar', () => {
       const transposeBtn = view.container.querySelector('button[aria-label="Pitch transpose"]');
       expect(transposeBtn).toBeTruthy();
       expect(transposeBtn.getAttribute('title')).toContain('+3.5 st');
-      expect(transposeBtn.className).toContain('text-blue-300');
+      expect(transposeBtn.getAttribute('data-active')).toBe('true');
 
       act(() => {
         transposeBtn.click();
@@ -448,8 +448,7 @@ describe('PlayerControlsSidebar', () => {
         />
       );
       const activeBtn = viewActive.container.querySelector('button[aria-label="Pitch transpose"]');
-      expect(activeBtn.className).toContain('text-blue-300');
-      expect(activeBtn.className).not.toContain('text-gray-400');
+      expect(activeBtn.getAttribute('data-active')).toBe('true');
       viewActive.unmount();
 
       const viewZero = render(
@@ -460,8 +459,7 @@ describe('PlayerControlsSidebar', () => {
         />
       );
       const zeroBtn = viewZero.container.querySelector('button[aria-label="Pitch transpose"]');
-      expect(zeroBtn.className).toContain('text-gray-400');
-      expect(zeroBtn.className).not.toContain('text-blue-300');
+      expect(zeroBtn.getAttribute('data-active')).toBe('false');
       expect(zeroBtn.getAttribute('title')).toContain('click to restore +2 st');
       viewZero.unmount();
     });
@@ -621,7 +619,7 @@ describe('PlayerControlsSidebar', () => {
         />
       );
 
-      const headerContainer = view.container.querySelector('div.border-b.border-gray-700');
+      const headerContainer = view.container.querySelector('div.border-b');
       expect(headerContainer.className).toContain('pr-[15px]');
 
       const collapseBtn = view.container.querySelector('button[aria-label="Collapse Controls"]');

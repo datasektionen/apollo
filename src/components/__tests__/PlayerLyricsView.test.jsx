@@ -57,9 +57,9 @@ describe('PlayerLyricsView', () => {
     const current = view.container.querySelector('[data-lyric-id="current"]');
     const upcoming = view.container.querySelector('[data-lyric-id="upcoming"]');
     expect(current.getAttribute('aria-current')).toBe('true');
-    expect(current.className).toContain('text-white');
-    expect(past.className).toContain('text-gray-400');
-    expect(upcoming.className).toContain('text-gray-300');
+    expect(current.getAttribute('data-lyric-state')).toBe('current');
+    expect(past.getAttribute('data-lyric-state')).toBe('past');
+    expect(upcoming.getAttribute('data-lyric-state')).toBe('upcoming');
   });
 
   it('resets scroll to the start for a new song and a playback restart', () => {

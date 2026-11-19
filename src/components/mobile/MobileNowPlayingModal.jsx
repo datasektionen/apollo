@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ChevronDown,
   Play,
@@ -11,7 +11,6 @@ import {
   Loader2,
   MicVocal,
   Sliders,
-  Music2,
   Info,
   Gauge,
   Music,
@@ -19,13 +18,31 @@ import {
   VolumeX,
   Metronome,
   ChevronsLeftRightEllipsis,
-  ChevronDown as ScrollDownIcon,
 } from 'lucide-react';
 import { formatClock, formatDurationMs } from '../../utils/playerTime';
 import { PLAYER_LOOP_MODES } from '../../types/player';
-import { ADVANCED_MIX_PRACTICE_FOCUS_STEPS } from '../../utils/advancedMix';
+import {
+  ADVANCED_MIX_PRACTICE_FOCUS_STEPS,
+  ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX,
+} from '../../utils/advancedMix';
+import {
+  PLAYBACK_SPEED_DRAG_BOUNDS,
+  PLAYBACK_TRANSPOSE_BOUNDS,
+  formatPlaybackSpeed,
+  formatPlaybackTranspose,
+} from '../../utils/playerControlsSidebar';
+import { getPlacedLyricLines } from '../../utils/lyricTimeline';
 import { getProjectCredits } from '../../lib/serverApi';
 import PlayerLyricsView from '../PlayerLyricsView';
+
+function formatFocusBadge(step) {
+  if (step === 'omitted') return 'Omitted';
+  if (step === 'solo') return 'Solo';
+  const numeric = Number(step);
+  if (!Number.isFinite(numeric)) return '0 dB';
+  if (numeric === 0) return '0 dB';
+  return `${numeric > 0 ? '+' : ''}${numeric} dB`;
+}
 
 export function MobileNowPlayingModal({
   isOpen,
@@ -52,7 +69,7 @@ export function MobileNowPlayingModal({
   onSetPlaybackSpeed,
   playbackTranspose = 0,
   onSetPlaybackTranspose,
-  practiceFocusControl = 2,
+  practiceFocusControl = ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX,
   onSetPracticeFocusControl,
   practicePanRange = 100,
   onSetPracticePanRange,
@@ -67,6 +84,9 @@ export function MobileNowPlayingModal({
   const [isMuted, setIsMuted] = useState(false);
   const previousVolumeRef = useRef(volume);
   const [creditsState, setCreditsState] = useState({ status: 'idle', data: null, error: '' });
+  const practiceSectionRef = useRef(null);
+  const lyricsSectionRef = useRef(null);
+  const creditsSectionRef = useRef(null);
 
   // Load credits automatically for the active project
   useEffect(() => {
@@ -84,7 +104,11 @@ export function MobileNowPlayingModal({
       })
       .catch((err) => {
         if (!cancelled) {
-          setCreditsState({ status: 'error', data: null, error: err.message || 'Failed to load credits' });
+          setCreditsState({
+            status: 'error',
+            data: null,
+            error: err.message || 'Failed to load credits',
+          });
         }
       });
     return () => {
@@ -92,19 +116,110 @@ export function MobileNowPlayingModal({
     };
   }, [activeQueueItem?.projectId, session]);
 
+  const currentTimeMs = Math.max(0, Number(currentTimeSec || 0) * 1000);
+  const lyricPreview = useMemo(() => {
+    const rawLines = Array.isArray(currentPlaybackLyrics?.lines) ? currentPlaybackLyrics.lines : [];
+    const placed = getPlacedLyricLines(rawLines).filter(
+      (entry) => String(entry.line?.text ?? '').trim().length > 0
+    );
+    if (placed.length > 0) {
+      let activeIndex = -1;
+      for (let i = 0; i < placed.length; i += 1) {
+        if (placed[i].startMs <= currentTimeMs) {
+          activeIndex = i;
+        } else {
+          break;
+        }
+      }
+      if (activeIndex >= 0) {
+        return {
+          mode: 'synced',
+          primary: String(placed[activeIndex].line.text).trim(),
+          secondary: placed[activeIndex + 1] ? String(placed[activeIndex + 1].line.text).trim() : '',
+          eyebrow: 'Live Lyric',
+        };
+      }
+      return {
+        mode: 'intro',
+        primary: String(placed[0].line.text).trim(),
+        secondary: placed[1] ? String(placed[1].line.text).trim() : '',
+        eyebrow: 'Up Next',
+      };
+    }
+
+    const staticTexts = rawLines
+      .map((line) => String(line?.text ?? '').trim())
+      .filter(Boolean);
+    if (staticTexts.length > 0) {
+      return {
+        mode: 'static',
+        primary: staticTexts[0],
+        secondary: staticTexts[1] || '',
+        eyebrow: 'Lyrics',
+      };
+    }
+    return null;
+  }, [currentPlaybackLyrics, currentTimeMs]);
+
   if (!isOpen || !activeQueueItem) return null;
 
   const title = activeQueueItem.name || activeQueueItem.title || 'Untitled Track';
   const subtitle = activeQueueItem.showName || activeQueueItem.artist || activeQueueItem.projectName || 'Apollo Choir';
   const musicalNumber = activeQueueItem.musicalNumber || '';
   const collectionName = activeQueueItem.collectionName || activeQueueItem.showName || 'Queue';
+  const totalDurationLabel = formatDurationMs(
+    activeQueueItem.durationMs ?? (durationSec > 0 ? durationSec * 1000 : 0)
+  );
 
   const isLoopOne = loopMode === PLAYER_LOOP_MODES.ONE;
   const isLoopAll = loopMode === PLAYER_LOOP_MODES.ALL;
 
-  const focusSteps = ADVANCED_MIX_PRACTICE_FOCUS_STEPS || ['Omitted', 'Low', 'Med', 'High', 'Solo'];
-  const focusLabels = ['Omitted (-)', 'Low', 'Med (Default)', 'High', 'Solo (+)'];
+  const focusSteps = ADVANCED_MIX_PRACTICE_FOCUS_STEPS;
+  const clampedFocusIdx = Math.max(
+    0,
+    Math.min(
+      focusSteps.length - 1,
+      Number.isFinite(Number(practiceFocusControl))
+        ? Number(practiceFocusControl)
+        : ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX
+    )
+  );
+  const focusLabel = formatFocusBadge(focusSteps[clampedFocusIdx]);
+  const focusPct = focusSteps.length > 1 ? (clampedFocusIdx / (focusSteps.length - 1)) * 100 : 50;
+  const focusQuickOptions = [
+    { idx: 0, label: 'Omit' },
+    { idx: 4, label: '-6' },
+    { idx: ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX, label: '0 dB' },
+    { idx: 8, label: '+6' },
+    { idx: focusSteps.length - 1, label: 'Solo' },
+  ];
+
   const speedQuickOptions = [0.8, 0.9, 1.0, 1.1, 1.2];
+  const clampedSpeed = Math.max(
+    PLAYBACK_SPEED_DRAG_BOUNDS.MIN,
+    Math.min(PLAYBACK_SPEED_DRAG_BOUNDS.MAX, Number(playbackSpeed) || 1)
+  );
+  const speedPct =
+    ((clampedSpeed - PLAYBACK_SPEED_DRAG_BOUNDS.MIN) /
+      (PLAYBACK_SPEED_DRAG_BOUNDS.MAX - PLAYBACK_SPEED_DRAG_BOUNDS.MIN)) *
+    100;
+
+  const clampedTranspose = Math.max(
+    PLAYBACK_TRANSPOSE_BOUNDS.MIN,
+    Math.min(PLAYBACK_TRANSPOSE_BOUNDS.MAX, Number(playbackTranspose) || 0)
+  );
+  const transposePct =
+    ((clampedTranspose - PLAYBACK_TRANSPOSE_BOUNDS.MIN) /
+      (PLAYBACK_TRANSPOSE_BOUNDS.MAX - PLAYBACK_TRANSPOSE_BOUNDS.MIN)) *
+    100;
+
+  const clampedPan = Math.max(0, Math.min(200, Number(practicePanRange) ?? 100));
+  const panPct = (clampedPan / 200) * 100;
+
+  const effectiveVolume = isMuted ? 0 : Math.max(0, Math.min(100, Number(volume) || 0));
+  const seekMax = Math.max(durationSec, 0.001);
+  const seekVal = Math.min(currentTimeSec, durationSec || 0);
+  const seekPct = durationSec > 0 ? Math.min(100, Math.max(0, (seekVal / durationSec) * 100)) : 0;
 
   const handleToggleMute = () => {
     if (isMuted) {
@@ -117,29 +232,33 @@ export function MobileNowPlayingModal({
     }
   };
 
+  const scrollToSection = (ref) => {
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-gradient-to-b from-gray-900 via-gray-950 to-black text-white pt-safe pb-safe select-none animate-in fade-in slide-in-from-bottom-8 duration-200 overflow-y-auto"
+      className="fixed inset-0 z-50 flex flex-col bg-[var(--player-bg-canvas)] text-[var(--player-text-primary)] pt-safe pb-safe select-none animate-in fade-in slide-in-from-bottom-8 duration-200 overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-label="Now Playing"
     >
       {/* Top Header */}
-      <header className="sticky top-0 z-20 flex h-14 items-center justify-between px-4 bg-gray-900/90 backdrop-blur-md border-b border-white/5 shrink-0">
+      <header className="sticky top-0 z-20 flex h-14 items-center justify-between px-4 bg-[var(--player-bg-canvas-translucent)] backdrop-blur-md border-b border-[var(--player-border-subtle)] shrink-0">
         <button
           type="button"
           onClick={onClose}
-          className="flex h-10 w-10 items-center justify-center text-gray-300 hover:text-white active:scale-95 transition-transform"
+          className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-95 transition-all"
           aria-label="Collapse player"
         >
-          <ChevronDown size={28} />
+          <ChevronDown size={24} />
         </button>
 
         <div className="min-w-0 flex-1 px-2 text-center">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-            Playing from collection
+          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
+            Playing from
           </div>
-          <div className="truncate text-xs font-semibold text-gray-200">
+          <div className="truncate text-xs font-semibold text-[var(--player-text-primary)]">
             {collectionName}
           </div>
         </div>
@@ -148,42 +267,72 @@ export function MobileNowPlayingModal({
       </header>
 
       {/* Main View Area */}
-      <div className="px-6 py-4 space-y-8 max-w-lg mx-auto w-full">
+      <div className="px-5 pt-4 pb-12 space-y-7 max-w-lg mx-auto w-full">
         {/* ============================================================ */}
-        {/* 1. TOP FOLD: Artwork, Track Info, Scrubber, Transport Controls */}
+        {/* 1. TOP FOLD: Editorial Stage, Track Info, Scrubber, Transport */}
         {/* ============================================================ */}
-        <section className="space-y-6">
-          {/* Artwork */}
-          <div className="flex flex-col items-center justify-center pt-2">
-            <div className="relative aspect-square w-full max-w-[320px] overflow-hidden rounded-2xl bg-gray-800 shadow-2xl ring-1 ring-white/10 flex items-center justify-center">
-              {activeQueueItem.artworkUrl ? (
-                <img
-                  src={activeQueueItem.artworkUrl}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-indigo-900 via-blue-900 to-gray-900 p-6 text-center">
-                  <Music2 size={64} className="text-blue-400/80 mb-3" />
-                  {musicalNumber && (
-                    <span className="text-4xl font-extrabold tracking-tight text-white/90">
-                      {musicalNumber}
-                    </span>
-                  )}
-                  <span className="mt-2 text-sm font-medium text-gray-300 max-w-[200px] truncate">
-                    {subtitle}
-                  </span>
+        <section className="space-y-5">
+          {/* Typographic & Live-Lyric Song Stage (zero fake album art box) */}
+          <div className="player-hero-surface relative overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] px-5 py-5 min-h-[188px] flex flex-col justify-between shadow-[var(--player-shadow-elevated)]">
+            <div className="flex items-center justify-between gap-3 text-[11px] font-bold uppercase tracking-[0.14em]">
+              <span className="text-[var(--player-accent-text)]">
+                {lyricPreview ? lyricPreview.eyebrow : (musicalNumber ? `No. ${musicalNumber}` : 'Choir Practice')}
+              </span>
+              {totalDurationLabel ? (
+                <span className="font-mono text-[var(--player-text-muted)] tabular-nums">
+                  {totalDurationLabel}
+                </span>
+              ) : null}
+            </div>
+
+            {lyricPreview ? (
+              <div className="my-4 space-y-2 border-l-2 border-[var(--player-accent)] pl-3.5">
+                <p
+                  className={`text-lg font-bold leading-snug line-clamp-3 ${
+                    lyricPreview.mode === 'synced'
+                      ? 'text-[var(--player-text-primary)]'
+                      : 'text-[var(--player-lyric-upcoming)]'
+                  }`}
+                >
+                  {lyricPreview.primary}
+                </p>
+                {lyricPreview.secondary ? (
+                  <p className="text-xs font-medium leading-snug text-[var(--player-lyric-past)] line-clamp-2">
+                    {lyricPreview.secondary}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <div className="my-4 space-y-2.5">
+                <div className="text-4xl font-extrabold tracking-tight text-[var(--player-text-primary)] tabular-nums">
+                  {musicalNumber || 'APOLLO'}
                 </div>
-              )}
+                <div className="h-[2px] w-10 rounded-full bg-[var(--player-accent)]" aria-hidden="true" />
+                <div className="text-xs font-medium text-[var(--player-text-secondary)] truncate">
+                  {subtitle}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between text-[11px] font-medium text-[var(--player-text-muted)]">
+              <span>{focusLabel === '0 dB' ? 'Balanced Mix' : `Focus ${focusLabel}`}</span>
+              <span>
+                {formatPlaybackSpeed(playbackSpeed)}x · {formatPlaybackTranspose(playbackTranspose)}
+              </span>
             </div>
           </div>
 
           {/* Track Info */}
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white line-clamp-2">
+            <h1 className="text-2xl font-extrabold tracking-tight text-[var(--player-text-primary)] line-clamp-2">
+              {musicalNumber ? (
+                <span className="mr-2 font-mono text-lg font-semibold text-[var(--player-accent-text)] tabular-nums">
+                  {musicalNumber}
+                </span>
+              ) : null}
               {title}
             </h1>
-            <p className="mt-1 text-base font-medium text-gray-400 truncate">
+            <p className="mt-1 text-sm font-medium text-[var(--player-text-secondary)] truncate">
               {subtitle}
             </p>
           </div>
@@ -193,59 +342,69 @@ export function MobileNowPlayingModal({
             <input
               type="range"
               min="0"
-              max={Math.max(durationSec, 0.001)}
+              max={seekMax}
               step="0.01"
-              value={Math.min(currentTimeSec, durationSec || 0)}
+              value={seekVal}
               onPointerDown={beginTimelineScrub}
               onPointerUp={endTimelineScrub}
               onPointerCancel={endTimelineScrub}
               onChange={(e) => onSeek?.(Number(e.target.value))}
-              className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-white hover:h-2 transition-all block"
+              style={{ '--player-range-pct': `${seekPct}%` }}
+              className="player-range player-range-touch w-full cursor-pointer block"
               aria-label="Seek track position"
             />
-            <div className="flex justify-between text-xs font-medium text-gray-400 tabular-nums">
+            <div className="flex justify-between text-[11px] font-medium text-[var(--player-text-secondary)] tabular-nums">
               <span>{formatClock(currentTimeSec)}</span>
               <span>{formatClock(durationSec)}</span>
             </div>
           </div>
 
-          {/* Spotify Media Transport Controls */}
-          <div className="flex items-center justify-between px-2">
+          {/* Media Transport Controls */}
+          <div className="flex items-center justify-between px-1">
             {/* Shuffle */}
             <button
               type="button"
               onClick={onToggleShuffle}
-              className={`flex h-10 w-10 items-center justify-center transition-colors active:scale-90 ${
-                shuffleEnabled ? 'text-green-500' : 'text-gray-400 hover:text-white'
+              aria-pressed={shuffleEnabled}
+              className={`relative flex h-11 w-11 items-center justify-center rounded-full transition-colors active:scale-90 ${
+                shuffleEnabled
+                  ? 'text-[var(--player-accent-text)]'
+                  : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
               }`}
               aria-label={shuffleEnabled ? 'Shuffle enabled' : 'Shuffle disabled'}
             >
-              <Shuffle size={22} />
+              <Shuffle size={20} />
+              {shuffleEnabled ? (
+                <span
+                  aria-hidden="true"
+                  className="absolute bottom-1.5 h-1 w-1 rounded-full bg-[var(--player-accent)]"
+                />
+              ) : null}
             </button>
 
             {/* Previous */}
             <button
               type="button"
               onClick={onPrevious}
-              className="flex h-12 w-12 items-center justify-center text-white active:scale-90 transition-transform"
+              className="flex h-12 w-12 items-center justify-center text-[var(--player-text-primary)] hover:text-[var(--player-accent-text)] active:scale-90 transition-all"
               aria-label="Previous track"
             >
-              <SkipBack size={32} className="fill-current" />
+              <SkipBack size={30} className="fill-current" />
             </button>
 
-            {/* Big Circular White Play/Pause Button */}
+            {/* Primary Apollo Gold Play/Pause CTA */}
             <button
               type="button"
               onClick={onTogglePlay}
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-2xl active:scale-95 transition-transform hover:scale-105"
+              className="player-play-cta flex h-16 w-16 items-center justify-center rounded-full"
               aria-label={isPlaying ? 'Pause' : 'Play'}
             >
               {isRendering ? (
-                <Loader2 size={30} className="animate-spin text-black" />
+                <Loader2 size={28} className="animate-spin" />
               ) : isPlaying ? (
-                <Pause size={32} className="fill-black" />
+                <Pause size={30} className="fill-current" />
               ) : (
-                <Play size={32} className="fill-black translate-x-0.5" />
+                <Play size={30} className="fill-current translate-x-0.5" />
               )}
             </button>
 
@@ -253,213 +412,274 @@ export function MobileNowPlayingModal({
             <button
               type="button"
               onClick={onNext}
-              className="flex h-12 w-12 items-center justify-center text-white active:scale-90 transition-transform"
+              className="flex h-12 w-12 items-center justify-center text-[var(--player-text-primary)] hover:text-[var(--player-accent-text)] active:scale-90 transition-all"
               aria-label="Next track"
             >
-              <SkipForward size={32} className="fill-current" />
+              <SkipForward size={30} className="fill-current" />
             </button>
 
             {/* Loop Mode */}
             <button
               type="button"
               onClick={onCycleLoopMode}
-              className={`flex h-10 w-10 items-center justify-center transition-colors active:scale-90 ${
-                isLoopAll || isLoopOne ? 'text-green-500' : 'text-gray-400 hover:text-white'
+              className={`relative flex h-11 w-11 items-center justify-center rounded-full transition-colors active:scale-90 ${
+                isLoopAll || isLoopOne
+                  ? 'text-[var(--player-accent-text)]'
+                  : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
               }`}
               aria-label={`Loop mode: ${loopMode}`}
             >
-              {isLoopOne ? <Repeat1 size={22} /> : <Repeat size={22} />}
+              {isLoopOne ? <Repeat1 size={20} /> : <Repeat size={20} />}
+              {isLoopAll || isLoopOne ? (
+                <span
+                  aria-hidden="true"
+                  className="absolute bottom-1.5 h-1 w-1 rounded-full bg-[var(--player-accent)]"
+                />
+              ) : null}
             </button>
           </div>
 
-          {/* Scroll Down Hint */}
-          <div className="flex items-center justify-center gap-1.5 text-xs text-gray-500 pt-2">
-            <span>Scroll down for practice controls, lyrics & credits</span>
-            <ScrollDownIcon size={14} className="animate-bounce" />
+          {/* Interactive Section Anchor Bar */}
+          <div className="grid grid-cols-3 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => scrollToSection(practiceSectionRef)}
+              className="flex items-center justify-center gap-1.5 rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] py-2 text-xs font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-[0.98] transition-all"
+            >
+              <Sliders size={13} className="text-[var(--player-accent-text)]" />
+              <span>Practice</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollToSection(lyricsSectionRef)}
+              className="flex items-center justify-center gap-1.5 rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] py-2 text-xs font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-[0.98] transition-all"
+            >
+              <MicVocal size={13} className="text-[var(--player-accent-text)]" />
+              <span>Lyrics</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollToSection(creditsSectionRef)}
+              className="flex items-center justify-center gap-1.5 rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] py-2 text-xs font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-[0.98] transition-all"
+            >
+              <Info size={13} className="text-[var(--player-accent-text)]" />
+              <span>Credits</span>
+            </button>
           </div>
         </section>
 
         {/* ============================================================ */}
-        {/* 2. SCROLL SECTION: Practice & Sound Controls (Desktop-Style Sliders) */}
+        {/* 2. SCROLL SECTION: Choir Practice & Sound Controls           */}
         {/* ============================================================ */}
-        <section className="space-y-5 rounded-2xl bg-gray-900/90 border border-gray-800 p-5 shadow-xl">
-          <div className="flex items-center gap-2 border-b border-gray-800 pb-3">
-            <Sliders size={20} className="text-blue-400" />
-            <h2 className="text-base font-bold text-white">Choir Practice & Sound Controls</h2>
+        <section
+          ref={practiceSectionRef}
+          className="space-y-5 rounded-2xl bg-[var(--player-bg-surface)] border border-[var(--player-border-subtle)] p-5 scroll-mt-16"
+        >
+          <div className="flex items-center gap-2 border-b border-[var(--player-border-subtle)] pb-3">
+            <Sliders size={18} className="text-[var(--player-accent-text)]" />
+            <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--player-text-primary)]">
+              Choir Practice & Sound Controls
+            </h2>
           </div>
 
-          {/* 1. Practice Focus Slider (Desktop 5-step Snapping) */}
+          {/* 1. Practice Focus Slider (full 13-step desktop parity) */}
           <div className="space-y-2">
             <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-gray-300">Practice Focus</span>
-              <span className="text-blue-400 font-bold uppercase">
-                {focusLabels[practiceFocusControl] || 'Normal'}
+              <span className="text-[var(--player-text-secondary)]">Practice Focus</span>
+              <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
+                {focusLabel}
               </span>
             </div>
             <input
               type="range"
               min="0"
-              max="4"
+              max={focusSteps.length - 1}
               step="1"
-              value={practiceFocusControl}
+              value={clampedFocusIdx}
               onChange={(e) => onSetPracticeFocusControl?.(Number(e.target.value))}
-              className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              style={{ '--player-range-pct': `${focusPct}%` }}
+              className="player-range player-range-touch w-full cursor-pointer"
               aria-label="Practice Focus Slider"
             />
-            <div className="grid grid-cols-5 gap-1 pt-1">
-              {focusSteps.map((step, idx) => (
-                <button
-                  key={step}
-                  type="button"
-                  onClick={() => onSetPracticeFocusControl?.(idx)}
-                  className={`py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
-                    practiceFocusControl === idx
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'bg-gray-800/80 text-gray-400 hover:text-gray-200'
-                  }`}
-                >
-                  {step}
-                </button>
-              ))}
+            <div className="grid grid-cols-5 gap-1.5 pt-1">
+              {focusQuickOptions.map((opt) => {
+                const active = clampedFocusIdx === opt.idx;
+                return (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    onClick={() => onSetPracticeFocusControl?.(opt.idx)}
+                    aria-pressed={active}
+                    className={`py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
+                      active
+                        ? 'bg-[var(--player-accent-soft)] border-[var(--player-accent-border)] text-[var(--player-accent-text)]'
+                        : 'bg-[var(--player-bg-elevated)] border-[var(--player-border-subtle)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* 2. Transformed Pan Range Slider (0 - 200%) */}
-          <div className="space-y-2">
+          {/* 2. Pan Range Slider (0 - 200%) */}
+          <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
             <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-gray-300 flex items-center gap-1.5">
-                <ChevronsLeftRightEllipsis size={14} className="text-blue-400" />
+              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
+                <ChevronsLeftRightEllipsis size={14} className="text-[var(--player-accent-text)]" />
                 <span>Pan Range (Choir Width)</span>
               </span>
-              <span className="text-blue-400 font-bold">{practicePanRange}%</span>
+              <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
+                {clampedPan}%
+              </span>
             </div>
             <input
               type="range"
               min="0"
               max="200"
               step="5"
-              value={practicePanRange}
+              value={clampedPan}
               onChange={(e) => onSetPracticePanRange?.(Number(e.target.value))}
-              className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              style={{ '--player-range-pct': `${panPct}%` }}
+              className="player-range player-range-touch w-full cursor-pointer"
               aria-label="Practice Pan Range Slider"
             />
-            <div className="flex justify-between text-[10px] text-gray-500 font-medium">
-              <span>0% (Mono)</span>
-              <span>100% (Stereo)</span>
-              <span>200% (Wide)</span>
+            <div className="flex justify-between text-[10px] text-[var(--player-text-muted)] font-medium">
+              <span>0% Mono</span>
+              <span>100% Stereo</span>
+              <span>200% Wide</span>
             </div>
           </div>
 
           {/* 3. Playback Speed Slider & Quick Buttons */}
-          <div className="space-y-2">
+          <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
             <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-gray-300 flex items-center gap-1.5">
-                <Gauge size={14} className="text-amber-400" />
+              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
+                <Gauge size={14} className="text-[var(--player-accent-text)]" />
                 <span>Playback Speed</span>
               </span>
-              <span className="text-amber-400 font-bold">{playbackSpeed}x</span>
+              <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
+                {formatPlaybackSpeed(playbackSpeed)}x
+              </span>
             </div>
             <input
               type="range"
-              min="0.5"
-              max="1.5"
-              step="0.05"
-              value={playbackSpeed}
+              min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
+              max={PLAYBACK_SPEED_DRAG_BOUNDS.MAX}
+              step={PLAYBACK_SPEED_DRAG_BOUNDS.STEP}
+              value={clampedSpeed}
               onChange={(e) => onSetPlaybackSpeed?.(Number(e.target.value))}
-              className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-amber-400"
+              style={{ '--player-range-pct': `${speedPct}%` }}
+              className="player-range player-range-touch w-full cursor-pointer"
               aria-label="Playback Speed Slider"
             />
             <div className="grid grid-cols-5 gap-1.5 pt-1">
-              {speedQuickOptions.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => onSetPlaybackSpeed?.(s)}
-                  className={`py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    Math.abs(playbackSpeed - s) < 0.01
-                      ? 'bg-amber-500 text-black font-bold shadow-md'
-                      : 'bg-gray-800 text-gray-300 hover:text-white'
-                  }`}
-                >
-                  {s}x
-                </button>
-              ))}
+              {speedQuickOptions.map((s) => {
+                const active = Math.abs(Number(playbackSpeed) - s) < 0.01;
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => onSetPlaybackSpeed?.(s)}
+                    aria-pressed={active}
+                    className={`py-1.5 rounded-lg border text-xs font-semibold tabular-nums transition-colors ${
+                      active
+                        ? 'bg-[var(--player-accent)] border-[var(--player-accent)] text-[var(--player-accent-foreground)] font-bold'
+                        : 'bg-[var(--player-bg-elevated)] border-[var(--player-border-subtle)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                    }`}
+                  >
+                    {s}x
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           {/* 4. Pitch Transpose Slider */}
-          <div className="space-y-2">
+          <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
             <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-gray-300 flex items-center gap-1.5">
-                <Music size={14} className="text-purple-400" />
+              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
+                <Music size={14} className="text-[var(--player-accent-text)]" />
                 <span>Pitch Transposition</span>
               </span>
-              <span className="text-purple-400 font-bold">
-                {playbackTranspose === 0 ? 'Original (0 st)' : playbackTranspose > 0 ? `+${playbackTranspose} st` : `${playbackTranspose} st`}
+              <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
+                {formatPlaybackTranspose(playbackTranspose)}
               </span>
             </div>
             <input
               type="range"
-              min="-6"
-              max="6"
-              step="1"
-              value={playbackTranspose}
+              min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
+              max={PLAYBACK_TRANSPOSE_BOUNDS.MAX}
+              step={PLAYBACK_TRANSPOSE_BOUNDS.STEP}
+              value={clampedTranspose}
               onChange={(e) => onSetPlaybackTranspose?.(Number(e.target.value))}
-              className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+              style={{ '--player-range-pct': `${transposePct}%` }}
+              className="player-range player-range-touch w-full cursor-pointer"
               aria-label="Pitch Transpose Slider"
             />
-            <div className="flex justify-between items-center text-[11px] text-gray-400 pt-1">
-              <span>-6 st</span>
+            <div className="flex justify-between items-center text-[11px] text-[var(--player-text-muted)] pt-1 tabular-nums">
+              <span>{PLAYBACK_TRANSPOSE_BOUNDS.MIN} st</span>
               <button
                 type="button"
                 onClick={() => onSetPlaybackTranspose?.(0)}
-                className="px-2.5 py-1 rounded bg-gray-800 text-gray-300 hover:text-white active:scale-95 font-medium"
+                className="px-3 py-1 rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-95 font-semibold"
               >
                 Reset to Original
               </button>
-              <span>+6 st</span>
+              <span>+{PLAYBACK_TRANSPOSE_BOUNDS.MAX} st</span>
             </div>
           </div>
 
           {/* 5. Master Volume Slider with Mute */}
-          <div className="space-y-2">
+          <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
             <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-gray-300 flex items-center gap-1.5">
+              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={handleToggleMute}
-                  className="hover:text-white transition-colors"
+                  aria-label={isMuted || volume === 0 ? 'Unmute master volume' : 'Mute master volume'}
+                  className="hover:text-[var(--player-text-primary)] transition-colors"
                 >
-                  {isMuted || volume === 0 ? <VolumeX size={16} className="text-red-400" /> : <Volume2 size={16} className="text-gray-300" />}
+                  {isMuted || volume === 0 ? (
+                    <VolumeX size={16} className="text-[var(--player-danger)]" />
+                  ) : (
+                    <Volume2 size={16} className="text-[var(--player-text-secondary)]" />
+                  )}
                 </button>
                 <span>Master Volume</span>
               </span>
-              <span className="text-gray-200 font-bold">{isMuted ? 'Muted' : `${volume}%`}</span>
+              <span className="text-[var(--player-text-primary)] font-bold tabular-nums">
+                {isMuted ? 'Muted' : `${volume}%`}
+              </span>
             </div>
             <input
               type="range"
               min="0"
               max="100"
               step="1"
-              value={isMuted ? 0 : volume}
+              value={effectiveVolume}
               onChange={(e) => {
                 setIsMuted(false);
                 onSetVolume?.(Number(e.target.value));
               }}
-              className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-white"
+              style={{ '--player-range-pct': `${effectiveVolume}%` }}
+              className="player-range player-range-touch w-full cursor-pointer"
               aria-label="Master Volume Slider"
             />
           </div>
 
           {/* 6. Metronome Click Volume (if snapshot has metronome) */}
           {hasRealtimeMetronome && (
-            <div className="space-y-2 border-t border-gray-800 pt-3">
+            <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
               <div className="flex justify-between items-center text-xs font-semibold">
-                <span className="text-gray-300 flex items-center gap-1.5">
-                  <Metronome size={14} className="text-teal-400" />
+                <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
+                  <Metronome size={14} className="text-[var(--player-accent-text)]" />
                   <span>Metronome Click</span>
                 </span>
-                <span className="text-teal-400 font-bold">{metronomeVolume}%</span>
+                <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
+                  {metronomeVolume}%
+                </span>
               </div>
               <input
                 type="range"
@@ -468,7 +688,8 @@ export function MobileNowPlayingModal({
                 step="1"
                 value={metronomeVolume}
                 onChange={(e) => onSetMetronomeVolume?.(Number(e.target.value))}
-                className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-teal-400"
+                style={{ '--player-range-pct': `${metronomeVolume}%` }}
+                className="player-range player-range-touch w-full cursor-pointer"
                 aria-label="Metronome Volume Slider"
               />
             </div>
@@ -476,57 +697,70 @@ export function MobileNowPlayingModal({
         </section>
 
         {/* ============================================================ */}
-        {/* 3. SCROLL SECTION: Synchronized Lyrics */}
+        {/* 3. SCROLL SECTION: Synchronized Lyrics                       */}
         {/* ============================================================ */}
-        <section className="space-y-3 rounded-2xl bg-gradient-to-br from-amber-950/30 to-gray-900 border border-amber-900/40 p-5 shadow-xl">
-          <div className="flex items-center gap-2 border-b border-amber-900/40 pb-3">
-            <MicVocal size={20} className="text-amber-400" />
-            <h2 className="text-base font-bold text-white">Lyrics</h2>
+        <section
+          ref={lyricsSectionRef}
+          className="space-y-3 rounded-2xl bg-[var(--player-bg-surface)] border border-[var(--player-border-subtle)] p-5 scroll-mt-16"
+        >
+          <div className="flex items-center gap-2 border-b border-[var(--player-border-subtle)] pb-3">
+            <MicVocal size={18} className="text-[var(--player-accent-text)]" />
+            <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--player-text-primary)]">
+              Lyrics
+            </h2>
           </div>
 
           {hasCurrentLyrics ? (
-            <div className="min-h-[220px] max-h-[380px] overflow-y-auto rounded-xl bg-black/40 p-3">
+            <div className="h-[380px] flex flex-col overflow-hidden rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)]">
               <PlayerLyricsView
                 lyrics={currentPlaybackLyrics}
                 currentTimeMs={currentTimeSec * 1000}
                 durationMs={durationSec * 1000}
                 songTitle={title}
-                onSeek={(ms) => onSeek?.(ms / 1000)}
+                showHeader={false}
+                onSeek={onSeek}
               />
             </div>
           ) : (
-            <div className="py-8 text-center text-sm text-gray-500">
+            <div className="py-8 text-center text-sm text-[var(--player-text-muted)]">
               No lyrics available for this song.
             </div>
           )}
         </section>
 
         {/* ============================================================ */}
-        {/* 4. SCROLL SECTION: Credits */}
+        {/* 4. SCROLL SECTION: Credits                                   */}
         {/* ============================================================ */}
-        <section className="space-y-4 rounded-2xl bg-gray-900/90 border border-gray-800 p-5 shadow-xl pb-10">
-          <div className="flex items-center gap-2 border-b border-gray-800 pb-3">
-            <Info size={20} className="text-purple-400" />
-            <h2 className="text-base font-bold text-white">Credits</h2>
+        <section
+          ref={creditsSectionRef}
+          className="space-y-4 rounded-2xl bg-[var(--player-bg-surface)] border border-[var(--player-border-subtle)] p-5 scroll-mt-16"
+        >
+          <div className="flex items-center gap-2 border-b border-[var(--player-border-subtle)] pb-3">
+            <Info size={18} className="text-[var(--player-accent-text)]" />
+            <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--player-text-primary)]">
+              Credits
+            </h2>
           </div>
 
           {creditsState.status === 'loading' ? (
-            <div className="py-8 flex items-center justify-center gap-2 text-sm text-gray-400">
-              <Loader2 size={18} className="animate-spin text-purple-400" />
+            <div className="py-8 flex items-center justify-center gap-2 text-sm text-[var(--player-text-secondary)]">
+              <Loader2 size={18} className="animate-spin text-[var(--player-accent-text)]" />
               <span>Loading credits...</span>
             </div>
           ) : creditsState.error ? (
-            <div className="rounded-lg border border-red-700/50 bg-red-950/40 p-3 text-xs text-red-200">
+            <div className="rounded-lg border border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] p-3 text-xs text-[var(--player-danger)]">
               {creditsState.error}
             </div>
           ) : creditsState.data ? (
             <div className="space-y-4 text-sm">
               {/* Show Header */}
               {creditsState.data.show ? (
-                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3.5 space-y-1">
-                  <div className="font-bold text-white">{creditsState.data.show.name}</div>
+                <div className="rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] p-3.5 space-y-1">
+                  <div className="font-bold text-[var(--player-text-primary)]">
+                    {creditsState.data.show.name}
+                  </div>
                   {creditsState.data.show.description && (
-                    <p className="text-xs text-gray-300 leading-relaxed">
+                    <p className="text-xs text-[var(--player-text-secondary)] leading-relaxed">
                       {creditsState.data.show.description}
                     </p>
                   )}
@@ -536,14 +770,18 @@ export function MobileNowPlayingModal({
               {/* Composition & Lyrics */}
               {creditsState.data.credits?.compositionLyrics?.length ? (
                 <div className="space-y-1.5">
-                  <div className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                     Composition & Lyrics
                   </div>
-                  <div className="divide-y divide-gray-800/80 rounded-lg bg-gray-950/40 px-3">
+                  <div className="divide-y divide-[var(--player-border-subtle)] rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3">
                     {creditsState.data.credits.compositionLyrics.map((item, idx) => (
-                      <div key={idx} className="py-2 flex justify-between items-center">
-                        <span className="font-medium text-gray-200">{item.artist?.name || item.name}</span>
-                        <span className="text-xs text-gray-400">{item.role || 'Writer'}</span>
+                      <div key={idx} className="py-2.5 flex justify-between items-center gap-3">
+                        <span className="font-medium text-[var(--player-text-primary)]">
+                          {item.artist?.name || item.name}
+                        </span>
+                        <span className="text-xs text-[var(--player-text-secondary)]">
+                          {item.role || 'Writer'}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -553,14 +791,18 @@ export function MobileNowPlayingModal({
               {/* Performers */}
               {creditsState.data.credits?.performers?.length ? (
                 <div className="space-y-1.5">
-                  <div className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                     Performers & Choir
                   </div>
-                  <div className="divide-y divide-gray-800/80 rounded-lg bg-gray-950/40 px-3 max-h-60 overflow-y-auto">
+                  <div className="divide-y divide-[var(--player-border-subtle)] rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3 max-h-60 overflow-y-auto">
                     {creditsState.data.credits.performers.map((item, idx) => (
-                      <div key={idx} className="py-2 flex justify-between items-center">
-                        <span className="font-medium text-gray-200">{item.artist?.name || item.name}</span>
-                        <span className="text-xs text-blue-400 font-mono">{item.role || 'Performer'}</span>
+                      <div key={idx} className="py-2.5 flex justify-between items-center gap-3">
+                        <span className="font-medium text-[var(--player-text-primary)]">
+                          {item.artist?.name || item.name}
+                        </span>
+                        <span className="text-xs text-[var(--player-accent-text)] font-mono">
+                          {item.role || 'Performer'}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -570,14 +812,18 @@ export function MobileNowPlayingModal({
               {/* Production */}
               {creditsState.data.credits?.productionEngineering?.length ? (
                 <div className="space-y-1.5">
-                  <div className="text-xs font-bold uppercase tracking-wider text-gray-500">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                     Production & Engineering
                   </div>
-                  <div className="divide-y divide-gray-800/80 rounded-lg bg-gray-950/40 px-3">
+                  <div className="divide-y divide-[var(--player-border-subtle)] rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3">
                     {creditsState.data.credits.productionEngineering.map((item, idx) => (
-                      <div key={idx} className="py-2 flex justify-between items-center">
-                        <span className="font-medium text-gray-200">{item.artist?.name || item.name}</span>
-                        <span className="text-xs text-gray-400">{item.role || 'Engineer'}</span>
+                      <div key={idx} className="py-2.5 flex justify-between items-center gap-3">
+                        <span className="font-medium text-[var(--player-text-primary)]">
+                          {item.artist?.name || item.name}
+                        </span>
+                        <span className="text-xs text-[var(--player-text-secondary)]">
+                          {item.role || 'Engineer'}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -585,7 +831,7 @@ export function MobileNowPlayingModal({
               ) : null}
             </div>
           ) : (
-            <div className="py-6 text-center text-xs text-gray-500">
+            <div className="py-6 text-center text-xs text-[var(--player-text-muted)]">
               No credits recorded for this project.
             </div>
           )}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ChevronLeft,
   Clapperboard,
   Folder,
   ListMusic,
@@ -34,7 +35,7 @@ const TYPE_ICONS = {
   query: Search,
 };
 
-function SearchTypeIcon({ type, size = 16, className = 'text-gray-400' }) {
+function SearchTypeIcon({ type, size = 18, className = 'text-[var(--player-text-muted)]' }) {
   const Icon = TYPE_ICONS[type] || Search;
   return <Icon size={size} className={className} />;
 }
@@ -48,28 +49,30 @@ function ResultRow({
 }) {
   return (
     <div
-      className={`group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-3 py-2 text-left transition-colors ${
-        active ? 'bg-white/10' : 'hover:bg-white/5'
+      className={`group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
+        active ? 'bg-[var(--player-bg-elevated)]' : 'hover:bg-[var(--player-hover)]'
       }`}
     >
       <button
         type="button"
         onClick={() => onSelect?.(item)}
-        className="col-span-2 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 text-left"
+        className="col-span-2 grid min-w-0 grid-cols-[32px_minmax(0,1fr)] items-center gap-3 text-left"
       >
-        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gray-900 text-gray-300">
-          <SearchTypeIcon type={item.type} size={18} />
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+          <SearchTypeIcon type={item.type} size={18} className="text-[var(--player-text-secondary)]" />
         </div>
         <div className="min-w-0">
-          <div className="truncate text-sm text-white">{item.title}</div>
-          <div className="truncate text-[11px] text-gray-400">
+          <div className="truncate text-sm font-medium text-[var(--player-text-primary)]">{item.title}</div>
+          <div className="truncate text-xs text-[var(--player-text-secondary)]">
             {showType ? [PLAYER_SEARCH_TYPE_LABELS[item.type] || item.type, item.subtitle].filter(Boolean).join(' · ') : item.subtitle}
           </div>
         </div>
       </button>
       <div className="flex items-center gap-3">
         {item.payload?.durationMs ? (
-          <span className="text-xs tabular-nums text-gray-500">{formatDurationMs(item.payload.durationMs)}</span>
+          <span className="text-xs tabular-nums text-[var(--player-text-muted)]">
+            {formatDurationMs(item.payload.durationMs)}
+          </span>
         ) : null}
         {onPlay && (item.type === 'song' || item.type === 'mix') ? (
           <button
@@ -78,10 +81,10 @@ function ResultRow({
               event.stopPropagation();
               onPlay(item);
             }}
-            className="rounded p-1 text-gray-400 opacity-0 hover:text-white group-hover:opacity-100"
+            className="rounded-full p-1.5 text-[var(--player-text-secondary)] opacity-0 hover:bg-[var(--player-pressed)] hover:text-[var(--player-accent-text)] group-hover:opacity-100 focus:opacity-100 transition-all"
             title={`Play ${item.title}`}
           >
-            <Play size={14} />
+            <Play size={14} className="fill-current" />
           </button>
         ) : null}
       </div>
@@ -174,8 +177,8 @@ export function PlayerSearchBar({
 
   return (
     <div ref={rootRef} className="relative w-full min-w-0">
-      <div className="relative flex h-9 min-w-0 items-center">
-        <Search size={15} className="pointer-events-none absolute left-3 text-gray-500" />
+      <div className="relative flex h-10 min-w-0 items-center">
+        <Search size={16} className="pointer-events-none absolute left-3.5 text-[var(--player-text-muted)]" />
         <input
           ref={inputRef}
           type="text"
@@ -192,14 +195,14 @@ export function PlayerSearchBar({
             onFocus?.();
           }}
           onKeyDown={handleKeyDown}
-          className="h-9 w-full min-w-0 box-border rounded-md border border-gray-700 bg-gray-900 py-0 pl-9 pr-9 text-sm leading-none text-gray-100 placeholder:text-gray-500 focus:border-gray-500 focus:outline-none"
+          className="h-10 w-full min-w-0 box-border rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] py-0 pl-10 pr-10 text-sm leading-none text-[var(--player-text-primary)] placeholder:text-[var(--player-text-muted)] transition-colors focus:border-[var(--player-accent-border)] focus:outline-none focus:ring-1 focus:ring-[var(--player-focus-ring)]"
         />
         {loading ? (
-          <Loader2 size={14} className="absolute right-3 animate-spin text-gray-500" />
+          <Loader2 size={14} className="absolute right-3.5 animate-spin text-[var(--player-accent-text)]" />
         ) : value ? (
           <button
             type="button"
-            className="absolute right-2 rounded p-1 text-gray-500 hover:text-white"
+            className="absolute right-2.5 rounded-full p-1 text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)] transition-colors"
             onClick={() => {
               onChange('');
               onSubmit?.('');
@@ -213,7 +216,7 @@ export function PlayerSearchBar({
         ) : null}
       </div>
       {showMenu ? (
-        <div className="absolute left-0 right-0 z-50 mt-1 overflow-hidden rounded-xl border border-gray-700 bg-gray-900 py-1 shadow-2xl">
+        <div className="player-menu absolute left-0 right-0 z-50 mt-1.5 overflow-hidden rounded-xl py-1">
           {suggestions.map((suggestion, index) => (
             <button
               key={suggestion.id}
@@ -221,20 +224,26 @@ export function PlayerSearchBar({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => applySuggestion(suggestion)}
               onMouseEnter={() => setActiveIndex(index)}
-              className={`flex w-full min-w-0 items-center gap-3 px-3 py-2 text-left ${
-                index === activeIndex ? 'bg-white/10 text-white' : 'text-gray-200 hover:bg-white/5'
+              className={`flex w-full min-w-0 items-center gap-3 px-3.5 py-2.5 text-left transition-colors ${
+                index === activeIndex
+                  ? 'bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)]'
+                  : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
               }`}
             >
-              <SearchTypeIcon type={suggestion.type} />
+              <SearchTypeIcon
+                type={suggestion.type}
+                size={16}
+                className={index === activeIndex ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)]'}
+              />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm">
+                <div className="truncate text-sm font-medium text-[var(--player-text-primary)]">
                   {suggestion.type === 'query' ? `Search for "${suggestion.title}"` : suggestion.title}
                 </div>
                 {suggestion.type !== 'query' && suggestion.subtitle ? (
-                  <div className="truncate text-[11px] text-gray-400">{suggestion.subtitle}</div>
+                  <div className="truncate text-xs text-[var(--player-text-secondary)]">{suggestion.subtitle}</div>
                 ) : null}
               </div>
-              <span className="shrink-0 text-[11px] uppercase tracking-wide text-gray-500">
+              <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-[var(--player-text-muted)]">
                 {PLAYER_SEARCH_TYPE_LABELS[suggestion.type] || suggestion.subtitle || ''}
               </span>
               {(suggestion.type === 'song' || suggestion.type === 'mix') && onPlay ? (
@@ -246,9 +255,9 @@ export function PlayerSearchBar({
                     setOpen(false);
                     onPlay(suggestion);
                   }}
-                  className="rounded p-1 text-gray-400 hover:text-white"
+                  className="rounded-full p-1 text-[var(--player-text-secondary)] hover:text-[var(--player-accent-text)]"
                 >
-                  <Play size={13} />
+                  <Play size={13} className="fill-current" />
                 </span>
               ) : null}
             </button>
@@ -263,10 +272,14 @@ function SearchSection({ title, items, onShowAll, onSelect, onPlay }) {
   if (!items?.length) return null;
   return (
     <section className="space-y-2">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-base font-semibold text-white">{title}</h3>
+      <div className="flex items-center justify-between gap-3 px-1">
+        <h3 className="text-base font-bold tracking-tight text-[var(--player-text-primary)]">{title}</h3>
         {onShowAll && items.length > 4 ? (
-          <button type="button" onClick={onShowAll} className="text-xs font-semibold text-gray-400 hover:text-white">
+          <button
+            type="button"
+            onClick={onShowAll}
+            className="text-xs font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-accent-text)] transition-colors"
+          >
             Show all
           </button>
         ) : null}
@@ -285,30 +298,30 @@ function CreditDetail({ credit, songsByProjectId, onBack, onSelect, onPlay }) {
   const involvements = payload?.involvements || [];
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-start gap-4 border-b border-gray-700 px-5 py-4">
+      <div className="player-hero-surface border-b border-[var(--player-border-subtle)] px-6 py-5">
         <button
           type="button"
           onClick={onBack}
-          className="rounded-md border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
+          className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 -ml-2.5 text-xs font-semibold text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
         >
-          Back
+          <ChevronLeft size={15} />
+          <span>Back</span>
         </button>
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gray-900">
-          <User size={28} className="text-gray-400" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-xs uppercase tracking-[0.16em] text-gray-500">
+        <div className="mt-3 min-w-0">
+          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
             {payload?.artistType === 'group' ? 'Group' : 'Credits'}
           </div>
-          <h2 className="truncate text-2xl font-semibold">{payload?.name}</h2>
+          <h2 className="mt-1 truncate text-3xl font-extrabold tracking-tight text-[var(--player-text-primary)]">
+            {payload?.name}
+          </h2>
           {payload?.groupType ? (
-            <div className="text-sm text-gray-400">{payload.groupType}</div>
+            <div className="mt-1 text-sm text-[var(--player-text-secondary)]">{payload.groupType}</div>
           ) : null}
         </div>
       </div>
       <div className="flex-1 overflow-auto px-5 py-4">
         {!involvements.length ? (
-          <div className="text-sm text-gray-500">No accessible credits for this person.</div>
+          <div className="text-sm text-[var(--player-text-muted)]">No accessible credits for this person.</div>
         ) : (
           <div className="space-y-1">
             {involvements.map((row, index) => {
@@ -325,7 +338,7 @@ function CreditDetail({ credit, songsByProjectId, onBack, onSelect, onPlay }) {
               return (
                 <div
                   key={`${row.roleKey}:${row.projectId}:${row.showId}:${row.contributionLabel}:${index}`}
-                  className="grid grid-cols-[minmax(0,1fr)_160px] items-center gap-3 rounded-md px-2 py-2 hover:bg-white/5"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-[var(--player-hover)] transition-colors"
                 >
                   <button
                     type="button"
@@ -333,8 +346,8 @@ function CreditDetail({ credit, songsByProjectId, onBack, onSelect, onPlay }) {
                     onClick={() => item && onSelect(item)}
                     disabled={!item}
                   >
-                    <div className="truncate text-sm text-white">{title}</div>
-                    <div className="truncate text-[11px] text-gray-400">
+                    <div className="truncate text-sm font-medium text-[var(--player-text-primary)]">{title}</div>
+                    <div className="truncate text-xs text-[var(--player-text-secondary)]">
                       {[row.roleLabel, row.contributionLabel, row.showName].filter(Boolean).join(' · ')}
                     </div>
                   </button>
@@ -342,10 +355,10 @@ function CreditDetail({ credit, songsByProjectId, onBack, onSelect, onPlay }) {
                     <button
                       type="button"
                       onClick={() => onPlay?.(song)}
-                      className="justify-self-end rounded p-1 text-gray-400 hover:text-white"
+                      className="justify-self-end rounded-full p-1.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-pressed)] hover:text-[var(--player-accent-text)] transition-colors"
                       title={`Play ${song.title}`}
                     >
-                      <Play size={14} />
+                      <Play size={14} className="fill-current" />
                     </button>
                   ) : null}
                 </div>
@@ -426,12 +439,14 @@ export function PlayerSearchResults({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-gray-700 px-4 py-3">
-        <h2 className="text-sm font-semibold text-white">Search</h2>
-        <p className="mt-0.5 truncate text-xs text-gray-400">
+      <div className="shrink-0 border-b border-[var(--player-border-subtle)] px-5 py-4">
+        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
+          Search
+        </div>
+        <p className="mt-1 truncate text-sm text-[var(--player-text-secondary)]">
           {query ? `Results for “${query}”` : 'Type a show, song, mix, playlist, folder, or person'}
         </p>
-        <div className="mt-3 flex min-w-0 gap-2 overflow-x-auto pb-1">
+        <div className="mt-3 flex min-w-0 gap-2 overflow-x-auto scrollbar-hidden pb-0.5">
           {PLAYER_SEARCH_TYPE_TABS.map((tab) => {
             const count = tab.id === PLAYER_SEARCH_TYPES.ALL ? (results?.total || 0) : counts[tab.id];
             const active = activeType === tab.id;
@@ -439,9 +454,13 @@ export function PlayerSearchResults({
               <button
                 key={tab.id}
                 type="button"
+                data-active={active ? 'true' : 'false'}
+                aria-pressed={active}
                 onClick={() => onTypeChange?.(tab.id)}
-                className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                  active ? 'bg-white text-gray-900' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+                className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  active
+                    ? 'bg-[var(--player-pill-active-bg)] text-[var(--player-pill-active-fg)]'
+                    : 'border border-[var(--player-border-subtle)] bg-[var(--player-pill-bg)] text-[var(--player-pill-fg)] hover:text-[var(--player-text-primary)]'
                 }`}
               >
                 {tab.label}
@@ -451,29 +470,46 @@ export function PlayerSearchResults({
           })}
         </div>
       </div>
-      <div className="flex-1 overflow-auto px-4 py-4">
+      <div className="flex-1 overflow-auto px-5 py-4">
         {!query ? (
-          <div className="text-sm text-gray-500">Start typing to search your library.</div>
+          <div className="py-8 text-sm text-[var(--player-text-muted)]">Start typing to search your library.</div>
         ) : !visible.total ? (
-          <div className="text-sm text-gray-500">No results found.</div>
+          <div className="py-8 text-sm text-[var(--player-text-muted)]">No results found.</div>
         ) : activeType === PLAYER_SEARCH_TYPES.ALL ? (
           <div className="space-y-6">
             {visible.topResult ? (
               <section className="space-y-2">
-                <h3 className="text-base font-semibold text-white">Top result</h3>
-                <button
-                  type="button"
-                  onClick={() => handleSelect(visible.topResult)}
-                  className="w-full max-w-md rounded-xl bg-gray-900/80 p-4 text-left hover:bg-gray-900"
-                >
-                  <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-lg bg-gray-800">
-                    <SearchTypeIcon type={visible.topResult.type} size={32} className="text-gray-300" />
-                  </div>
-                  <div className="truncate text-2xl font-semibold">{visible.topResult.title}</div>
-                  <div className="mt-1 truncate text-sm text-gray-400">
-                    {[PLAYER_SEARCH_TYPE_LABELS[visible.topResult.type], visible.topResult.subtitle].filter(Boolean).join(' · ')}
-                  </div>
-                </button>
+                <h3 className="text-base font-bold tracking-tight text-[var(--player-text-primary)]">Top result</h3>
+                <div className="player-hero-surface flex w-full max-w-lg items-center justify-between gap-4 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] p-5 transition-colors hover:border-[var(--player-accent-border)]">
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(visible.topResult)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
+                      {PLAYER_SEARCH_TYPE_LABELS[visible.topResult.type] || visible.topResult.type}
+                    </div>
+                    <div className="mt-1 truncate text-2xl font-extrabold tracking-tight text-[var(--player-text-primary)]">
+                      {visible.topResult.title}
+                    </div>
+                    {visible.topResult.subtitle ? (
+                      <div className="mt-1 truncate text-sm text-[var(--player-text-secondary)]">
+                        {visible.topResult.subtitle}
+                      </div>
+                    ) : null}
+                  </button>
+                  {(visible.topResult.type === 'song' || visible.topResult.type === 'mix') && onPlay ? (
+                    <button
+                      type="button"
+                      onClick={() => onPlay(visible.topResult)}
+                      className="player-play-cta flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+                      title={`Play ${visible.topResult.title}`}
+                      aria-label={`Play ${visible.topResult.title}`}
+                    >
+                      <Play size={18} className="fill-current translate-x-0.5" />
+                    </button>
+                  ) : null}
+                </div>
               </section>
             ) : null}
             <SearchSection title="Songs" items={results.byType.songs} onShowAll={() => onTypeChange?.(PLAYER_SEARCH_TYPES.SONGS)} onSelect={handleSelect} onPlay={onPlay} />

@@ -189,7 +189,7 @@ describe('PlayerLibrarySidebar', () => {
       button.textContent.includes('Warmup')
     ));
     expect(expanded).toBeTruthy();
-    expect(expanded.className).toContain('hover:bg-gray-700');
+    expect(expanded.className).toContain('player-library-row');
     expect(expanded.className).toContain('w-full');
     act(() => {
       expanded.click();
@@ -202,7 +202,7 @@ describe('PlayerLibrarySidebar', () => {
     flushToggleAnimation();
     const minimized = view.container.querySelector('button[aria-label="Warmup (Playlist)"]');
     expect(minimized).toBeTruthy();
-    expect(minimized.className).toContain('hover:bg-gray-700');
+    expect(minimized.className).toContain('player-library-row');
     expect(minimized.className).toContain('w-full');
     act(() => {
       minimized.click();
@@ -251,7 +251,7 @@ describe('PlayerLibrarySidebar', () => {
       />
     );
 
-    const headerContainer = view.container.querySelector('div.border-b.border-gray-700');
+    const headerContainer = view.container.querySelector('div.border-b');
     expect(headerContainer.className).toContain('pl-[15px]');
 
     const collapseBtn = view.container.querySelector('button[aria-label="Collapse Your Library"]');
@@ -262,7 +262,7 @@ describe('PlayerLibrarySidebar', () => {
     });
     flushToggleAnimation();
 
-    const minimizedContainer = view.container.querySelector('div.border-b.border-gray-700');
+    const minimizedContainer = view.container.querySelector('div.border-b');
     expect(minimizedContainer.className).toContain('justify-center');
 
     const expandBtn = view.container.querySelector('button[aria-label="Expand Your Library"]');

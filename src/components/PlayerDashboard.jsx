@@ -24,6 +24,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { BrandWordmark } from './BrandLogo';
+import '../styles/player-theme.css';
 import { PlayerSearchBar, PlayerSearchResults, usePlayerSearchResults } from './PlayerSearch';
 import { PlayerLibrarySidebar } from './PlayerLibrarySidebar';
 import { PlayerControlsSidebar } from './PlayerControlsSidebar';
@@ -335,6 +336,19 @@ function getPlayerPlayOptions(playback = {}, extra = {}) {
 }
 
 
+function formatCollectionTotalDuration(items = []) {
+  const totalMs = (items || []).reduce((sum, item) => {
+    const ms = Number(item?.durationMs ?? item?.mix?.durationMs ?? 0);
+    return Number.isFinite(ms) && ms > 0 ? sum + ms : sum;
+  }, 0);
+  if (totalMs <= 0) return '';
+  const totalMins = Math.round(totalMs / 60000);
+  if (totalMins < 1) {
+    return `${Math.max(1, Math.round(totalMs / 1000))} sec`;
+  }
+  return `${totalMins} min`;
+}
+
 function CreditsDialog({ state, onClose }) {
   if (!state) return null;
   const data = state.data || null;
@@ -343,28 +357,28 @@ function CreditsDialog({ state, onClose }) {
       {artists.map((artist) => (
         <span
           key={`${artist.type}:${artist.id}`}
-          className="rounded-full bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-100"
+          className="rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-popover)] px-2.5 py-1 text-xs font-medium text-[var(--player-text-primary)]"
           title={artist.description || undefined}
         >
           {artist.name}
         </span>
       ))}
-      {!artists.length ? <span className="text-sm text-gray-500">-</span> : null}
+      {!artists.length ? <span className="text-sm text-[var(--player-text-muted)]">-</span> : null}
     </div>
   );
   const renderCategory = (title, rows = []) => (
     <section className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{title}</h3>
+      <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">{title}</h3>
       {!rows.length ? (
-        <div className="text-sm text-gray-500">No credits.</div>
+        <div className="text-sm text-[var(--player-text-muted)]">No credits.</div>
       ) : (
         <div className="space-y-2">
           {rows.map((row) => (
             <div
               key={`${title}:${row.roleKey || row.partName}`}
-              className="grid gap-2 rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-2 sm:grid-cols-[150px,1fr]"
+              className="grid gap-2 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-3.5 py-2.5 sm:grid-cols-[150px,1fr]"
             >
-              <div className="text-sm font-medium text-gray-300">{row.roleLabel || row.partName}</div>
+              <div className="text-sm font-medium text-[var(--player-text-secondary)]">{row.roleLabel || row.partName}</div>
               {renderArtists(row.artists)}
             </div>
           ))}
@@ -378,13 +392,13 @@ function CreditsDialog({ state, onClose }) {
     return (
       <div
         key={`${nested ? 'member' : 'performer'}:${artist?.type || 'unknown'}:${artist?.id || contributionLabel}`}
-        className={`${nested ? 'ml-5 border-l border-gray-800 pl-4' : 'rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-2'}`}
+        className={`${nested ? 'ml-5 border-l border-[var(--player-border-default)] pl-4' : 'rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-3.5 py-2.5'}`}
       >
-        <div className="text-sm font-semibold text-gray-100" title={artist?.description || undefined}>
+        <div className="text-sm font-semibold text-[var(--player-text-primary)]" title={artist?.description || undefined}>
           {artist?.name || '-'}
         </div>
         {contributionLabel ? (
-          <div className="mt-0.5 text-xs text-gray-400">{contributionLabel}</div>
+          <div className="mt-0.5 text-xs text-[var(--player-text-secondary)]">{contributionLabel}</div>
         ) : null}
         {row.members?.length ? (
           <div className="mt-2 space-y-2">
@@ -396,9 +410,9 @@ function CreditsDialog({ state, onClose }) {
   };
   const renderPerformers = (rows = []) => (
     <section className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Performers</h3>
+      <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">Performers</h3>
       {!rows.length ? (
-        <div className="text-sm text-gray-500">No credits.</div>
+        <div className="text-sm text-[var(--player-text-muted)]">No credits.</div>
       ) : (
         <div className="space-y-2">
           {rows.map((row) => renderPerformerRow(row))}
@@ -408,34 +422,38 @@ function CreditsDialog({ state, onClose }) {
   );
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4">
       <button type="button" className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close credits" />
-      <div className="relative max-h-[86vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 text-white shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-gray-800 px-5 py-4">
+      <div className="relative max-h-[86vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)]">
+        <div className="player-hero-surface flex items-start justify-between gap-3 border-b border-[var(--player-border-subtle)] px-6 py-4">
           <div>
-            <div className="text-lg font-semibold">Credits</div>
-            <div className="text-sm text-gray-400">{state.title || data?.project?.name || 'Musical number'}</div>
+            <div className="text-lg font-bold tracking-tight">Credits</div>
+            <div className="text-sm text-[var(--player-text-secondary)]">{state.title || data?.project?.name || 'Musical number'}</div>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3.5 py-1.5 text-xs font-semibold text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
+          >
             Close
           </button>
         </div>
-        <div className="max-h-[calc(86vh-76px)] overflow-auto px-5 py-4">
+        <div className="max-h-[calc(86vh-76px)] overflow-auto px-6 py-5">
           {state.status === 'loading' ? (
-            <div className="py-12 text-center text-sm text-gray-400">Loading credits...</div>
+            <div className="py-12 text-center text-sm text-[var(--player-text-secondary)]">Loading credits...</div>
           ) : state.error ? (
-            <div className="rounded-lg border border-red-700/50 bg-red-950/40 px-3 py-2 text-sm text-red-200">{state.error}</div>
+            <div className="rounded-xl border border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] px-3.5 py-2.5 text-sm text-[var(--player-danger)]">{state.error}</div>
           ) : (
             <div className="space-y-5">
               {data?.show ? (
-                <section className="rounded-xl border border-gray-800 bg-gray-950/40 px-4 py-3">
-                  <div className="text-sm font-semibold text-gray-100">{data.show.name}</div>
+                <section className="rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-4 py-3.5">
+                  <div className="text-sm font-bold text-[var(--player-text-primary)]">{data.show.name}</div>
                   {data.show.description ? (
-                    <p className="mt-2 text-sm leading-6 text-gray-300">{data.show.description}</p>
+                    <p className="mt-2 text-sm leading-6 text-[var(--player-text-secondary)]">{data.show.description}</p>
                   ) : null}
                   {data.show.producers?.length ? (
                     <div className="mt-3 grid gap-2 sm:grid-cols-[110px,1fr]">
-                      <div className="text-sm font-medium text-gray-400">Producer</div>
+                      <div className="text-sm font-medium text-[var(--player-text-muted)]">Producer</div>
                       {renderArtists(data.show.producers)}
                     </div>
                   ) : null}
@@ -2626,9 +2644,11 @@ function PlayerDashboard({
     : (loopMode === PLAYER_LOOP_MODES.ALL ? 'Loop all' : 'Loop one');
   const LoopIcon = loopMode === PLAYER_LOOP_MODES.ONE ? Repeat1 : Repeat;
   const loopButtonClass = loopMode === PLAYER_LOOP_MODES.OFF
-    ? 'text-gray-400'
-    : 'text-blue-300';
-  const shuffleButtonClass = shuffleEnabled ? 'text-blue-300' : 'text-gray-400';
+    ? 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+    : 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]';
+  const shuffleButtonClass = shuffleEnabled
+    ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+    : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]';
   const isMuted = volume <= 0;
   const isMetronomeMuted = metronomeVolume <= 0;
   const VolumeIcon = isMuted ? VolumeX : Volume2;
@@ -3641,7 +3661,10 @@ function PlayerDashboard({
 
   if (isMobile) {
     return (
-      <div className="h-full w-full overflow-hidden bg-gray-950 text-white">
+      <div
+        className="player-theme h-full w-full overflow-hidden bg-[var(--player-bg-canvas)] text-[var(--player-text-primary)]"
+        data-player-theme="dark-gold"
+      >
         <MobilePlayerView
           session={session}
           onLogout={onLogout}
@@ -3722,20 +3745,59 @@ function PlayerDashboard({
     );
   }
 
+  const isPlaylistCollectionView = Boolean(
+    selectedPlaylist && activeCollectionType === PLAYER_COLLECTION_TYPES.PLAYLIST
+  );
+  const currentShowCollectionId = activeTuttiShow ? `show:${activeTuttiShow.id}` : 'tutti';
+  const heroItemsForMeta = isPlaylistCollectionView
+    ? activePlaylistRows.filter((row) => !row.unavailable && row.mix)
+    : (activeTuttiMixes || []);
+  const heroDurationLabel = formatCollectionTotalDuration(heroItemsForMeta);
+  const heroCountNoun = isPlaylistCollectionView
+    ? (heroItemsForMeta.length === 1 ? 'mix' : 'mixes')
+    : (heroItemsForMeta.length === 1 ? 'number' : 'numbers');
+  const heroMetaText = [
+    `${heroItemsForMeta.length} ${heroCountNoun}`,
+    heroDurationLabel,
+  ].filter(Boolean).join(' · ');
+  const firstPlayablePlaylistRow = isPlaylistCollectionView
+    ? activePlaylistRows.find((row) => !row.unavailable && row.queueIndex >= 0 && row.mix) || null
+    : null;
+  const isHeroCollectionActive = isPlaylistCollectionView
+    ? (
+        activeCollectionType === PLAYER_COLLECTION_TYPES.PLAYLIST
+        && String(activeCollectionId) === String(selectedPlaylist?.id)
+        && activeIndex >= 0
+      )
+    : (
+        activeCollectionType === PLAYER_COLLECTION_TYPES.TUTTI
+        && String(activeCollectionId) === String(currentShowCollectionId)
+        && activeIndex >= 0
+      );
+  const isHeroPlaying = isHeroCollectionActive && isPlaying;
+  const heroCanPlay = isPlaylistCollectionView ? Boolean(firstPlayablePlaylistRow) : tuttiQueue.length > 0;
+  const timelinePct = durationSec > 0
+    ? Math.max(0, Math.min(100, (Math.min(currentTimeSec, durationSec) / durationSec) * 100))
+    : 0;
+  const masterVolumePct = Math.max(0, Math.min(100, Number(volume) || 0));
+
   return (
-    <div className="h-full flex flex-col bg-gray-900 text-white">
-      <div className="relative z-[100] bg-gray-800 border-b border-gray-700 px-4 py-3 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+    <div
+      className="player-theme h-full flex flex-col bg-[var(--player-bg-canvas)] text-[var(--player-text-primary)]"
+      data-player-theme="dark-gold"
+    >
+      <div className="relative z-[100] bg-[var(--player-bg-canvas)] px-4 h-16 shrink-0 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
         <button
           type="button"
           onClick={handleGoHome}
-          className="m-0 leading-none rounded-md hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="m-0 leading-none rounded-md hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--player-focus-ring)]"
           title="Home"
           aria-label="Home"
         >
-          <BrandWordmark className="h-9" />
+          <BrandWordmark className="h-8" />
         </button>
         <div className="flex min-w-0 justify-center overflow-hidden">
-          <div className="w-full min-w-0 max-w-md">
+          <div className="w-full min-w-0 max-w-lg">
             <PlayerSearchBar
               value={searchDraft}
               onChange={handleSearchInputChange}
@@ -3748,7 +3810,7 @@ function PlayerDashboard({
             />
           </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0">
           {!isStandaloneApp() ? (
             <a
               href="/download"
@@ -3758,7 +3820,7 @@ function PlayerDashboard({
                   navigate('/download');
                 }
               }}
-              className="inline-flex items-center gap-1.5 rounded-md bg-gray-700 hover:bg-gray-600 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:text-white transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] px-3.5 py-1.5 text-xs font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] transition-colors"
               title="Install App"
             >
               <Download size={13} />
@@ -3766,16 +3828,16 @@ function PlayerDashboard({
             </a>
           ) : null}
 
-          <div className="flex items-center rounded-lg bg-gray-700 p-0.5">
+          <div className="flex items-center rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-0.5">
             <button
               type="button"
               disabled
-              className="rounded-md px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white cursor-default"
+              className="rounded-full px-3.5 py-1.5 text-xs font-semibold bg-[var(--player-bg-active-segment)] text-[var(--player-accent-text)] cursor-default"
               title="Current mode"
             >Player</button>
             <button
               onClick={onSwitchToDawDashboard}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-gray-300 hover:bg-gray-600 hover:text-white transition-colors"
+              className="rounded-full px-3.5 py-1.5 text-xs font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] transition-colors"
               title="Switch to DAW mode"
             >
               DAW
@@ -3785,20 +3847,20 @@ function PlayerDashboard({
           <div className="relative" ref={profileMenuRef}>
             <button
               onClick={() => setProfileMenuOpen((previous) => !previous)}
-              className="bg-gray-700 hover:bg-gray-600 text-white rounded-lg p-2 flex items-center justify-center transition-colors"
+              className="h-9 w-9 rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)] flex items-center justify-center transition-colors"
               title="User menu"
             >
               <CircleUserRound size={18} />
             </button>
             {profileMenuOpen ? (
-              <div className="absolute right-0 top-full mt-2 min-w-32 rounded-md border border-gray-700 bg-gray-800 shadow-2xl z-[110] overflow-hidden">
+              <div className="player-menu absolute right-0 top-full mt-2 min-w-40 rounded-xl py-1 z-[110] overflow-hidden">
                 {onOpenProfile ? (
                   <button
                     onClick={() => {
                       setProfileMenuOpen(false);
                       onOpenProfile();
                     }}
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
+                    className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                   >
                     My Profile
                   </button>
@@ -3809,7 +3871,7 @@ function PlayerDashboard({
                     setProfileMenuOpen(false);
                     refreshAudioDevices();
                   }}
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                 >
                   Settings
                 </button>
@@ -3819,17 +3881,18 @@ function PlayerDashboard({
                       setProfileMenuOpen(false);
                       onOpenAdmin?.();
                     }}
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
+                    className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                   >
                     Admin
                   </button>
                 ) : null}
+                <div className="my-1 border-t border-[var(--player-border-subtle)]" />
                 <button
                   onClick={() => {
                     setProfileMenuOpen(false);
                     onLogout();
                   }}
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
                 >
                   Log out
                 </button>
@@ -3839,15 +3902,15 @@ function PlayerDashboard({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden px-4 pb-2 pt-4">
-        <div className="h-full flex flex-col gap-3">
+      <div className="flex-1 overflow-hidden px-3 pb-2 pt-0.5">
+        <div className="h-full flex flex-col gap-2.5">
           {showNoAccessBanner ? (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-900/20 px-4 py-3 text-sm text-amber-100">
+            <div className="rounded-xl border border-[var(--player-warning-border)] bg-[var(--player-warning-soft)] px-4 py-3 text-sm text-[var(--player-warning-text)]">
               {noAccessMessage}
             </div>
           ) : null}
 
-          <div className="flex-1 min-h-0 flex gap-3">
+          <div className="flex-1 min-h-0 flex gap-2.5">
             <PlayerLibrarySidebar
               folders={folders}
               playlists={playlists}
@@ -3868,23 +3931,26 @@ function PlayerDashboard({
               }}
             />
 
-            <div className="flex-1 min-w-0 rounded-lg border border-gray-700 bg-gray-800/80 flex flex-col overflow-hidden">
+            <div className="flex-1 min-w-0 rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] flex flex-col overflow-hidden">
               {effectiveMainPanelView === 'settings' ? (
                 <>
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+                  <div className="player-hero-surface flex items-center justify-between px-6 py-4 border-b border-[var(--player-border-subtle)]">
                     <div>
-                      <h2 className="text-sm font-semibold">Settings</h2>
-                      <p className="text-xs text-gray-400 mt-0.5">Playback and device options for the player.</p>
+                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
+                        Audio &amp; Devices
+                      </div>
+                      <h2 className="mt-0.5 text-lg font-bold tracking-tight text-[var(--player-text-primary)]">Settings</h2>
+                      <p className="text-xs text-[var(--player-text-secondary)] mt-0.5">Playback and device options for the player.</p>
                     </div>
                     <button
                       type="button"
                       onClick={() => setMainPanelView('library')}
-                      className="rounded-md border border-gray-700 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-700"
+                      className="rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3.5 py-1.5 text-xs font-semibold text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
                     >
                       Close
                     </button>
                   </div>
-                  <div className="flex-1 overflow-auto p-4">
+                  <div className="player-settings-host flex-1 overflow-auto p-6">
                     <PlaybackDevicesSettingsPanel
                       audioSettings={audioSettings}
                       setAudioSettings={setAudioSettings}
@@ -3920,14 +3986,97 @@ function PlayerDashboard({
                 />
               ) : (
                 <>
-                  <div className="flex h-11 min-h-11 max-h-11 shrink-0 items-center overflow-hidden border-b border-gray-700 px-4">
-                    <h2 className="m-0 truncate text-base font-semibold leading-none">
-                      {selectedPlaylist && activeCollectionType === PLAYER_COLLECTION_TYPES.PLAYLIST
+                  <header className="player-hero-surface shrink-0 border-b border-[var(--player-border-subtle)] px-6 pt-6 pb-5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
+                        {isPlaylistCollectionView ? 'Playlist' : 'Show'}
+                      </span>
+                      {!isPlaylistCollectionView && tuttiShows.length > 1 ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {tuttiShows.map((show) => {
+                            const showSelected = activeTuttiShow?.id === show.id;
+                            return (
+                              <button
+                                key={show.id}
+                                type="button"
+                                onClick={() => {
+                                  handleSelectCollection(PLAYER_COLLECTION_TYPES.TUTTI, `show:${show.id}`);
+                                  setSelectedPlaylistId(null);
+                                  setSelectedFolderId(null);
+                                  setActiveIndex(-1);
+                                  if (inRouter) navigate(`/player/shows/${show.id}`);
+                                }}
+                                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                                  showSelected
+                                    ? 'bg-[var(--player-pill-active-bg)] text-[var(--player-pill-active-fg)]'
+                                    : 'border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                                }`}
+                              >
+                                {show.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                    <h2 className="m-0 mt-1.5 truncate text-3xl lg:text-[2.5rem] font-extrabold leading-[1.08] tracking-[-0.025em] text-[var(--player-text-primary)]">
+                      {isPlaylistCollectionView
                         ? selectedPlaylist.name
                         : (activeTuttiShow?.name || 'Show')}
                     </h2>
-                  </div>
-                  <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center border-b border-gray-700 px-4 text-xs leading-none text-gray-400">
+                    <div className="mt-2 text-xs font-medium text-[var(--player-text-secondary)] tabular-nums">
+                      {heroMetaText}
+                    </div>
+                    <div className="mt-5 flex items-center gap-3">
+                      <button
+                        type="button"
+                        disabled={!heroCanPlay}
+                        onClick={() => {
+                          if (isHeroCollectionActive) {
+                            void handleTogglePlay();
+                            return;
+                          }
+                          if (isPlaylistCollectionView && firstPlayablePlaylistRow) {
+                            void handlePlayPlaylistRow(firstPlayablePlaylistRow);
+                            return;
+                          }
+                          if (!isPlaylistCollectionView && tuttiQueue.length) {
+                            setSelectedPlaylistId(null);
+                            setSelectedFolderId(null);
+                            setActiveCollectionType(PLAYER_COLLECTION_TYPES.TUTTI);
+                            setActiveCollectionId(currentShowCollectionId);
+                            void playQueueItem(0);
+                          }
+                        }}
+                        className="player-play-cta inline-flex h-10 items-center gap-2 rounded-full px-5 text-sm font-bold"
+                        title={isHeroPlaying ? 'Pause' : 'Play'}
+                      >
+                        {isHeroPlaying ? (
+                          <Pause size={16} className="fill-current" />
+                        ) : (
+                          <Play size={16} className="fill-current translate-x-[1px]" />
+                        )}
+                        <span>{isHeroPlaying ? 'Pause' : 'Play'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!heroCanPlay}
+                        data-active={shuffleEnabled ? 'true' : 'false'}
+                        aria-pressed={shuffleEnabled}
+                        onClick={() => setShuffleEnabled((previous) => !previous)}
+                        className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-xs font-semibold transition-colors disabled:opacity-40 ${
+                          shuffleEnabled
+                            ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                            : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
+                        }`}
+                        title={shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
+                      >
+                        <Shuffle size={14} />
+                        <span>Shuffle</span>
+                      </button>
+                    </div>
+                  </header>
+                  <div className="grid h-10 min-h-10 max-h-10 shrink-0 grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                     <div className="translate-x-px">#</div>
                     <div>Title</div>
                     <div className="flex items-center justify-end">
@@ -3937,7 +4086,7 @@ function PlayerDashboard({
                     </div>
                     <div />
                   </div>
-                  <div className="flex-1 overflow-auto">
+                  <div className="flex-1 overflow-auto px-2 py-2">
                     {selectedPlaylist && activeCollectionType === PLAYER_COLLECTION_TYPES.PLAYLIST ? (
                       <>
                         {(() => {
@@ -3972,13 +4121,14 @@ function PlayerDashboard({
                               className="relative"
                             >
                               {beforeSlotActive ? (
-                                <div className="pointer-events-none absolute left-4 right-4 top-0 z-20 h-px bg-blue-400 shadow-[0_0_0_1px_rgba(96,165,250,0.28)]" />
+                                <div className="pointer-events-none absolute left-4 right-4 top-0 z-20 h-0.5 bg-[var(--player-accent)]" />
                               ) : null}
                               {bottomSlotActive ? (
-                                <div className="pointer-events-none absolute left-4 right-4 bottom-0 z-20 h-px bg-blue-400 shadow-[0_0_0_1px_rgba(96,165,250,0.28)]" />
+                                <div className="pointer-events-none absolute left-4 right-4 bottom-0 z-20 h-0.5 bg-[var(--player-accent)]" />
                               ) : null}
                               <div
                                 draggable={playlistRowDragEnabled}
+                                data-active={isActive ? 'true' : 'false'}
                                 onDragStart={(event) => {
                                   if (!playlistRowDragEnabled) return;
                                   event.dataTransfer.effectAllowed = 'move';
@@ -4036,18 +4186,34 @@ function PlayerDashboard({
                                 onDoubleClick={async () => {
                                   await handlePlayPlaylistRow(row);
                                 }}
-                                className={`group relative grid grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center px-4 py-2.5 text-sm transition-colors ${
-                                  row.unavailable
-                                    ? 'text-gray-500'
-                                    : (isActive ? 'bg-blue-700/20' : 'hover:bg-gray-700/60')
+                                className={`player-track-row group relative grid grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center rounded-lg px-4 py-2.5 min-h-[52px] text-sm ${
+                                  row.unavailable ? 'text-[var(--player-text-disabled)]' : ''
                                 } ${
                                   playlistRowDragEnabled ? 'cursor-grab active:cursor-grabbing' : ''
                                 } ${
                                   isDraggedRow ? 'opacity-40' : ''
                                 }`}
                               >
-                                <div className="flex items-center pl-0.5 text-gray-300">
-                                  <span className="group-hover:hidden">{index + 1}</span>
+                                {isActive ? (
+                                  <span
+                                    aria-hidden="true"
+                                    className="absolute left-0 top-2.5 bottom-2.5 w-[2.5px] rounded-r-full bg-[var(--player-accent)]"
+                                  />
+                                ) : null}
+                                <div className="flex items-center pl-0.5">
+                                  {isActive && isPlaying ? (
+                                    <span className="group-hover:hidden flex items-end gap-[2px] h-3.5" aria-hidden="true">
+                                      <span className="player-eq-bar" />
+                                      <span className="player-eq-bar" />
+                                      <span className="player-eq-bar" />
+                                    </span>
+                                  ) : (
+                                    <span className={`group-hover:hidden tabular-nums text-xs ${
+                                      isActive ? 'text-[var(--player-accent-text)] font-semibold' : 'text-[var(--player-text-muted)]'
+                                    }`}>
+                                      {index + 1}
+                                    </span>
+                                  )}
                                   {!row.unavailable ? (
                                     <button
                                       type="button"
@@ -4056,15 +4222,30 @@ function PlayerDashboard({
                                         event.stopPropagation();
                                         await handlePlayPlaylistRow(row);
                                       }}
-                                      className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded text-gray-300 hover:text-white focus:text-white"
+                                      className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded text-[var(--player-text-primary)] hover:text-[var(--player-accent-text)] focus:text-[var(--player-accent-text)]"
                                       title={`Play ${rowTitle}`}
                                     >
-                                      <Play size={14} />
+                                      <Play size={14} className="fill-current" />
                                     </button>
                                   ) : null}
                                 </div>
-                                <div className="truncate">{rowTitle}</div>
-                                <div className="text-right text-gray-400 tabular-nums">
+                                <div className="min-w-0">
+                                  <div className={`truncate font-medium ${
+                                    row.unavailable
+                                      ? 'text-[var(--player-text-disabled)]'
+                                      : isActive
+                                        ? 'text-[var(--player-accent-text)] font-semibold'
+                                        : 'text-[var(--player-text-primary)]'
+                                  }`}>
+                                    {rowTitle}
+                                  </div>
+                                  {!row.unavailable && row.mix?.showName ? (
+                                    <div className="truncate text-xs text-[var(--player-text-secondary)]">
+                                      {row.mix.showName}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="text-right text-xs text-[var(--player-text-secondary)] tabular-nums">
                                   {formatDurationMs(row.mix?.durationMs, isActive ? durationSec : 0)}
                                 </div>
                                 <div className="flex justify-end">
@@ -4085,7 +4266,7 @@ function PlayerDashboard({
                                           y: rect.bottom + 4,
                                         });
                                       }}
-                                      className="rounded p-1 text-gray-400 hover:text-white hover:bg-gray-700 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                                      className="rounded-md p-1 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] hover:bg-[var(--player-pressed)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                                       title="Options"
                                     >
                                       <MoreHorizontal size={14} />
@@ -4100,7 +4281,7 @@ function PlayerDashboard({
                           );
                         })()}
                         {!activePlaylistRows.length ? (
-                          <div className="text-xs text-gray-500 px-4 py-3">No playlist items.</div>
+                          <div className="px-4 py-6 text-sm text-[var(--player-text-muted)]">No playlist items.</div>
                         ) : null}
                       </>
                     ) : (
@@ -4116,6 +4297,7 @@ function PlayerDashboard({
                           return (
                             <div
                               key={mix.id}
+                              data-active={isActive ? 'true' : 'false'}
                               onClick={() => handleSelectItem(PLAYER_COLLECTION_TYPES.TUTTI, collectionId, index)}
                               onDoubleClick={async () => {
                                 await playQueueItem(index);
@@ -4125,26 +4307,58 @@ function PlayerDashboard({
                                 handleSelectItem(PLAYER_COLLECTION_TYPES.TUTTI, collectionId, index);
                                 setProjectContextMenu({ mix, x: event.clientX, y: event.clientY });
                               }}
-                              className={`group grid grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center px-4 py-2.5 text-sm cursor-pointer transition-colors ${
-                                isActive ? 'bg-blue-700/20' : 'hover:bg-gray-700/60'
-                              }`}
+                              className="player-track-row group relative grid grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center rounded-lg px-4 py-2.5 min-h-[52px] text-sm cursor-pointer"
                             >
-                              <div className="flex items-center pl-0.5 text-gray-300">
-                                <span className="group-hover:hidden">{index + 1}</span>
+                              {isActive ? (
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute left-0 top-2.5 bottom-2.5 w-[2.5px] rounded-r-full bg-[var(--player-accent)]"
+                                />
+                              ) : null}
+                              <div className="flex items-center pl-0.5">
+                                {isActive && isPlaying ? (
+                                  <span className="group-hover:hidden flex items-end gap-[2px] h-3.5" aria-hidden="true">
+                                    <span className="player-eq-bar" />
+                                    <span className="player-eq-bar" />
+                                    <span className="player-eq-bar" />
+                                  </span>
+                                ) : (
+                                  <span className={`group-hover:hidden tabular-nums text-xs ${
+                                    isActive ? 'text-[var(--player-accent-text)] font-semibold' : 'text-[var(--player-text-muted)]'
+                                  }`}>
+                                    {index + 1}
+                                  </span>
+                                )}
                                 <button
                                   type="button"
                                   onClick={async (event) => {
                                     event.stopPropagation();
                                     await playQueueItem(index);
                                   }}
-                                  className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded text-gray-300 hover:text-white focus:text-white"
+                                  className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded text-[var(--player-text-primary)] hover:text-[var(--player-accent-text)] focus:text-[var(--player-accent-text)]"
                                   title={`Play ${listTitle}`}
                                 >
-                                  <Play size={14} />
+                                  <Play size={14} className="fill-current" />
                                 </button>
                               </div>
-                              <div className="truncate text-gray-100">{listTitle}</div>
-                              <div className="text-right text-gray-400 tabular-nums">
+                              <div className="min-w-0 truncate">
+                                <span className="sr-only">{listTitle}</span>
+                                <span aria-hidden="true" className="inline-flex items-baseline gap-3 min-w-0 max-w-full">
+                                  <span className={`w-9 shrink-0 tabular-nums text-xs font-medium ${
+                                    isActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)]'
+                                  }`}>
+                                    {mix.musicalNumber || '0.0'}
+                                  </span>
+                                  <span className={`truncate ${
+                                    isActive
+                                      ? 'text-[var(--player-accent-text)] font-semibold'
+                                      : 'text-[var(--player-text-primary)] font-medium'
+                                  }`}>
+                                    {mix.projectName || mix.name || 'Untitled Project'}
+                                  </span>
+                                </span>
+                              </div>
+                              <div className="text-right text-xs text-[var(--player-text-secondary)] tabular-nums">
                                 {formatDurationMs(mix.durationMs, isActive ? durationSec : 0)}
                               </div>
                               <div className="flex justify-end">
@@ -4154,7 +4368,7 @@ function PlayerDashboard({
                                     const rect = event.currentTarget.getBoundingClientRect();
                                     setProjectContextMenu({ mix, x: rect.right, y: rect.bottom + 4 });
                                   }}
-                                  className="rounded p-1 text-gray-400 hover:text-white hover:bg-gray-700 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                                  className="rounded-md p-1 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] hover:bg-[var(--player-pressed)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                                   title="Options"
                                 >
                                   <MoreHorizontal size={14} />
@@ -4164,7 +4378,7 @@ function PlayerDashboard({
                           );
                         })}
                         {!activeTuttiMixes.length ? (
-                          <div className="text-xs text-gray-500 px-4 py-3">No readable projects found.</div>
+                          <div className="px-4 py-6 text-sm text-[var(--player-text-muted)]">No readable projects found.</div>
                         ) : null}
                       </>
                     )}
@@ -4219,72 +4433,72 @@ function PlayerDashboard({
           className="fixed z-50"
           style={libraryContextMenuStyle || undefined}
         >
-          <div className="min-w-[168px] rounded-md border border-gray-700 bg-gray-800 py-1 text-white shadow-xl">
+          <div className="player-menu min-w-[176px] rounded-xl py-1">
             <button
               type="button"
               onClick={async () => handleLibraryContextAction('create_playlist')}
-              className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+              className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
             >
               Create playlist
             </button>
             <button
               type="button"
               onClick={async () => handleLibraryContextAction('create_folder')}
-              className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+              className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
             >
               Create folder
             </button>
             {libraryContextMenu.entry ? (
-              <div className="my-1 border-t border-gray-700" />
+              <div className="my-1 border-t border-[var(--player-border-subtle)]" />
             ) : null}
             {libraryContextMenu.entry?.kind === 'mix' ? (
               <>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('credits')}
-                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                 >
                   Show Credits
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('rename')}
-                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                 >
                   Rename
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('move')}
-                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                 >
                   Move
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('duplicate')}
-                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                 >
                   Create duplicate
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('edit_mix')}
-                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                 >
                   Edit mix
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('delete')}
-                  className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
                 >
                   Delete
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('new_from_project')}
-                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                 >
                   Create new mix from this project
                 </button>
@@ -4299,14 +4513,14 @@ function PlayerDashboard({
                   <button
                     type="button"
                     onClick={() => setLibraryMoveSubmenuOpen((previous) => !previous)}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                    className="player-menu-item flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm"
                   >
                     Move to folder
-                    <ChevronRight size={14} className="shrink-0 text-gray-400" />
+                    <ChevronRight size={14} className="shrink-0 text-[var(--player-text-muted)]" />
                   </button>
                   {libraryMoveSubmenuOpen ? (
                     <div
-                      className={`absolute top-0 z-[60] max-h-64 min-w-[160px] overflow-auto rounded-md border border-gray-700 bg-gray-800 py-1 shadow-xl ${
+                      className={`player-menu absolute top-0 z-[60] max-h-64 min-w-[168px] overflow-auto rounded-xl py-1 ${
                         libraryContextMenu.x > (typeof window !== 'undefined' ? window.innerWidth - 320 : 0)
                           ? 'right-full -mr-px'
                           : 'left-full -ml-px'
@@ -4315,14 +4529,14 @@ function PlayerDashboard({
                       <button
                         type="button"
                         onClick={async () => handleLibraryContextAction('move_to_new_folder')}
-                        className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                        className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                       >
                         New folder
                       </button>
                       <button
                         type="button"
                         onClick={async () => handleLibraryContextAction('move_to_folder', null)}
-                        className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                        className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                       >
                         Your Library
                       </button>
@@ -4336,7 +4550,7 @@ function PlayerDashboard({
                           key={folder.id}
                           type="button"
                           onClick={async () => handleLibraryContextAction('move_to_folder', folder.id)}
-                          className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                          className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                         >
                           {folder.name}
                         </button>
@@ -4347,14 +4561,14 @@ function PlayerDashboard({
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('rename')}
-                  className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                 >
                   Rename
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('delete')}
-                  className="w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-gray-700"
+                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
                 >
                   Delete
                 </button>
@@ -4367,19 +4581,19 @@ function PlayerDashboard({
       {projectContextMenu ? (
         <div
           ref={projectContextMenuRef}
-          className="fixed z-50 min-w-[160px] rounded-md border border-gray-700 bg-gray-800 shadow-xl overflow-hidden"
+          className="player-menu fixed z-50 min-w-[168px] rounded-xl py-1 overflow-hidden"
           style={projectContextMenuStyle || undefined}
         >
           <button
             onClick={handleShowCreditsFromContextMenu}
-            className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
+            className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
           >
             Show Credits
           </button>
           {projectContextMenu.mix?.canCreateMixes !== false ? (
             <button
               onClick={handleCreateMixFromContextMenu}
-              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
+              className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
             >
               Create mix
             </button>
@@ -4394,20 +4608,20 @@ function PlayerDashboard({
 
       {mixDialog ? (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
           onClick={() => {
             if (mixDialog.status === 'saving') return;
             setMixDialog(null);
           }}
         >
           <div
-            className="w-full max-w-2xl rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl"
+            className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-gray-800 px-6 py-4">
+            <div className="player-hero-surface flex items-center justify-between border-b border-[var(--player-border-subtle)] px-6 py-4">
               <div>
-                <div className="text-lg font-semibold text-gray-100">Create Mix</div>
-                <div className="text-sm text-gray-400">
+                <div className="text-lg font-bold tracking-tight text-[var(--player-text-primary)]">Create Mix</div>
+                <div className="text-sm text-[var(--player-text-secondary)]">
                   {mixDialog.projectLike?.musicalNumber ? `${mixDialog.projectLike.musicalNumber} - ` : ''}
                   {mixDialog.projectLike?.name || mixDialog.projectLike?.projectName || 'Project'}
                 </div>
@@ -4417,7 +4631,7 @@ function PlayerDashboard({
                   <button
                     type="button"
                     onClick={handleMixDialogBack}
-                    className="rounded-md border border-gray-700 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800"
+                    className="rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3.5 py-1.5 text-xs font-semibold text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
                   >
                     Back
                   </button>
@@ -4426,7 +4640,7 @@ function PlayerDashboard({
                   type="button"
                   onClick={() => setMixDialog(null)}
                   disabled={mixDialog.status === 'saving'}
-                  className="rounded-md border border-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800 disabled:opacity-50"
+                  className="rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3.5 py-1.5 text-xs font-semibold text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:opacity-50 transition-colors"
                 >
                   Close
                 </button>
@@ -4435,36 +4649,36 @@ function PlayerDashboard({
 
             <div className="px-6 py-5">
               {mixDialogStep === 'loading' ? (
-                <div className="flex min-h-48 items-center justify-center gap-3 text-gray-300">
-                  <Loader2 size={20} className="animate-spin" />
+                <div className="flex min-h-48 items-center justify-center gap-3 text-[var(--player-text-secondary)]">
+                  <Loader2 size={20} className="animate-spin text-[var(--player-accent-text)]" />
                   <span>Loading mix options...</span>
                 </div>
               ) : null}
 
               {mixDialogStep === 'saving' ? (
-                <div className="flex min-h-48 items-center justify-center gap-3 text-gray-300">
-                  <Loader2 size={20} className="animate-spin" />
+                <div className="flex min-h-48 items-center justify-center gap-3 text-[var(--player-text-secondary)]">
+                  <Loader2 size={20} className="animate-spin text-[var(--player-accent-text)]" />
                   <span>Creating mix...</span>
                 </div>
               ) : null}
 
               {mixDialogStep === 'type' ? (
                 <div className="space-y-3 text-center">
-                  <div className="text-sm font-medium text-gray-300">Choose mix type</div>
-	                  <div className="grid gap-3 sm:grid-cols-4">
-	                    {mixTypeOptions.map((option) => (
-	                      <button
-	                        key={option.id}
-	                        type="button"
-	                        onClick={() => {
-	                          if (option.id === 'advanced') {
-	                            handleCreateAdvancedMixFromDialog();
-	                            return;
-	                          }
-	                          handleSelectMixType(option.id);
-	                        }}
-	                        className="rounded-xl border border-gray-700 bg-gray-800 px-4 py-5 text-center text-base font-medium text-gray-100 transition-colors hover:border-gray-500 hover:bg-gray-750"
-	                      >
+                  <div className="text-sm font-medium text-[var(--player-text-secondary)]">Choose mix type</div>
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    {mixTypeOptions.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => {
+                          if (option.id === 'advanced') {
+                            handleCreateAdvancedMixFromDialog();
+                            return;
+                          }
+                          handleSelectMixType(option.id);
+                        }}
+                        className="rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-4 py-5 text-center text-sm font-semibold text-[var(--player-text-primary)] transition-colors hover:border-[var(--player-accent-border)] hover:bg-[var(--player-bg-popover)]"
+                      >
                         {option.label}
                       </button>
                     ))}
@@ -4475,8 +4689,8 @@ function PlayerDashboard({
               {mixDialogStep === 'group' ? (
                 <div className="space-y-4 text-center">
                   <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-300">Choose group</div>
-                    <div className="text-xs text-gray-500">
+                    <div className="text-sm font-medium text-[var(--player-text-secondary)]">Choose group</div>
+                    <div className="text-xs text-[var(--player-text-muted)]">
                       {groupMixOptions.length === 3 ? 'Select one or two groups' : 'Select one group'}
                     </div>
                   </div>
@@ -4488,10 +4702,10 @@ function PlayerDashboard({
                         key={option.value}
                         type="button"
                         onClick={() => handleToggleMixGroup(option.value)}
-                        className={`rounded-xl border px-4 py-5 text-center text-base font-medium transition-colors ${
+                        className={`rounded-xl border px-4 py-5 text-center text-sm font-semibold transition-colors ${
                           isSelected
-                            ? 'border-blue-500 bg-blue-500/10 text-blue-100'
-                            : 'border-gray-700 bg-gray-800 text-gray-100 hover:border-gray-500 hover:bg-gray-750'
+                            ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                            : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)] hover:border-[var(--player-border-strong)] hover:bg-[var(--player-bg-popover)]'
                         }`}
                       >
                         {option.label}
@@ -4504,7 +4718,7 @@ function PlayerDashboard({
                       type="button"
                       onClick={handleConfirmGroupSelection}
                       disabled={!resolveGroupMixSelection(groupMixOptions, mixDialog?.groupIds)}
-                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-full bg-[var(--player-accent)] px-5 py-2 text-sm font-bold text-[var(--player-accent-foreground)] transition-colors hover:bg-[var(--player-accent-hover)] disabled:cursor-not-allowed disabled:opacity-45"
                     >
                       Continue
                     </button>
@@ -4514,11 +4728,11 @@ function PlayerDashboard({
 
               {mixDialogStep === 'part' ? (
                 <div className="space-y-4 text-center">
-                  <div className="text-sm font-medium text-gray-300">Choose part</div>
+                  <div className="text-sm font-medium text-[var(--player-text-secondary)]">Choose part</div>
                   <div className="space-y-4">
                     {partMixSections.map((section) => (
                       <div key={section.label} className="space-y-2">
-                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
                           {section.label}
                         </div>
                         <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
@@ -4527,7 +4741,7 @@ function PlayerDashboard({
                               key={option.value}
                               type="button"
                               onClick={() => handleSelectPartPreset(option)}
-                              className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-center text-sm font-medium text-gray-100 transition-colors hover:border-gray-500 hover:bg-gray-750"
+                              className="rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3 py-2.5 text-center text-sm font-medium text-[var(--player-text-primary)] transition-colors hover:border-[var(--player-accent-border)] hover:bg-[var(--player-bg-popover)]"
                             >
                               {option.label}
                             </button>
@@ -4542,21 +4756,21 @@ function PlayerDashboard({
               {mixDialogStep === 'details' ? (
                 <div className="space-y-5">
                   <div>
-                    <div className="text-center text-sm font-medium text-gray-300">Name</div>
+                    <div className="text-center text-sm font-medium text-[var(--player-text-secondary)]">Name</div>
                     <input
                       type="text"
                       value={mixDialog.name}
                       onChange={(event) => setMixDialog((previous) => (
                         previous ? { ...previous, name: event.target.value } : previous
                       ))}
-                      className="mt-2 w-full rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 text-base text-gray-100 placeholder:text-gray-500 focus:border-gray-500 focus:outline-none"
+                      className="mt-2 w-full rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-4 py-3 text-base text-[var(--player-text-primary)] placeholder:text-[var(--player-text-muted)] focus:border-[var(--player-accent-border)] focus:outline-none"
                       placeholder="Mix name"
                       autoFocus
                     />
                   </div>
 
                   <div className="space-y-3 text-center">
-                    <div className="text-sm font-medium text-gray-300">Place in</div>
+                    <div className="text-sm font-medium text-[var(--player-text-secondary)]">Place in</div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       {mixPlacementOptions.map((option) => {
                         const isSelected = mixDialog.placement === option.value;
@@ -4567,10 +4781,10 @@ function PlayerDashboard({
                             onClick={() => setMixDialog((previous) => (
                               previous ? { ...previous, placement: option.value } : previous
                             ))}
-                            className={`rounded-xl border px-4 py-3 text-center text-base font-medium transition-colors ${
+                            className={`rounded-xl border px-4 py-3 text-center text-sm font-semibold transition-colors ${
                               isSelected
-                                ? 'border-blue-500 bg-blue-500/10 text-blue-100'
-                                : 'border-gray-700 bg-gray-800 text-gray-100 hover:border-gray-500 hover:bg-gray-750'
+                                ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                                : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)] hover:border-[var(--player-border-strong)] hover:bg-[var(--player-bg-popover)]'
                             }`}
                           >
                             {option.label}
@@ -4584,7 +4798,7 @@ function PlayerDashboard({
                     <button
                       type="button"
                       onClick={handleCreateMixFromDialog}
-                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+                      className="rounded-full bg-[var(--player-accent)] px-5 py-2 text-sm font-bold text-[var(--player-accent-foreground)] transition-colors hover:bg-[var(--player-accent-hover)]"
                     >
                       Create Mix
                     </button>
@@ -4596,62 +4810,103 @@ function PlayerDashboard({
         </div>
       ) : null}
 
-      <div className="bg-gray-850 px-6 pt-1 pb-3">
-        <div className="grid min-h-[92px] grid-cols-[minmax(0,1fr)_minmax(380px,760px)_minmax(0,1fr)] items-center gap-4">
-          <div className="min-w-0 text-lg font-semibold text-gray-200">
-            <div className="truncate" title={nowPlayingLabel || activeQueueItem?.name || ''}>
-              {nowPlayingLabel || activeQueueItem?.name || ''}
-            </div>
+      <div
+        data-player-region="transport-bar"
+        className="bg-[var(--player-bg-canvas)] border-t border-[var(--player-border-subtle)] px-5 pt-2 pb-2.5 shrink-0"
+      >
+        <div className="grid min-h-[76px] grid-cols-[minmax(0,1fr)_minmax(380px,660px)_minmax(0,1fr)] items-center gap-4">
+          <div className="min-w-0">
+            {nowPlayingLabel || activeQueueItem?.name ? (
+              <>
+                {activeQueueItem?.musicalNumber ? (
+                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
+                    No. {activeQueueItem.musicalNumber}
+                  </div>
+                ) : null}
+                <div
+                  className="truncate text-sm font-semibold text-[var(--player-text-primary)]"
+                  title={nowPlayingLabel || activeQueueItem?.name || ''}
+                >
+                  {nowPlayingLabel || activeQueueItem?.name || ''}
+                </div>
+                {activeQueueItem?.showName ? (
+                  <div className="truncate text-xs text-[var(--player-text-secondary)]">
+                    {activeQueueItem.showName}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="truncate text-xs text-[var(--player-text-muted)]">
+                Select a number to begin rehearsal
+              </div>
+            )}
           </div>
 
-	          <div className="flex min-h-[92px] w-full flex-col justify-center">
-	            <div className="flex items-center justify-center gap-4 flex-wrap">
-	              <div className="flex items-center justify-center gap-3">
-	                <button
-	                  onClick={() => setShuffleEnabled((previous) => !previous)}
-	                  className={`rounded bg-gray-700 hover:bg-gray-600 p-3 disabled:opacity-50 ${shuffleButtonClass}`}
-	                  disabled={!activeQueueItems.length || isRendering}
-	                  title={shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
-	                >
-	                  <Shuffle size={20} />
-	                </button>
-	                <button
-	                  onClick={handlePrevious}
-	                  className="rounded bg-gray-700 hover:bg-gray-600 p-3 disabled:opacity-50"
-	                  disabled={!activeQueueItems.length}
-	                  title="Previous"
-	                >
-	                  <SkipBack size={20} />
-	                </button>
-	                <button
-	                  onClick={handleTogglePlay}
-	                  className="rounded bg-blue-600 hover:bg-blue-700 p-3 disabled:opacity-50"
-	                  disabled={!activeQueueItems.length}
-	                  title={isRendering ? 'Loading mix (click to cancel)...' : (isPlaying ? 'Pause' : 'Play')}
-	                >
-	                  {isRendering ? <Loader2 size={20} className="animate-spin" /> : (isPlaying ? <Pause size={20} /> : <Play size={20} />)}
-	                </button>
-	                <button
-	                  onClick={handleNext}
-	                  className="rounded bg-gray-700 hover:bg-gray-600 p-3 disabled:opacity-50"
-	                  disabled={!activeQueueItems.length}
-	                  title="Next"
-	                >
-	                  <SkipForward size={20} />
-	                </button>
-	                <button
-	                  onClick={handleCycleLoopMode}
-	                  className={`rounded bg-gray-700 hover:bg-gray-600 p-3 disabled:opacity-50 ${loopButtonClass}`}
-	                  title={`${loopLabel} (click to cycle off -> all -> one)`}
-	                  disabled={!activeQueueItems.length}
-	                >
-	                  <LoopIcon size={20} />
-	                </button>
-	              </div>
-	            </div>
+          <div className="flex min-h-[76px] w-full flex-col justify-center">
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShuffleEnabled((previous) => !previous)}
+                className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--player-hover)] disabled:opacity-40 ${shuffleButtonClass}`}
+                disabled={!activeQueueItems.length || isRendering}
+                title={shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
+              >
+                <Shuffle size={17} />
+                {shuffleEnabled ? (
+                  <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-[var(--player-accent)]" />
+                ) : null}
+              </button>
+              <button
+                type="button"
+                onClick={handlePrevious}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors disabled:opacity-40"
+                disabled={!activeQueueItems.length}
+                title="Previous"
+              >
+                <SkipBack size={19} className="fill-current" />
+              </button>
+              <button
+                type="button"
+                onClick={handleTogglePlay}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--player-accent)] hover:bg-[var(--player-accent-hover)] text-[var(--player-accent-foreground)] shadow-[var(--player-shadow-accent)] transition-all active:scale-95 disabled:opacity-40"
+                disabled={!activeQueueItems.length}
+                title={isRendering ? 'Loading mix (click to cancel)...' : (isPlaying ? 'Pause' : 'Play')}
+              >
+                {isRendering ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : isPlaying ? (
+                  <Pause size={18} className="fill-current" />
+                ) : (
+                  <Play size={18} className="fill-current translate-x-[1px]" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={handleNext}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors disabled:opacity-40"
+                disabled={!activeQueueItems.length}
+                title="Next"
+              >
+                <SkipForward size={19} className="fill-current" />
+              </button>
+              <button
+                type="button"
+                onClick={handleCycleLoopMode}
+                className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--player-hover)] disabled:opacity-40 ${loopButtonClass}`}
+                title={`${loopLabel} (click to cycle off -> all -> one)`}
+                disabled={!activeQueueItems.length}
+              >
+                <LoopIcon size={17} />
+                {loopMode !== PLAYER_LOOP_MODES.OFF ? (
+                  <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-[var(--player-accent)]" />
+                ) : null}
+              </button>
+            </div>
 
-            <div className="mt-3 flex items-center gap-3 w-full">
-              <span className="text-sm text-gray-300 tabular-nums">{formatClock(currentTimeSec)}</span>
+            <div className="mt-1.5 flex items-center gap-3 w-full">
+              <span className="w-10 text-right text-[11px] font-medium text-[var(--player-text-muted)] tabular-nums">
+                {formatClock(currentTimeSec)}
+              </span>
               <input
                 type="range"
                 min="0"
@@ -4662,34 +4917,46 @@ function PlayerDashboard({
                 onPointerUp={endTimelineScrub}
                 onPointerCancel={endTimelineScrub}
                 onChange={(e) => handleSeek(Number(e.target.value), e)}
-                className="flex-1 volume-slider volume-slider-lg cursor-pointer block"
+                className="flex-1 h-5 player-range volume-slider volume-slider-lg cursor-pointer block"
+                style={{ '--player-range-pct': `${timelinePct}%` }}
               />
-              <span className="text-sm text-gray-300 tabular-nums">{formatClock(durationSec)}</span>
+              <span className="w-10 text-left text-[11px] font-medium text-[var(--player-text-muted)] tabular-nums">
+                {formatClock(durationSec)}
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-4">
+          <div className="flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={handleToggleLyricsView}
               disabled={!hasCurrentLyrics}
-              className={`shrink-0 p-1.5 transition-colors ${!hasCurrentLyrics ? 'text-gray-400' : (lyricsViewOpen && effectiveMainPanelView !== 'settings' ? 'text-blue-300' : 'text-gray-400 hover:text-gray-200')} disabled:cursor-not-allowed disabled:opacity-30`}
+              className={`relative shrink-0 flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--player-hover)] ${
+                !hasCurrentLyrics
+                  ? 'text-[var(--player-text-disabled)]'
+                  : (lyricsViewOpen && effectiveMainPanelView !== 'settings'
+                      ? 'text-[var(--player-accent-text)]'
+                      : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]')
+              } disabled:cursor-not-allowed disabled:opacity-35`}
               title="Lyrics"
               aria-label="Lyrics"
               aria-pressed={lyricsViewOpen && hasCurrentLyrics && effectiveMainPanelView !== 'settings'}
             >
-              <MicVocal size={20} />
+              <MicVocal size={18} />
+              {lyricsViewOpen && hasCurrentLyrics && effectiveMainPanelView !== 'settings' ? (
+                <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-[var(--player-accent)]" />
+              ) : null}
             </button>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleToggleMute}
-                className="text-gray-400 hover:text-gray-200 transition-colors"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
                 title={isMuted ? 'Unmute' : 'Mute'}
               >
-                <VolumeIcon size={20} />
+                <VolumeIcon size={18} />
               </button>
-              <div className="relative w-40 h-7">
+              <div className="relative w-40 h-7 flex items-center">
                 <input
                   type="range"
                   min="0"
@@ -4706,13 +4973,14 @@ function PlayerDashboard({
                     disabled: isRendering,
                   })}
                   onDoubleClick={() => openSliderEdit('master', volume, isRendering)}
-                  className="w-40 h-7 volume-slider volume-slider-lg cursor-pointer block"
+                  className="w-40 h-7 player-range volume-slider volume-slider-lg cursor-pointer block"
+                  style={{ '--player-range-pct': `${masterVolumePct}%` }}
                   title="Master Volume (double-click for numeric input)"
                 />
                 {sliderDragTooltip?.kind === 'master' && (
                   <div
-                    className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
-                    style={{ marginBottom: '1px' }}
+                    className="player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs tabular-nums rounded text-center z-50"
+                    style={{ marginBottom: '2px' }}
                   >
                     {formatSliderValue('master', Number(sliderDragTooltip.value))}
                   </div>
@@ -4735,8 +5003,8 @@ function PlayerDashboard({
                         setSliderEditTooltip(null);
                       }
                     }}
-                    className="absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
-                    style={{ marginBottom: '1px' }}
+                    className="player-menu absolute bottom-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs tabular-nums rounded text-center focus:outline-none z-50"
+                    style={{ marginBottom: '2px' }}
                     autoFocus
                   />
                 )}
@@ -4745,10 +5013,10 @@ function PlayerDashboard({
           </div>
         </div>
         {error ? (
-          <div className="mt-1 text-xs text-red-300 text-center">{error}</div>
+          <div className="mt-1 text-xs text-[var(--player-danger)] text-center">{error}</div>
         ) : null}
         {loading ? (
-          <div className="mt-1 text-xs text-gray-400 text-center">Loading player data...</div>
+          <div className="mt-1 text-xs text-[var(--player-text-muted)] text-center">Loading player data...</div>
         ) : null}
       </div>
     </div>

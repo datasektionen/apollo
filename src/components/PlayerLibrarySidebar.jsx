@@ -97,16 +97,17 @@ function getSidebarLayout(sidebarWidth) {
   };
 }
 
-function LibraryHoverTooltip({ tooltip }) {
+function LibraryHoverTooltip({ tooltip, playerTheme = 'dark-gold' }) {
   if (!tooltip || typeof document === 'undefined') return null;
   return createPortal(
     <div
-      className="pointer-events-none fixed z-[90] max-w-xs -translate-y-1/2 rounded-md border border-gray-700 bg-gray-900 px-2.5 py-1.5 shadow-xl"
+      className="player-theme player-menu pointer-events-none fixed z-[90] max-w-xs -translate-y-1/2 rounded-lg px-3 py-1.5"
+      data-player-theme={playerTheme}
       style={{ left: tooltip.x, top: tooltip.y }}
     >
-      <div className="truncate text-sm text-white">{tooltip.name}</div>
+      <div className="truncate text-sm font-medium text-[var(--player-text-primary)]">{tooltip.name}</div>
       {tooltip.subtitle ? (
-        <div className="truncate text-[11px] text-gray-400">{tooltip.subtitle}</div>
+        <div className="truncate text-[11px] text-[var(--player-text-secondary)]">{tooltip.subtitle}</div>
       ) : null}
     </div>,
     document.body
@@ -196,9 +197,8 @@ function LibraryEntryRow({
       }}
       onMouseEnter={(event) => handleHover(event, true)}
       onMouseLeave={(event) => handleHover(event, false)}
-      className={`flex w-full min-w-0 items-center overflow-hidden rounded-md text-left transition-colors ${
-        isActive ? 'bg-blue-700/30' : 'hover:bg-gray-700'
-      }`}
+      data-active={isActive ? 'true' : 'false'}
+      className="player-library-row relative flex w-full min-w-0 items-center overflow-hidden rounded-lg text-left"
       style={{
         height: layout.rowHeight,
         paddingLeft: layout.iconPad,
@@ -207,9 +207,17 @@ function LibraryEntryRow({
       }}
       aria-label={fullyMinimized ? `${entry.name} (${subtitle})` : undefined}
     >
+      {isActive && !fullyMinimized ? (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-2 bottom-2 w-[2.5px] rounded-r-full bg-[var(--player-accent)]"
+        />
+      ) : null}
       <EntryIcon
         size={ENTRY_ICON_SIZE}
-        className="shrink-0 text-gray-300"
+        className={`shrink-0 transition-colors ${
+          isActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-secondary)]'
+        }`}
         style={{ width: ENTRY_ICON_SIZE, height: ENTRY_ICON_SIZE, minWidth: ENTRY_ICON_SIZE }}
       />
       <div
@@ -224,8 +232,14 @@ function LibraryEntryRow({
         }}
         aria-hidden={fullyMinimized}
       >
-        <div className="truncate text-sm">{entry.name}</div>
-        <div className="truncate text-[11px] text-gray-500">{subtitle}</div>
+        <div
+          className={`truncate text-sm font-medium ${
+            isActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-primary)]'
+          }`}
+        >
+          {entry.name}
+        </div>
+        <div className="truncate text-[11px] text-[var(--player-text-muted)]">{subtitle}</div>
       </div>
     </button>
   );
@@ -246,6 +260,7 @@ export function PlayerLibrarySidebar({
   onCreateFolder,
   onCreatePlaylist,
   onContextMenu,
+  playerTheme = 'dark-gold',
 }) {
   const saved = useMemo(() => readLibrarySidebarSettings(), []);
   const [mode, setMode] = useState(saved.mode);
@@ -516,7 +531,8 @@ export function PlayerLibrarySidebar({
     ? createPortal(
       <div
         ref={createMenu.menuRef}
-        className="fixed z-[80] min-w-36 overflow-hidden rounded-md border border-gray-700 bg-gray-800 text-white shadow-xl"
+        className="player-theme player-menu fixed z-[80] min-w-40 overflow-hidden rounded-lg py-1"
+        data-player-theme={playerTheme}
         style={{ top: createMenu.coords.top, left: createMenu.coords.left }}
       >
         <button
@@ -525,7 +541,7 @@ export function PlayerLibrarySidebar({
             setCreateOpen(false);
             await onCreateFolder?.();
           }}
-          className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+          className="player-menu-item w-full px-3 py-2 text-left text-sm"
         >
           Create Folder
         </button>
@@ -535,7 +551,7 @@ export function PlayerLibrarySidebar({
             setCreateOpen(false);
             await onCreatePlaylist?.();
           }}
-          className="w-full px-3 py-2 text-left text-sm text-white hover:bg-gray-700"
+          className="player-menu-item w-full px-3 py-2 text-left text-sm"
         >
           Create Playlist
         </button>
@@ -548,7 +564,8 @@ export function PlayerLibrarySidebar({
     ? createPortal(
       <div
         ref={sortMenu.menuRef}
-        className="fixed z-[80] w-max overflow-hidden rounded-md border border-gray-700 bg-gray-800 py-1 shadow-xl"
+        className="player-theme player-menu fixed z-[80] w-max overflow-hidden rounded-lg py-1"
+        data-player-theme={playerTheme}
         style={{ top: sortMenu.coords.top, right: sortMenu.coords.right }}
       >
         {LIBRARY_SORT_OPTIONS.map((option) => {
@@ -556,8 +573,8 @@ export function PlayerLibrarySidebar({
           return (
             <div
               key={option.id}
-              className={`relative hover:bg-gray-700 ${
-                selected ? 'text-white' : 'text-gray-200'
+              className={`player-menu-item relative ${
+                selected ? 'text-[var(--player-accent-text)] font-medium' : 'text-[var(--player-text-secondary)]'
               }`}
             >
               <button
@@ -576,7 +593,7 @@ export function PlayerLibrarySidebar({
                 <button
                   type="button"
                   onClick={() => setSortReversed((current) => !current)}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1.5 text-gray-300 hover:text-white"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1.5 text-[var(--player-accent-text)] hover:text-[var(--player-text-primary)]"
                   title={sortReversed ? 'Sort ascending' : 'Sort descending'}
                   aria-label={sortReversed ? 'Sort ascending' : 'Sort descending'}
                 >
@@ -597,8 +614,8 @@ export function PlayerLibrarySidebar({
       className="relative shrink-0 min-h-0"
       style={{ width: sidebarWidth }}
     >
-      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-gray-700 bg-gray-800/80">
-        <div className={`relative z-20 flex h-11 min-h-11 max-h-11 shrink-0 items-center border-b border-gray-700 ${
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)]">
+        <div className={`relative z-20 flex h-11 min-h-11 max-h-11 shrink-0 items-center border-b border-[var(--player-border-subtle)] ${
           fullyMinimized ? 'justify-center px-1' : 'gap-1 pl-[15px] pr-2'
         }`}>
           <button
@@ -606,7 +623,7 @@ export function PlayerLibrarySidebar({
             onClick={toggleMode}
             onMouseEnter={() => setHeaderHover(true)}
             onMouseLeave={() => setHeaderHover(false)}
-            className={`group/toggle flex items-center rounded-md py-1 text-left hover:bg-gray-700 ${
+            className={`group/toggle flex items-center rounded-md py-1 text-left text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors ${
               fullyMinimized ? 'h-8 w-8 justify-center px-0' : 'min-w-0 flex-1 gap-1.5 pl-1.5 pr-1'
             }`}
             title={fullyMinimized ? 'Expand Your Library' : 'Collapse Your Library'}
@@ -620,7 +637,7 @@ export function PlayerLibrarySidebar({
             />
             {fullyMinimized ? null : (
               <span
-                className="truncate text-base font-semibold leading-none"
+                className="truncate text-[15px] font-bold leading-none tracking-tight text-[var(--player-text-primary)]"
                 style={{
                   opacity: progress,
                   maxWidth: lerp(0, 180, progress),
@@ -644,7 +661,7 @@ export function PlayerLibrarySidebar({
                 setCreateOpen((previous) => !previous);
                 setSortOpen(false);
               }}
-              className="rounded p-1.5 hover:bg-gray-700"
+              className="rounded-md p-1.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
               title="Create"
               aria-haspopup="menu"
               aria-expanded={createOpen}
@@ -665,7 +682,7 @@ export function PlayerLibrarySidebar({
 
         {libraryScopeFolderId && !searchQuery ? (
           <div
-            className="shrink-0 overflow-hidden border-b border-gray-700"
+            className="shrink-0 overflow-hidden border-b border-[var(--player-border-subtle)]"
             style={{
               paddingLeft: lerp(4, 8, progress),
               paddingRight: lerp(4, 8, progress),
@@ -676,7 +693,7 @@ export function PlayerLibrarySidebar({
             <button
               type="button"
               onClick={() => onLibraryScopeChange?.(null)}
-              className="inline-flex max-w-full items-center gap-1 rounded hover:bg-gray-700"
+              className="inline-flex max-w-full items-center gap-1 rounded-md text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
               title="Back to Your Library"
               aria-label="Back to Your Library"
               style={{
@@ -687,7 +704,7 @@ export function PlayerLibrarySidebar({
             >
               <ChevronLeft size={Math.round(lerp(16, 13, progress))} className="shrink-0" />
               <span
-                className="truncate text-sm"
+                className="truncate text-sm font-medium"
                 style={{
                   opacity: progress,
                   maxWidth: lerp(0, 200, progress),
@@ -701,7 +718,7 @@ export function PlayerLibrarySidebar({
         ) : null}
 
         <div
-          className="flex shrink-0 items-center gap-2 overflow-hidden border-gray-700"
+          className="flex shrink-0 items-center gap-2 overflow-hidden border-[var(--player-border-subtle)]"
           style={{
             height: lerp(0, TOOLBAR_HEIGHT, progress),
             opacity: progress,
@@ -715,7 +732,7 @@ export function PlayerLibrarySidebar({
         >
           {searchOpen ? (
             <div className="relative min-w-0 flex-1">
-              <Search size={TOOLBAR_ICON_SIZE} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+              <Search size={TOOLBAR_ICON_SIZE} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--player-text-muted)]" />
               <input
                 ref={searchInputRef}
                 type="text"
@@ -735,14 +752,14 @@ export function PlayerLibrarySidebar({
                   }
                   setSearchOpen(false);
                 }}
-                className={`h-7 w-full rounded-md border border-gray-700 bg-gray-900 py-0 pl-8 text-sm text-gray-100 placeholder:text-gray-500 focus:border-gray-500 focus:outline-none ${
-                  searchDraft ? 'pr-7' : 'pr-2'
+                className={`h-7 w-full rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] py-0 pl-8 text-xs text-[var(--player-text-primary)] placeholder:text-[var(--player-text-muted)] focus:border-[var(--player-accent-border)] focus:outline-none ${
+                  searchDraft ? 'pr-7' : 'pr-2.5'
                 }`}
               />
               {searchDraft ? (
                 <button
                   type="button"
-                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:text-white"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     setSearchDraft('');
@@ -761,7 +778,7 @@ export function PlayerLibrarySidebar({
                 setSearchOpen(true);
                 setCreateOpen(false);
               }}
-              className="rounded p-1.5 text-gray-300 hover:bg-gray-700 hover:text-white"
+              className="rounded-md p-1.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
               title="Search Your Library"
               aria-label="Search Your Library"
               tabIndex={chromeInteractive ? 0 : -1}
@@ -777,7 +794,7 @@ export function PlayerLibrarySidebar({
               setSortOpen((previous) => !previous);
               setCreateOpen(false);
             }}
-            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded px-1.5 py-1 text-sm text-gray-300 hover:bg-gray-700 hover:text-white"
+            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
             aria-haspopup="menu"
             aria-expanded={sortOpen}
             title="Change library order"
@@ -792,7 +809,7 @@ export function PlayerLibrarySidebar({
           className="flex-1 overflow-auto"
           style={{
             padding: layout.listPad,
-            rowGap: 4,
+            rowGap: 2,
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -815,7 +832,7 @@ export function PlayerLibrarySidebar({
           ))}
           {!displayedItems.length ? (
             <div
-              className="text-xs text-gray-500"
+              className="text-xs text-[var(--player-text-muted)]"
               style={{
                 paddingLeft: fullyMinimized ? 4 : 8,
                 paddingRight: fullyMinimized ? 4 : 8,
@@ -841,19 +858,23 @@ export function PlayerLibrarySidebar({
       >
         <div
           className={`absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full transition-colors ${
-            isResizing ? 'bg-white/75' : showResizeLine ? 'bg-white/45' : 'bg-transparent'
+            isResizing
+              ? 'bg-[var(--player-accent)]'
+              : showResizeLine
+                ? 'bg-[var(--player-border-strong)]'
+                : 'bg-transparent'
           }`}
         />
       </div>
 
       {isResizing && typeof document !== 'undefined' ? createPortal(
-        <div className="fixed inset-0 z-[70] cursor-col-resize" />,
+        <div className="player-theme fixed inset-0 z-[70] cursor-col-resize" data-player-theme={playerTheme} />,
         document.body
       ) : null}
 
       {createMenuNode}
       {sortMenuNode}
-      <LibraryHoverTooltip tooltip={hoverTooltip} />
+      <LibraryHoverTooltip tooltip={hoverTooltip} playerTheme={playerTheme} />
     </div>
   );
 }

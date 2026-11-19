@@ -153,7 +153,7 @@ describe('PlayerDashboard mobile layout detection', () => {
     expect(nav.textContent).not.toContain('Create');
 
     // Desktop 3-column elements should NOT be rendered in mobile view
-    expect(container.querySelector('.bg-gray-850')).toBeNull(); // desktop bottom player bar class
+    expect(container.querySelector('[data-player-region="transport-bar"]')).toBeNull(); // desktop bottom player bar region
   });
 
   it('renders desktop layout when useIsMobile returns false', async () => {
@@ -174,7 +174,7 @@ describe('PlayerDashboard mobile layout detection', () => {
     expect(container.querySelector('nav[aria-label="Mobile Navigation"]')).toBeNull();
 
     // Desktop bottom player bar should be rendered
-    expect(container.querySelector('.bg-gray-850')).not.toBeNull();
+    expect(container.querySelector('[data-player-region="transport-bar"]')).not.toBeNull();
   });
 
   it('starts playback when clicking a song row in mobile Home tab', async () => {

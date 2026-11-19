@@ -354,8 +354,8 @@ describe('URL Routing & Deep Linking', () => {
     // URL should have updated to type=shows
     expect(currentLocation?.search).toContain('type=shows');
     expect(currentLocation?.search).toContain('q=Show');
-    // Shows tab should have active styles (bg-white)
-    expect(showsTabButton.className).toContain('bg-white');
+    // Shows tab should have active state
+    expect(showsTabButton.getAttribute('data-active')).toBe('true');
   });
 
   it('navigates to show page and exits search results when clicking a show in search', async () => {

@@ -3,11 +3,24 @@ import {
   Folder,
   ListMusic,
   ChevronLeft,
+  ChevronRight,
   Play,
   Pause,
+  Shuffle,
   CircleUserRound,
 } from 'lucide-react';
+import { BrandMark } from '../BrandLogo';
 import { formatDurationMs } from '../../utils/playerTime';
+
+function formatPlaylistDurationLabel(items = []) {
+  const totalMs = (items || []).reduce((sum, row) => {
+    const ms = Number(row?.mix?.durationMs ?? row?.durationMs ?? 0);
+    return Number.isFinite(ms) && ms > 0 ? sum + ms : sum;
+  }, 0);
+  if (totalMs <= 0) return '';
+  const mins = Math.round(totalMs / 60000);
+  return mins < 1 ? `${Math.max(1, Math.round(totalMs / 1000))} sec` : `${mins} min`;
+}
 
 export function MobileLibraryTab({
   playlists = [],
@@ -17,6 +30,9 @@ export function MobileLibraryTab({
   tuttiMixes = [],
   activeQueueItem,
   isPlaying,
+  shuffleEnabled = false,
+  onToggleShuffle,
+  onTogglePlay,
   onPlayLibraryMix,
   onPlayPlaylistRow,
   onOpenUserMenu,
@@ -24,201 +40,280 @@ export function MobileLibraryTab({
   const [activeFilter, setActiveFilter] = useState('all');
   const [drilledPlaylist, setDrilledPlaylist] = useState(null);
 
-  // If viewing a drilled-down playlist
   if (drilledPlaylist) {
     const items = playlistItemsByPlaylistId[drilledPlaylist.id] || [];
+    const durationLabel = formatPlaylistDurationLabel(items);
+    const metaText = [`${items.length} ${items.length === 1 ? 'mix' : 'mixes'}`, durationLabel].filter(Boolean).join(' · ');
+    const firstPlayableIndex = items.findIndex((row) => !row.unavailable && (row.mix || row.id));
+    const firstPlayable = firstPlayableIndex >= 0 ? items[firstPlayableIndex] : null;
+    const isPlaylistActive = Boolean(
+      activeQueueItem && items.some((row) => (
+        activeQueueItem.id === row.mix?.id
+        || activeQueueItem.mixId === row.mix?.id
+        || activeQueueItem.id === row.id
+      ))
+    );
+    const isPlaylistPlaying = isPlaylistActive && isPlaying;
 
     return (
-      <div className="flex-1 overflow-y-auto px-4 pb-28 pt-2 space-y-4 select-none">
-        {/* Back navigation */}
-        <button
-          type="button"
-          onClick={() => setDrilledPlaylist(null)}
-          className="flex items-center gap-1.5 text-sm font-semibold text-gray-300 hover:text-white active:scale-95 transition-transform"
-        >
-          <ChevronLeft size={20} />
-          <span>Your Library</span>
-        </button>
-
-        {/* Playlist Header Card */}
-        <div className="flex items-center gap-4 rounded-2xl bg-gradient-to-br from-indigo-950 to-gray-900 border border-indigo-900/40 p-4 shadow-lg">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-blue-700 text-white shadow-md">
-            <ListMusic size={32} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-bold text-white truncate">
-              {drilledPlaylist.name}
-            </h1>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Playlist • {items.length} tracks
-            </p>
-          </div>
+      <div className="flex-1 overflow-y-auto pb-28 select-none">
+        {/* Sticky Back Header */}
+        <div className="sticky top-0 z-20 flex items-center justify-between bg-[var(--player-bg-canvas-translucent)] px-4 pt-3 pb-2.5 backdrop-blur-md border-b border-[var(--player-border-subtle)]">
+          <button
+            type="button"
+            onClick={() => setDrilledPlaylist(null)}
+            className="inline-flex items-center gap-1 -ml-1.5 py-1 pr-2 text-sm font-semibold text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-95 transition-all"
+          >
+            <ChevronLeft size={20} />
+            <span>Your Library</span>
+          </button>
+          <BrandMark className="h-5 w-5 opacity-80" alt="" />
         </div>
+
+        {/* Editorial Typographic Playlist Hero (Zero Fake Artwork) */}
+        <section className="player-hero-surface border-b border-[var(--player-border-subtle)] px-4 pt-5 pb-5">
+          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
+            Playlist
+          </div>
+          <h1 className="mt-1 text-3xl font-extrabold leading-tight tracking-[-0.02em] text-[var(--player-text-primary)] break-words">
+            {drilledPlaylist.name}
+          </h1>
+          <p className="mt-1.5 text-xs font-medium text-[var(--player-text-secondary)] tabular-nums">
+            {metaText}
+          </p>
+
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              type="button"
+              disabled={!firstPlayable}
+              onClick={() => {
+                if (isPlaylistActive && onTogglePlay) {
+                  onTogglePlay();
+                } else if (firstPlayable) {
+                  onPlayPlaylistRow(firstPlayable, drilledPlaylist, firstPlayableIndex);
+                }
+              }}
+              className="player-play-cta inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-bold disabled:opacity-40"
+              aria-label={isPlaylistPlaying ? `Pause ${drilledPlaylist.name}` : `Play ${drilledPlaylist.name}`}
+            >
+              {isPlaylistPlaying ? (
+                <Pause size={16} className="fill-current" />
+              ) : (
+                <Play size={16} className="fill-current translate-x-[1px]" />
+              )}
+              <span>{isPlaylistPlaying ? 'Pause' : 'Play'}</span>
+            </button>
+            {onToggleShuffle ? (
+              <button
+                type="button"
+                disabled={!firstPlayable}
+                onClick={onToggleShuffle}
+                aria-pressed={shuffleEnabled}
+                className={`inline-flex h-11 items-center gap-2 rounded-full border px-4 text-xs font-semibold transition-colors disabled:opacity-40 ${
+                  shuffleEnabled
+                    ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                    : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]'
+                }`}
+              >
+                <Shuffle size={14} />
+                <span>Shuffle</span>
+              </button>
+            ) : null}
+          </div>
+        </section>
 
         {/* Playlist Tracks List */}
-        <div className="space-y-1">
-          {items.length === 0 ? (
-            <div className="py-12 text-center text-sm text-gray-500">
-              This playlist is empty.
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-800/80 rounded-xl bg-gray-900/60 border border-gray-800/80 overflow-hidden">
-              {items.map((row, idx) => {
-                const isThisPlaying = activeQueueItem?.id === row.mix?.id || activeQueueItem?.id === row.id;
-                return (
-                  <div
-                    key={row.id}
-                    onClick={() => onPlayPlaylistRow(row, drilledPlaylist, idx)}
-                    className={`flex items-center justify-between p-3.5 transition-colors cursor-pointer active:bg-gray-800 ${
-                      isThisPlaying ? 'bg-blue-900/20 text-blue-400' : 'text-gray-200 hover:bg-gray-800/50'
-                    }`}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="w-5 text-center text-xs font-mono text-gray-400 shrink-0">
-                        {idx + 1}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className={`truncate text-sm font-semibold ${isThisPlaying ? 'text-blue-400' : 'text-white'}`}>
-                          {row.mix?.name || row.mix?.projectName || row.name || 'Mix Track'}
-                        </div>
-                        <div className="truncate text-xs text-gray-400">
-                          {row.mix?.showName || 'Playlist item'}
-                        </div>
+        {items.length === 0 ? (
+          <div className="py-12 px-4 text-center text-sm text-[var(--player-text-muted)]">
+            This playlist is empty.
+          </div>
+        ) : (
+          <div className="divide-y divide-[var(--player-border-subtle)]">
+            {items.map((row, idx) => {
+              const isThisPlaying = Boolean(
+                activeQueueItem && (
+                  activeQueueItem.id === row.mix?.id
+                  || activeQueueItem.mixId === row.mix?.id
+                  || activeQueueItem.id === row.id
+                )
+              );
+              const activeAndPlaying = isThisPlaying && isPlaying;
+              return (
+                <div
+                  key={row.id}
+                  onClick={() => onPlayPlaylistRow(row, drilledPlaylist, idx)}
+                  data-active={isThisPlaying ? 'true' : 'false'}
+                  className={`relative flex min-h-[64px] items-center justify-between px-4 py-3 transition-colors cursor-pointer active:bg-[var(--player-pressed)] ${
+                    isThisPlaying ? 'bg-[var(--player-row-active)]' : 'hover:bg-[var(--player-hover)]'
+                  }`}
+                  role="button"
+                  tabIndex={0}
+                >
+                  {isThisPlaying ? (
+                    <span
+                      aria-hidden="true"
+                      className="absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full bg-[var(--player-accent)]"
+                    />
+                  ) : null}
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="flex w-7 shrink-0 items-center justify-center">
+                      {activeAndPlaying ? (
+                        <span className="flex items-end gap-[2px] h-3.5" aria-hidden="true">
+                          <span className="player-eq-bar" />
+                          <span className="player-eq-bar" />
+                          <span className="player-eq-bar" />
+                        </span>
+                      ) : (
+                        <span className={`text-xs font-medium tabular-nums ${
+                          isThisPlaying ? 'text-[var(--player-accent-text)] font-semibold' : 'text-[var(--player-text-muted)]'
+                        }`}>
+                          {idx + 1}
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className={`truncate text-[15px] font-semibold ${
+                        isThisPlaying ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-primary)]'
+                      }`}>
+                        {row.mix?.name || row.mix?.projectName || row.name || 'Mix Track'}
+                      </div>
+                      <div className="mt-0.5 truncate text-xs text-[var(--player-text-secondary)]">
+                        {row.mix?.showName || 'Playlist item'}
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-xs text-gray-400 tabular-nums">
-                        {formatDurationMs(row.mix?.durationMs)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPlayPlaylistRow(row, drilledPlaylist, idx);
-                        }}
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-800 text-white hover:bg-gray-700 active:scale-90 transition-transform"
-                      >
-                        {isThisPlaying && isPlaying ? <Pause size={14} /> : <Play size={14} className="translate-x-0.5" />}
-                      </button>
-                    </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                    <span className="text-xs text-[var(--player-text-muted)] tabular-nums">
+                      {formatDurationMs(row.mix?.durationMs)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isThisPlaying && onTogglePlay) {
+                          onTogglePlay();
+                        } else {
+                          onPlayPlaylistRow(row, drilledPlaylist, idx);
+                        }
+                      }}
+                      className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors active:scale-90 ${
+                        isThisPlaying
+                          ? 'text-[var(--player-accent-text)]'
+                          : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                      }`}
+                      aria-label={activeAndPlaying ? 'Pause track' : 'Play track'}
+                    >
+                      {activeAndPlaying ? (
+                        <Pause size={16} className="fill-current" />
+                      ) : (
+                        <Play size={16} className="fill-current translate-x-[1px]" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }
 
-  // Filtered lists
   const filteredPlaylists = activeFilter === 'folders' ? [] : playlists;
   const filteredFolders = activeFilter === 'playlists' ? [] : folders;
 
   return (
     <div className="flex-1 overflow-y-auto pb-28 select-none">
-      {/* Top Header: User Symbol + "Your Library" Title (Uniform with Home and Search) */}
-      <div className="sticky top-0 z-20 bg-gray-950/95 px-4 pt-3 pb-3 backdrop-blur-md border-b border-gray-800/80 space-y-3">
+      {/* Top Header: User Symbol + "Your Library" Title */}
+      <div className="sticky top-0 z-20 bg-[var(--player-bg-canvas-translucent)] px-4 pt-3 pb-3 backdrop-blur-md border-b border-[var(--player-border-subtle)] space-y-3">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onOpenUserMenu}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-800 border border-gray-700/80 text-gray-300 hover:text-white active:scale-95 transition-transform shadow-sm"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-95 transition-all"
             aria-label="User Menu"
           >
-            <CircleUserRound size={24} />
+            <CircleUserRound size={20} />
           </button>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Your Library</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--player-text-primary)]">Your Library</h1>
+          <BrandMark className="ml-auto h-6 w-6 opacity-90" alt="" />
         </div>
 
         {/* Category Pills */}
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hidden py-0.5">
-          <button
-            type="button"
-            onClick={() => setActiveFilter('all')}
-            className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all shrink-0 ${
-              activeFilter === 'all'
-                ? 'bg-white text-black font-bold shadow-md'
-                : 'bg-gray-800 text-gray-300 hover:text-white'
-            }`}
-          >
-            All
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveFilter('playlists')}
-            className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all shrink-0 ${
-              activeFilter === 'playlists'
-                ? 'bg-white text-black font-bold shadow-md'
-                : 'bg-gray-800 text-gray-300 hover:text-white'
-            }`}
-          >
-            Playlists
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveFilter('folders')}
-            className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-all shrink-0 ${
-              activeFilter === 'folders'
-                ? 'bg-white text-black font-bold shadow-md'
-                : 'bg-gray-800 text-gray-300 hover:text-white'
-            }`}
-          >
-            Folders
-          </button>
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'playlists', label: 'Playlists' },
+            { id: 'folders', label: 'Folders' },
+          ].map((pill) => {
+            const active = activeFilter === pill.id;
+            return (
+              <button
+                key={pill.id}
+                type="button"
+                data-active={active ? 'true' : 'false'}
+                aria-pressed={active}
+                onClick={() => setActiveFilter(pill.id)}
+                className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors shrink-0 ${
+                  active
+                    ? 'bg-[var(--player-pill-active-bg)] text-[var(--player-pill-active-fg)]'
+                    : 'border border-[var(--player-border-subtle)] bg-[var(--player-pill-bg)] text-[var(--player-pill-fg)] hover:text-[var(--player-text-primary)]'
+                }`}
+              >
+                {pill.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Playlists and Folders List */}
-      <div className="px-4 pt-3 space-y-2">
-        {/* Playlists */}
+      {/* Playlists and Folders List (No Fake Gradient Squares) */}
+      <div className="divide-y divide-[var(--player-border-subtle)]">
         {filteredPlaylists.map((playlist) => {
           const count = (playlistItemsByPlaylistId[playlist.id] || []).length;
           return (
             <div
               key={playlist.id}
               onClick={() => setDrilledPlaylist(playlist)}
-              className="flex items-center justify-between p-3 rounded-xl bg-gray-900/60 border border-gray-800/80 hover:bg-gray-800 transition-colors cursor-pointer active:scale-[0.99]"
+              className="flex min-h-[64px] items-center justify-between px-4 py-3 hover:bg-[var(--player-hover)] active:bg-[var(--player-pressed)] transition-colors cursor-pointer"
               role="button"
               tabIndex={0}
             >
               <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-700 to-indigo-900 text-white shadow">
-                  <ListMusic size={22} />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-accent-text)]">
+                  <ListMusic size={20} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold text-white">
+                  <div className="truncate text-[15px] font-semibold text-[var(--player-text-primary)]">
                     {playlist.name}
                   </div>
-                  <div className="truncate text-xs text-gray-400 mt-0.5">
-                    Playlist • {count} tracks
+                  <div className="truncate text-xs text-[var(--player-text-secondary)] mt-0.5 tabular-nums">
+                    Playlist · {count} {count === 1 ? 'mix' : 'mixes'}
                   </div>
                 </div>
               </div>
+              <ChevronRight size={18} className="shrink-0 text-[var(--player-text-muted)]" />
             </div>
           );
         })}
 
-        {/* Folders */}
         {filteredFolders.map((folder) => (
           <div
             key={folder.id}
-            className="flex items-center justify-between p-3 rounded-xl bg-gray-900/60 border border-gray-800/80 hover:bg-gray-800 transition-colors cursor-pointer active:scale-[0.99]"
+            className="flex min-h-[64px] items-center justify-between px-4 py-3 hover:bg-[var(--player-hover)] transition-colors cursor-pointer"
             role="button"
             tabIndex={0}
           >
             <div className="flex items-center gap-3.5 min-w-0 flex-1">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gray-800 text-amber-400 shadow">
-                <Folder size={22} />
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]">
+                <Folder size={20} />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-white">
+                <div className="truncate text-[15px] font-semibold text-[var(--player-text-primary)]">
                   {folder.name}
                 </div>
-                <div className="truncate text-xs text-gray-400 mt-0.5">
+                <div className="truncate text-xs text-[var(--player-text-secondary)] mt-0.5">
                   Folder
                 </div>
               </div>
@@ -227,7 +322,7 @@ export function MobileLibraryTab({
         ))}
 
         {filteredPlaylists.length === 0 && filteredFolders.length === 0 && (
-          <div className="py-12 text-center text-sm text-gray-500">
+          <div className="py-12 px-4 text-center text-sm text-[var(--player-text-muted)]">
             No library items found.
           </div>
         )}
