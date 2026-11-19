@@ -44,9 +44,9 @@ export function MobileControlsDrawer({
   );
   const focusQuickOptions = [
     { idx: 0, label: 'Omit' },
-    { idx: 4, label: '-6' },
+    { idx: 4, label: '-6 dB' },
     { idx: ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX, label: '0 dB' },
-    { idx: 8, label: '+6' },
+    { idx: 8, label: '+6 dB' },
     { idx: focusSteps.length - 1, label: 'Solo' },
   ];
 

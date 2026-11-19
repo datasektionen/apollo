@@ -56,7 +56,7 @@ export function MobileLibraryTab({
     const isPlaylistPlaying = isPlaylistActive && isPlaying;
 
     return (
-      <div className="flex-1 overflow-y-auto pb-28 select-none">
+      <div className="flex-1 overflow-y-auto pb-36 select-none">
         {/* Sticky Back Header */}
         <div className="sticky top-0 z-20 flex items-center justify-between bg-[var(--player-bg-canvas-translucent)] px-4 pt-3 pb-2.5 backdrop-blur-md border-b border-[var(--player-border-subtle)]">
           <button
@@ -82,7 +82,7 @@ export function MobileLibraryTab({
             {metaText}
           </p>
 
-          <div className="mt-4 flex items-center gap-3">
+          <div className={onToggleShuffle ? 'mt-4 grid grid-cols-2 gap-3' : 'mt-4 flex items-center gap-3'}>
             <button
               type="button"
               disabled={!firstPlayable}
@@ -93,7 +93,7 @@ export function MobileLibraryTab({
                   onPlayPlaylistRow(firstPlayable, drilledPlaylist, firstPlayableIndex);
                 }
               }}
-              className="player-play-cta inline-flex h-11 items-center gap-2 rounded-full px-5 text-sm font-bold disabled:opacity-40"
+              className="player-play-cta inline-flex h-10 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-bold disabled:opacity-40"
               aria-label={isPlaylistPlaying ? `Pause ${drilledPlaylist.name}` : `Play ${drilledPlaylist.name}`}
             >
               {isPlaylistPlaying ? (
@@ -109,7 +109,7 @@ export function MobileLibraryTab({
                 disabled={!firstPlayable}
                 onClick={onToggleShuffle}
                 aria-pressed={shuffleEnabled}
-                className={`inline-flex h-11 items-center gap-2 rounded-full border px-4 text-xs font-semibold transition-colors disabled:opacity-40 ${
+                className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-full border px-4 text-xs font-semibold transition-colors disabled:opacity-40 ${
                   shuffleEnabled
                     ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
                     : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]'
@@ -149,7 +149,7 @@ export function MobileLibraryTab({
                     }
                   }}
                   data-active={isThisPlaying ? 'true' : 'false'}
-                  className={`relative flex min-h-[60px] items-center justify-between px-4 py-2.5 transition-colors cursor-pointer active:bg-[var(--player-pressed)] ${
+                  className={`relative flex min-h-[54px] items-center justify-between px-4 py-2 transition-colors cursor-pointer active:bg-[var(--player-pressed)] ${
                     isThisPlaying ? 'bg-[var(--player-row-active)]' : 'hover:bg-[var(--player-hover)]'
                   }`}
                   role="button"
@@ -207,7 +207,7 @@ export function MobileLibraryTab({
   const filteredFolders = activeFilter === 'playlists' ? [] : folders;
 
   return (
-    <div className="flex-1 overflow-y-auto pb-28 select-none">
+    <div className="flex-1 overflow-y-auto pb-36 select-none">
       {/* Top Header: User Symbol + "Your Library" Title */}
       <div className="sticky top-0 z-20 bg-[var(--player-bg-canvas-translucent)] px-4 pt-3 pb-3 backdrop-blur-md border-b border-[var(--player-border-subtle)] space-y-3">
         <div className="flex items-center gap-3">

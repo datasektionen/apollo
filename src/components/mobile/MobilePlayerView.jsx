@@ -139,6 +139,12 @@ export function MobilePlayerView({
 
       {/* Floating Mini Player (Visible above tabs whenever track is active) */}
       <div className="relative z-30 shrink-0">
+        {activeQueueItem ? (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-7 left-0 right-0 h-7 bg-gradient-to-t from-[var(--player-bg-canvas)] via-[var(--player-bg-canvas)]/75 to-transparent"
+          />
+        ) : null}
         <MobileMiniPlayer
           activeQueueItem={activeQueueItem}
           isPlaying={isPlaying}

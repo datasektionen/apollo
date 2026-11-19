@@ -76,12 +76,14 @@ export function MobileMiniPlayer({
         </div>
       </div>
 
-      {/* Inset 2px Gold Progress Line */}
-      <div className="h-[2px] w-full bg-[var(--player-slider-track)]">
-        <div
-          className="h-full bg-[var(--player-accent)] transition-[width] duration-150 ease-linear"
-          style={{ width: `${progressPercent}%` }}
-        />
+      {/* Inset Pill Gold Progress Line */}
+      <div className="px-3.5 pb-1.5 pt-0">
+        <div className="h-[2px] w-full overflow-hidden rounded-full bg-[var(--player-slider-track)]">
+          <div
+            className="h-full rounded-full bg-[var(--player-accent)] transition-[width] duration-150 ease-linear"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
       </div>
     </div>
   );

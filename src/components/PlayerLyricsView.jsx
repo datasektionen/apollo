@@ -210,7 +210,7 @@ function PlayerLyricsView({
       ) : null}
       <div
         ref={scrollContainerRef}
-        className="player-scrollfade min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-4 sm:px-10"
+        className="player-scrollfade min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-4 sm:px-12"
         aria-label="Lyrics lines"
         onScroll={handleScroll}
       >
@@ -219,7 +219,7 @@ function PlayerLyricsView({
         ) : lines.length === 0 ? (
           <div className="mx-auto max-w-3xl py-6 text-lg text-[var(--player-text-muted)]">No lyrics available for this song.</div>
         ) : (
-          <div className="mx-auto max-w-3xl space-y-5">
+          <div className="mx-auto max-w-3xl space-y-5 pb-16">
             {lines.map((line, index) => {
               const text = String(line?.text ?? '');
               if (!text.trim()) {
@@ -237,7 +237,7 @@ function PlayerLyricsView({
               const colorClass = !isSynced
                 ? 'text-[var(--player-text-primary)]'
                 : (isCurrent
-                    ? 'text-[var(--player-text-primary)] border-l-2 border-[var(--player-accent)] pl-4 -ml-4'
+                    ? 'text-[var(--player-text-primary)]'
                     : (isPast
                         ? 'text-[var(--player-lyric-past)]'
                         : 'text-[var(--player-lyric-upcoming)]'));
@@ -257,8 +257,14 @@ function PlayerLyricsView({
                   aria-current={isCurrent ? 'true' : undefined}
                   title={canSeek ? 'Jump to this lyric' : undefined}
                   onClick={() => handleSeekLine(line)}
-                  className={`block w-full whitespace-pre-wrap break-words rounded-lg text-left text-[1.5rem] font-extrabold leading-[1.25] tracking-tight transition-colors sm:text-[2rem] disabled:cursor-default disabled:opacity-100 ${colorClass} ${canSeek ? 'cursor-pointer hover:text-[var(--player-text-primary)]' : 'cursor-default'}`}
+                  className={`relative block w-full whitespace-pre-wrap break-words text-left text-[1.5rem] font-extrabold leading-[1.25] tracking-tight transition-colors sm:text-[2rem] disabled:cursor-default disabled:opacity-100 ${colorClass} ${canSeek ? 'cursor-pointer hover:text-[var(--player-text-primary)]' : 'cursor-default'}`}
                 >
+                  {isCurrent ? (
+                    <span
+                      aria-hidden="true"
+                      className="absolute -left-5 top-1.5 bottom-1.5 w-[3px] rounded-full bg-[var(--player-accent)]"
+                    />
+                  ) : null}
                   {text}
                 </button>
               );

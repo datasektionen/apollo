@@ -4077,23 +4077,23 @@ function PlayerDashboard({
                     </div>
                   </header>
                   {isPlaylistCollectionView ? (
-                    <div className="grid h-10 min-h-10 max-h-10 shrink-0 grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
+                    <div className="grid h-10 min-h-10 max-h-10 shrink-0 grid-cols-[44px_minmax(0,1fr)_64px_24px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                       <div className="translate-x-px">#</div>
                       <div>Title</div>
                       <div className="flex items-center justify-end">
-                        <span title="Length" aria-label="Length" className="inline-flex items-center -translate-x-1">
+                        <span title="Length" aria-label="Length" className="inline-flex items-center">
                           <Clock size={14} />
                         </span>
                       </div>
                       <div />
                     </div>
                   ) : (
-                    <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[44px_60px_minmax(0,1fr)_88px_34px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
+                    <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[44px_60px_minmax(0,1fr)_64px_24px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                       <div className="translate-x-px">#</div>
                       <div>No.</div>
                       <div>Title</div>
                       <div className="flex items-center justify-end">
-                        <span title="Length" aria-label="Length" className="inline-flex items-center -translate-x-1">
+                        <span title="Length" aria-label="Length" className="inline-flex items-center">
                           <Clock size={14} />
                         </span>
                       </div>
@@ -4200,7 +4200,7 @@ function PlayerDashboard({
                                 onDoubleClick={async () => {
                                   await handlePlayPlaylistRow(row);
                                 }}
-                                className={`player-track-row group relative grid grid-cols-[56px_minmax(0,1fr)_96px_34px] items-center rounded-lg px-4 py-2.5 min-h-[52px] text-sm ${
+                                className={`player-track-row group relative grid grid-cols-[44px_minmax(0,1fr)_64px_24px] items-center rounded-lg px-4 py-2.5 min-h-[52px] text-sm ${
                                   row.unavailable ? 'text-[var(--player-text-disabled)]' : ''
                                 } ${
                                   playlistRowDragEnabled ? 'cursor-grab active:cursor-grabbing' : ''
@@ -4321,7 +4321,7 @@ function PlayerDashboard({
                                 handleSelectItem(PLAYER_COLLECTION_TYPES.TUTTI, collectionId, index);
                                 setProjectContextMenu({ mix, x: event.clientX, y: event.clientY });
                               }}
-                              className="player-track-row group relative grid grid-cols-[44px_60px_minmax(0,1fr)_88px_34px] items-center rounded-lg px-4 py-1.5 min-h-[44px] text-sm cursor-pointer"
+                              className="player-track-row group relative grid grid-cols-[44px_60px_minmax(0,1fr)_64px_24px] items-center rounded-lg px-4 py-1.5 min-h-[44px] text-sm cursor-pointer"
                             >
                               {isActive ? (
                                 <span
@@ -4421,6 +4421,16 @@ function PlayerDashboard({
               focusSliderPosition={focusSliderPosition}
               onTogglePracticeFocus={handleTogglePracticeFocus}
               onFocusSliderClick={handleFocusSliderClick}
+              onSelectPracticeFocus={(focusIndex) => {
+                if (!isRendering && !focusControlDisabled) {
+                  setPracticeFocusControl(focusIndex);
+                }
+              }}
+              onSelectPlaybackSpeed={(nextSpeed) => {
+                if (!isRendering) {
+                  setPlaybackSpeed(nextSpeed);
+                }
+              }}
               practicePanRange={practicePanRange}
               panControlDisabled={panControlDisabled}
               showPanRangeHighlight={showPanRangeHighlight}
@@ -4832,24 +4842,33 @@ function PlayerDashboard({
         <div className="grid min-h-[76px] grid-cols-[minmax(0,1fr)_minmax(380px,660px)_minmax(0,1fr)] items-center gap-4">
           <div className="min-w-0">
             {nowPlayingLabel || activeQueueItem?.name ? (
-              <>
-                {activeQueueItem?.musicalNumber ? (
-                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
-                    No. {activeQueueItem.musicalNumber}
-                  </div>
-                ) : null}
-                <div
-                  className="truncate text-sm font-semibold text-[var(--player-text-primary)]"
-                  title={nowPlayingLabel || activeQueueItem?.name || ''}
-                >
-                  {nowPlayingLabel || activeQueueItem?.name || ''}
-                </div>
-                {activeQueueItem?.showName ? (
-                  <div className="truncate text-xs text-[var(--player-text-secondary)]">
-                    {activeQueueItem.showName}
-                  </div>
-                ) : null}
-              </>
+              (() => {
+                const rawTitle = nowPlayingLabel || activeQueueItem?.name || '';
+                const num = activeQueueItem?.musicalNumber ? String(activeQueueItem.musicalNumber).trim() : '';
+                const strippedTitle = (num && rawTitle.startsWith(`${num} - `))
+                  ? rawTitle.slice(num.length + 3)
+                  : rawTitle;
+                return (
+                  <>
+                    {num ? (
+                      <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)] tabular-nums">
+                        No. {num}
+                      </div>
+                    ) : null}
+                    <div
+                      className="truncate text-sm font-semibold text-[var(--player-text-primary)]"
+                      title={rawTitle}
+                    >
+                      {strippedTitle}
+                    </div>
+                    {activeQueueItem?.showName ? (
+                      <div className="truncate text-xs text-[var(--player-text-secondary)]">
+                        {activeQueueItem.showName}
+                      </div>
+                    ) : null}
+                  </>
+                );
+              })()
             ) : (
               <div className="truncate text-xs text-[var(--player-text-muted)]">
                 Select a number to begin rehearsal
@@ -4883,7 +4902,11 @@ function PlayerDashboard({
               <button
                 type="button"
                 onClick={handleTogglePlay}
-                className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--player-accent)] hover:bg-[var(--player-accent-hover)] text-[var(--player-accent-foreground)] shadow-[var(--player-shadow-accent)] transition-all active:scale-95 disabled:opacity-40"
+                className={`flex h-10 w-10 items-center justify-center rounded-full transition-all active:scale-95 ${
+                  activeQueueItems.length
+                    ? 'bg-[var(--player-accent)] hover:bg-[var(--player-accent-hover)] text-[var(--player-accent-foreground)] shadow-[var(--player-shadow-accent)]'
+                    : 'border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-muted)] cursor-not-allowed'
+                }`}
                 disabled={!activeQueueItems.length}
                 title={isRendering ? 'Loading mix (click to cancel)...' : (isPlaying ? 'Pause' : 'Play')}
               >
@@ -4948,11 +4971,11 @@ function PlayerDashboard({
               disabled={!hasCurrentLyrics}
               className={`relative shrink-0 flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--player-hover)] ${
                 !hasCurrentLyrics
-                  ? 'text-[var(--player-text-disabled)]'
+                  ? 'text-[var(--player-text-muted)]'
                   : (lyricsViewOpen && effectiveMainPanelView !== 'settings'
                       ? 'text-[var(--player-accent-text)]'
                       : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]')
-              } disabled:cursor-not-allowed disabled:opacity-35`}
+              } disabled:cursor-not-allowed disabled:opacity-55`}
               title="Lyrics"
               aria-label="Lyrics"
               aria-pressed={lyricsViewOpen && hasCurrentLyrics && effectiveMainPanelView !== 'settings'}

@@ -18,6 +18,7 @@ import {
   VolumeX,
   Metronome,
   ChevronsLeftRightEllipsis,
+  Scale,
 } from 'lucide-react';
 import { formatClock, formatDurationMs } from '../../utils/playerTime';
 import { PLAYER_LOOP_MODES } from '../../types/player';
@@ -42,6 +43,14 @@ function formatFocusBadge(step) {
   if (!Number.isFinite(numeric)) return '0 dB';
   if (numeric === 0) return '0 dB';
   return `${numeric > 0 ? '+' : ''}${numeric} dB`;
+}
+
+function getBipolarTrackStyle(pct) {
+  const clamped = Math.max(0, Math.min(100, Number(pct) || 50));
+  return {
+    '--player-bipolar-start': `${Math.min(50, clamped)}%`,
+    '--player-bipolar-end': `${Math.max(50, clamped)}%`,
+  };
 }
 
 export function MobileNowPlayingModal({
@@ -189,9 +198,9 @@ export function MobileNowPlayingModal({
   const focusPct = focusSteps.length > 1 ? (clampedFocusIdx / (focusSteps.length - 1)) * 100 : 50;
   const focusQuickOptions = [
     { idx: 0, label: 'Omit' },
-    { idx: 4, label: '-6' },
+    { idx: 4, label: '-6 dB' },
     { idx: ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX, label: '0 dB' },
-    { idx: 8, label: '+6' },
+    { idx: 8, label: '+6 dB' },
     { idx: focusSteps.length - 1, label: 'Solo' },
   ];
 
@@ -269,7 +278,7 @@ export function MobileNowPlayingModal({
       </header>
 
       {/* Main View Area */}
-      <div className="px-5 pt-4 pb-12 space-y-7 max-w-lg mx-auto w-full">
+      <div className="px-5 pt-4 pb-16 space-y-7 max-w-lg mx-auto w-full">
         {/* ============================================================ */}
         {/* 1. TOP FOLD: Editorial Stage, Track Info, Scrubber, Transport */}
         {/* ============================================================ */}
@@ -280,7 +289,11 @@ export function MobileNowPlayingModal({
               <span className="text-[var(--player-accent-text)]">
                 {lyricPreview ? lyricPreview.eyebrow : (musicalNumber ? `No. ${musicalNumber}` : 'Choir Practice')}
               </span>
-              {totalDurationLabel ? (
+              {lyricPreview && (lyricPreview.mode === 'synced' || lyricPreview.mode === 'intro') ? (
+                <span className="rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--player-accent-text)]">
+                  Synced
+                </span>
+              ) : totalDurationLabel ? (
                 <span className="font-mono text-[var(--player-text-muted)] tabular-nums">
                   {totalDurationLabel}
                 </span>
@@ -327,15 +340,10 @@ export function MobileNowPlayingModal({
           {/* Track Info */}
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight text-[var(--player-text-primary)] line-clamp-2">
-              {musicalNumber ? (
-                <span className="mr-2 font-mono text-lg font-semibold text-[var(--player-accent-text)] tabular-nums">
-                  {musicalNumber}
-                </span>
-              ) : null}
               {title}
             </h1>
-            <p className="mt-1 text-sm font-medium text-[var(--player-text-secondary)] truncate">
-              {subtitle}
+            <p className="mt-1 text-sm font-medium text-[var(--player-text-secondary)] truncate tabular-nums">
+              {[musicalNumber ? `No. ${musicalNumber}` : null, subtitle].filter(Boolean).join(' · ')}
             </p>
           </div>
 
@@ -441,8 +449,8 @@ export function MobileNowPlayingModal({
             </button>
           </div>
 
-          {/* Interactive Section Anchor Bar */}
-          <div className="grid grid-cols-3 gap-2 pt-1">
+          {/* Interactive Section Segmented Switch */}
+          <div className="rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-1 grid grid-cols-3 gap-1">
             {[
               { id: 'practice', label: 'Practice', Icon: Sliders, ref: practiceSectionRef },
               { id: 'lyrics', label: 'Lyrics', Icon: MicVocal, ref: lyricsSectionRef },
@@ -455,13 +463,16 @@ export function MobileNowPlayingModal({
                   type="button"
                   aria-pressed={selected}
                   onClick={() => scrollToSection(id, ref)}
-                  className={`flex items-center justify-center gap-1.5 rounded-full border py-2 text-xs font-semibold transition-colors active:scale-[0.98] ${
+                  className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-colors active:scale-[0.98] ${
                     selected
-                      ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                      : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                      ? 'bg-[var(--player-bg-active-segment)] text-[var(--player-text-primary)]'
+                      : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
                   }`}
                 >
-                  <Icon size={13} className="text-[var(--player-accent-text)]" />
+                  <Icon
+                    size={13}
+                    className={selected ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)]'}
+                  />
                   <span>{label}</span>
                 </button>
               );
@@ -486,22 +497,31 @@ export function MobileNowPlayingModal({
           {/* 1. Practice Focus Slider (full 13-step desktop parity) */}
           <div className="space-y-2">
             <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-[var(--player-text-secondary)]">Practice Focus</span>
+              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
+                <Scale size={14} className="text-[var(--player-accent-text)]" />
+                <span>Practice Focus</span>
+              </span>
               <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
                 {focusLabel}
               </span>
             </div>
-            <input
-              type="range"
-              min="0"
-              max={focusSteps.length - 1}
-              step="1"
-              value={clampedFocusIdx}
-              onChange={(e) => onSetPracticeFocusControl?.(Number(e.target.value))}
-              style={{ '--player-range-pct': `${focusPct}%` }}
-              className="player-range player-range-touch w-full cursor-pointer"
-              aria-label="Practice Focus Slider"
-            />
+            <div className="relative flex items-center">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+              />
+              <input
+                type="range"
+                min="0"
+                max={focusSteps.length - 1}
+                step="1"
+                value={clampedFocusIdx}
+                onChange={(e) => onSetPracticeFocusControl?.(Number(e.target.value))}
+                style={getBipolarTrackStyle(focusPct)}
+                className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
+                aria-label="Practice Focus Slider"
+              />
+            </div>
             <div className="grid grid-cols-5 gap-1.5 pt-1">
               {focusQuickOptions.map((opt) => {
                 const active = clampedFocusIdx === opt.idx;
@@ -524,29 +544,35 @@ export function MobileNowPlayingModal({
             </div>
           </div>
 
-          {/* 2. Pan Range Slider (0 - 200%) */}
+          {/* 2. Choir Width Slider (0 - 200%) */}
           <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
             <div className="flex justify-between items-center text-xs font-semibold">
               <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
                 <ChevronsLeftRightEllipsis size={14} className="text-[var(--player-accent-text)]" />
-                <span>Pan Range (Choir Width)</span>
+                <span>Choir Width</span>
               </span>
               <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
                 {clampedPan}%
               </span>
             </div>
-            <input
-              type="range"
-              min="0"
-              max="200"
-              step="5"
-              value={clampedPan}
-              onChange={(e) => onSetPracticePanRange?.(Number(e.target.value))}
-              style={{ '--player-range-pct': `${panPct}%` }}
-              className="player-range player-range-touch w-full cursor-pointer"
-              aria-label="Practice Pan Range Slider"
-            />
-            <div className="flex justify-between text-[10px] text-[var(--player-text-muted)] font-medium">
+            <div className="relative flex items-center">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+              />
+              <input
+                type="range"
+                min="0"
+                max="200"
+                step="5"
+                value={clampedPan}
+                onChange={(e) => onSetPracticePanRange?.(Number(e.target.value))}
+                style={getBipolarTrackStyle(panPct)}
+                className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
+                aria-label="Practice Pan Range Slider"
+              />
+            </div>
+            <div className="flex justify-between text-[10px] text-[var(--player-text-muted)] font-medium pt-0.5 pb-1">
               <span>0% Mono</span>
               <span>100% Stereo</span>
               <span>200% Wide</span>
@@ -564,17 +590,23 @@ export function MobileNowPlayingModal({
                 {formatPlaybackSpeed(playbackSpeed)}x
               </span>
             </div>
-            <input
-              type="range"
-              min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
-              max={PLAYBACK_SPEED_DRAG_BOUNDS.MAX}
-              step={PLAYBACK_SPEED_DRAG_BOUNDS.STEP}
-              value={clampedSpeed}
-              onChange={(e) => onSetPlaybackSpeed?.(Number(e.target.value))}
-              style={{ '--player-range-pct': `${speedPct}%` }}
-              className="player-range player-range-touch w-full cursor-pointer"
-              aria-label="Playback Speed Slider"
-            />
+            <div className="relative flex items-center">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+              />
+              <input
+                type="range"
+                min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
+                max={PLAYBACK_SPEED_DRAG_BOUNDS.MAX}
+                step={PLAYBACK_SPEED_DRAG_BOUNDS.STEP}
+                value={clampedSpeed}
+                onChange={(e) => onSetPlaybackSpeed?.(Number(e.target.value))}
+                style={getBipolarTrackStyle(speedPct)}
+                className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
+                aria-label="Playback Speed Slider"
+              />
+            </div>
             <div className="grid grid-cols-5 gap-1.5 pt-1">
               {speedQuickOptions.map((s) => {
                 const active = Math.abs(Number(playbackSpeed) - s) < 0.01;
@@ -608,17 +640,23 @@ export function MobileNowPlayingModal({
                 {formatPlaybackTranspose(playbackTranspose)}
               </span>
             </div>
-            <input
-              type="range"
-              min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
-              max={PLAYBACK_TRANSPOSE_BOUNDS.MAX}
-              step={PLAYBACK_TRANSPOSE_BOUNDS.STEP}
-              value={clampedTranspose}
-              onChange={(e) => onSetPlaybackTranspose?.(Number(e.target.value))}
-              style={{ '--player-range-pct': `${transposePct}%` }}
-              className="player-range player-range-touch w-full cursor-pointer"
-              aria-label="Pitch Transpose Slider"
-            />
+            <div className="relative flex items-center">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+              />
+              <input
+                type="range"
+                min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
+                max={PLAYBACK_TRANSPOSE_BOUNDS.MAX}
+                step={PLAYBACK_TRANSPOSE_BOUNDS.STEP}
+                value={clampedTranspose}
+                onChange={(e) => onSetPlaybackTranspose?.(Number(e.target.value))}
+                style={getBipolarTrackStyle(transposePct)}
+                className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
+                aria-label="Pitch Transpose Slider"
+              />
+            </div>
             <div className="flex justify-between items-center text-[11px] text-[var(--player-text-muted)] pt-1 tabular-nums">
               <span>{PLAYBACK_TRANSPOSE_BOUNDS.MIN} st</span>
               <button

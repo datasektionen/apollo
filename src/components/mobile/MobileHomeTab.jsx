@@ -41,7 +41,7 @@ export function MobileHomeTab({
   const isShowPlaying = isShowTrackActive && isPlaying;
 
   return (
-    <div className="flex-1 overflow-y-auto pb-28 select-none">
+    <div className="flex-1 overflow-y-auto pb-40 select-none">
       {/* Sticky Obsidian Top Header: User Avatar + "Home" + Apollo Mark */}
       <div className="sticky top-0 z-20 flex items-center gap-3 bg-[var(--player-bg-canvas-translucent)] px-4 pt-3 pb-3 backdrop-blur-md border-b border-[var(--player-border-subtle)]">
         <button
@@ -58,7 +58,7 @@ export function MobileHomeTab({
 
       {/* Editorial Show Hero (Typography-First, Stacked Parity with Playlist & Desktop) */}
       {tuttiMixes.length > 0 ? (
-        <section className="player-hero-surface border-b border-[var(--player-border-subtle)] px-4 pt-5 pb-4">
+        <section className="player-hero-surface border-b border-[var(--player-border-subtle)] px-4 pt-4 pb-3.5">
           <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
             Show
           </div>
@@ -68,7 +68,7 @@ export function MobileHomeTab({
           <p className="mt-1 text-xs font-medium text-[var(--player-text-secondary)] tabular-nums">
             {heroMeta}
           </p>
-          <div className="mt-4 flex items-center gap-3">
+          <div className={onToggleShuffle ? 'mt-3.5 grid grid-cols-2 gap-3' : 'mt-3.5 flex items-center gap-3'}>
             <button
               type="button"
               onClick={() => {
@@ -78,7 +78,7 @@ export function MobileHomeTab({
                   onPlayMix?.(tuttiMixes[0], null, 0);
                 }
               }}
-              className="player-play-cta inline-flex h-10 items-center gap-2 rounded-full px-5 text-sm font-bold"
+              className="player-play-cta inline-flex h-10 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-bold"
               aria-label={isShowPlaying ? `Pause ${showName}` : `Play ${showName}`}
             >
               {isShowPlaying ? (
@@ -93,7 +93,7 @@ export function MobileHomeTab({
                 type="button"
                 onClick={onToggleShuffle}
                 aria-pressed={shuffleEnabled}
-                className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-xs font-semibold transition-colors active:scale-95 ${
+                className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-full border px-4 text-xs font-semibold transition-colors active:scale-95 ${
                   shuffleEnabled
                     ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
                     : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]'
@@ -131,7 +131,7 @@ export function MobileHomeTab({
                   }
                 }}
                 data-active={isThisPlaying ? 'true' : 'false'}
-                className={`relative flex min-h-[60px] items-center justify-between px-4 py-2.5 transition-colors cursor-pointer active:bg-[var(--player-pressed)] ${
+                className={`relative flex min-h-[54px] items-center justify-between px-4 py-2 transition-colors cursor-pointer active:bg-[var(--player-pressed)] ${
                   isThisPlaying ? 'bg-[var(--player-row-active)]' : 'hover:bg-[var(--player-hover)]'
                 }`}
                 role="button"

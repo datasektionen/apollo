@@ -97,6 +97,7 @@ export function PlayerControlsSidebar({
   focusSliderPosition = 50,
   onTogglePracticeFocus,
   onFocusSliderClick,
+  onSelectPracticeFocus,
   practicePanRange = 100,
   panControlDisabled = false,
   showPanRangeHighlight = false,
@@ -105,6 +106,7 @@ export function PlayerControlsSidebar({
   showPanFocusAxisMarker = false,
   practicePanFocusAxisPixel = 0,
   onTogglePracticePanRange,
+  onSelectPlaybackSpeed,
   isRendering = false,
   sliderDragTooltip = null,
   sliderEditTooltip = null,
@@ -626,6 +628,10 @@ export function PlayerControlsSidebar({
                     title="Practice focus"
                   >
                     <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-slider-track)] pointer-events-none z-0" />
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)] z-10"
+                    />
                     <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none z-10">
                       <div
                         className="absolute top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-accent)] transition-all"
@@ -689,6 +695,37 @@ export function PlayerControlsSidebar({
                 </div>
               </div>
             </div>
+            {!fullyMinimized && progress > 0.85 && onSelectPracticeFocus ? (
+              <div
+                className="grid grid-cols-5 gap-1 pt-1"
+                style={{ paddingLeft: rowPaddingLeft, paddingRight: 16, opacity: sliderOpacity }}
+              >
+                {[
+                  { idx: 0, label: 'Omit' },
+                  { idx: 4, label: '-6 dB' },
+                  { idx: 6, label: '0 dB' },
+                  { idx: 8, label: '+6 dB' },
+                  { idx: 12, label: 'Solo' },
+                ].map((preset) => {
+                  const selected = Number(practiceFocusControl) === preset.idx;
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      disabled={focusControlDisabled || isRendering}
+                      onClick={() => onSelectPracticeFocus(preset.idx)}
+                      className={`h-6 rounded-md border px-0.5 text-[10px] font-semibold whitespace-nowrap transition-colors disabled:opacity-45 ${
+                        selected
+                          ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                          : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             </div>
           ) : null}
 
@@ -766,13 +803,25 @@ export function PlayerControlsSidebar({
                   title={panControlDisabled ? 'Transformed pan range disabled for Omitted/Solo focus' : 'Transformed pan range'}
                 >
                   <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-slider-track)] overflow-hidden pointer-events-none" />
-                  <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full overflow-hidden pointer-events-none">
-                    <div
-                      className={`absolute left-0 top-0 bottom-0 bg-[var(--player-slider-fill)] transition-opacity ${
-                        showPanRangeHighlight ? 'opacity-90' : 'opacity-45'
-                      }`}
-                      style={{ width: `${practicePanHighlightPixel}px` }}
-                    />
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)] z-10"
+                  />
+                  <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none overflow-hidden">
+                    {(() => {
+                      const panPct = Math.max(0, Math.min(100, (Number(practicePanRange) || 0) / 2));
+                      return (
+                        <div
+                          className={`absolute top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-slider-fill)] transition-opacity ${
+                            showPanRangeHighlight ? 'opacity-90' : 'opacity-65'
+                          }`}
+                          style={{
+                            left: `${Math.min(50, panPct)}%`,
+                            width: `${Math.abs(panPct - 50)}%`,
+                          }}
+                        />
+                      );
+                    })()}
                   </div>
                   <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none">
                     <div
@@ -898,6 +947,10 @@ export function PlayerControlsSidebar({
                     pointerEvents: progress > 0.8 ? 'auto' : 'none',
                   }}
                 >
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+                  />
                   <input
                     type="range"
                     min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
@@ -914,8 +967,11 @@ export function PlayerControlsSidebar({
                       disabled: isRendering,
                     })}
                     onDoubleClick={() => openSliderEdit?.('speed', playbackSpeed, isRendering)}
-                    className="w-40 h-5 player-range cursor-pointer block"
-                    style={{ '--player-range-pct': `${speedPct}%` }}
+                    className="relative z-10 w-40 h-5 player-range player-range-bipolar cursor-pointer block"
+                    style={{
+                      '--player-bipolar-start': `${Math.min(50, speedPct)}%`,
+                      '--player-bipolar-end': `${Math.max(50, speedPct)}%`,
+                    }}
                     title="Playback speed (double-click for numeric input)"
                   />
                 {sliderDragTooltip?.kind === 'speed' && (
@@ -962,6 +1018,31 @@ export function PlayerControlsSidebar({
                 )}
               </div>
             </div>
+            {!fullyMinimized && progress > 0.85 && onSelectPlaybackSpeed ? (
+              <div
+                className="grid grid-cols-4 gap-1 pt-1"
+                style={{ paddingLeft: rowPaddingLeft, paddingRight: 16, opacity: sliderOpacity }}
+              >
+                {[0.8, 0.9, 1, 1.2].map((presetSpeed) => {
+                  const selected = Math.abs((Number(playbackSpeed) || 1) - presetSpeed) < 0.01;
+                  return (
+                    <button
+                      key={presetSpeed}
+                      type="button"
+                      disabled={isRendering}
+                      onClick={() => onSelectPlaybackSpeed(presetSpeed)}
+                      className={`h-6 rounded-md border px-1 text-[10px] font-semibold tabular-nums whitespace-nowrap transition-colors disabled:opacity-45 ${
+                        selected
+                          ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                          : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]'
+                      }`}
+                    >
+                      {presetSpeed}x
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             </div>
           ) : null}
 
@@ -1036,6 +1117,10 @@ export function PlayerControlsSidebar({
                     pointerEvents: progress > 0.8 ? 'auto' : 'none',
                   }}
                 >
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+                  />
                   <input
                     type="range"
                     min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
@@ -1052,8 +1137,11 @@ export function PlayerControlsSidebar({
                       disabled: isRendering,
                     })}
                     onDoubleClick={() => openSliderEdit?.('transpose', playbackTranspose, isRendering)}
-                    className="w-40 h-5 player-range cursor-pointer block"
-                    style={{ '--player-range-pct': `${transposePct}%` }}
+                    className="relative z-10 w-40 h-5 player-range player-range-bipolar cursor-pointer block"
+                    style={{
+                      '--player-bipolar-start': `${Math.min(50, transposePct)}%`,
+                      '--player-bipolar-end': `${Math.max(50, transposePct)}%`,
+                    }}
                     title="Pitch transpose (double-click for numeric input)"
                   />
                 {sliderDragTooltip?.kind === 'transpose' && (
@@ -1104,7 +1192,7 @@ export function PlayerControlsSidebar({
           ) : null}
 
           {!fullyMinimized && progress > 0.85 ? (
-            <div className="mt-auto mx-3 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3 py-2.5 text-[11px] leading-relaxed text-[var(--player-text-muted)]">
+            <div className="mt-2 mx-3 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3 py-2.5 text-[11px] leading-relaxed text-[var(--player-text-muted)]">
               {practiceControlsEnabled ? (
                 <div className="space-y-1">
                   <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--player-accent-text)]">
@@ -1120,7 +1208,7 @@ export function PlayerControlsSidebar({
                   <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-secondary)]">
                     Practice Tools
                   </div>
-                  <div>Start any track to unlock Focus, Choir Width, and Pitch controls.</div>
+                  <div>Start any track to unlock Practice Focus and Choir Width controls.</div>
                 </div>
               )}
             </div>
