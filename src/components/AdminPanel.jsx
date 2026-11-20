@@ -131,7 +131,7 @@ function ToggleSwitch({
         className={`absolute top-0.5 h-5 w-5 rounded-full shadow transition-transform ${
           checked
             ? 'translate-x-5 bg-[var(--player-accent-foreground)]'
-            : 'translate-x-0.5 bg-[var(--player-text-primary)]'
+            : 'translate-x-0.5 bg-[var(--player-text-secondary)]'
         }`}
       />
     </button>
@@ -1070,7 +1070,7 @@ export default function AdminPanel({
                       setProfileMenuOpen(false);
                       leaveAdmin(() => onLogout?.());
                     }}
-                    className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
+                    className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
                   >
                     Log out
                   </button>
@@ -1088,8 +1088,8 @@ export default function AdminPanel({
 
         <div className="min-h-0 flex-1 overflow-hidden px-3 pb-3 pt-2.5">
           <div className="flex h-full flex-col gap-2.5 overflow-hidden md:flex-row">
-            <aside className="shrink-0 rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-2 md:w-48">
-              <nav className="flex gap-1.5 overflow-x-auto scrollbar-hidden md:block md:space-y-1 md:overflow-visible" aria-label="Admin Navigation">
+            <aside className="shrink-0 rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-1.5 md:w-48 md:p-2">
+              <nav className="grid grid-cols-5 gap-1 md:block md:space-y-1" aria-label="Admin Navigation">
                 {navItems.map((item) => {
                   const active = tab === item.id;
                   return (
@@ -1097,7 +1097,7 @@ export default function AdminPanel({
                       key={item.id}
                       type="button"
                       onClick={() => selectAdminTab(item.id)}
-                      className={`relative flex min-w-28 items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition-colors md:w-full ${
+                      className={`relative flex min-w-0 items-center justify-center rounded-lg px-1 py-1.5 text-center text-xs transition-colors md:w-full md:justify-between md:gap-1.5 md:px-2.5 md:py-2 md:text-left md:text-sm ${
                         active
                           ? 'bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)]'
                           : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
@@ -1106,14 +1106,14 @@ export default function AdminPanel({
                       {active ? (
                         <span
                           aria-hidden="true"
-                          className="absolute inset-x-3 bottom-0 h-[2px] rounded-t-full bg-[var(--player-accent)] md:inset-y-2 md:inset-x-auto md:left-0 md:h-auto md:w-[2.5px] md:rounded-r-full md:rounded-tl-none"
+                          className="absolute inset-x-2 bottom-0 h-[2px] rounded-t-full bg-[var(--player-accent)] md:inset-y-2 md:inset-x-auto md:left-0 md:h-auto md:w-[2.5px] md:rounded-r-full md:rounded-tl-none"
                         />
                       ) : null}
-                      <span className={`pl-1.5 font-medium ${active ? 'text-[var(--player-accent-text)] font-semibold' : ''}`}>
+                      <span className={`font-medium md:pl-1.5 ${active ? 'text-[var(--player-accent-text)] font-semibold' : ''}`}>
                         {item.label}
                       </span>
                       {item.count !== null ? (
-                        <span className="rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)] px-2 py-0.5 text-xs tabular-nums text-[var(--player-text-muted)]">
+                        <span className="hidden md:inline-flex rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)] px-1.5 py-0.5 text-[10px] tabular-nums text-[var(--player-text-muted)] md:px-2 md:text-xs">
                           {item.count}
                         </span>
                       ) : null}
@@ -1123,7 +1123,7 @@ export default function AdminPanel({
               </nav>
             </aside>
 
-            <div className={`min-w-0 flex-1 overflow-auto rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-4 ${accessDirty ? 'pb-24' : ''}`}>
+            <div className={`min-w-0 flex-1 overflow-auto p-0 md:rounded-[10px] md:border md:border-[var(--player-border-subtle)] md:bg-[var(--player-bg-surface)] md:p-4 ${accessDirty ? 'pb-24' : ''}`}>
               {loading ? (
                 <Empty>Loading...</Empty>
               ) : tab === 'artists' ? (
@@ -1269,7 +1269,7 @@ export default function AdminPanel({
                                   type="button"
                                   disabled={saving}
                                   onClick={handleDeleteRole}
-                                  className="rounded-lg bg-[var(--player-danger-solid)] px-3.5 py-2 text-sm font-semibold text-[var(--player-danger-foreground)] transition-colors hover:bg-[var(--player-danger-solid-hover)] disabled:opacity-45"
+                                  className="rounded-lg border border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] px-3.5 py-2 text-sm font-semibold text-[var(--player-danger-text)] transition-colors hover:bg-[var(--player-danger-surface)] disabled:opacity-45"
                                 >
                                   Delete
                                 </button>
@@ -1642,9 +1642,9 @@ export default function AdminPanel({
                   </div>
 
                   <div className="overflow-visible rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)]">
-                    <div className="grid grid-cols-[1.1fr,1.6fr,40px] gap-4 border-b border-[var(--player-border-subtle)] px-4 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-text-muted)] lg:grid-cols-[1.2fr,1fr,1.5fr,40px]">
+                    <div className="hidden grid-cols-[1.2fr,1fr,1.5fr,40px] gap-4 border-b border-[var(--player-border-subtle)] px-4 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-text-muted)] lg:grid">
                       <span>User</span>
-                      <span className="hidden lg:block">Identity</span>
+                      <span>Identity</span>
                       <span>Roles</span>
                       <span />
                     </div>
@@ -1657,11 +1657,11 @@ export default function AdminPanel({
                       return (
                         <div
                           key={user.id}
-                          className="group grid grid-cols-[1.1fr,1.6fr,40px] items-center gap-4 border-b border-[var(--player-border-subtle)] px-4 py-4 last:border-b-0 transition-colors hover:bg-[var(--player-hover)] lg:grid-cols-[1.2fr,1fr,1.5fr,40px]"
+                          className="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2.5 border-b border-[var(--player-border-subtle)] px-4 py-3.5 last:border-b-0 transition-colors hover:bg-[var(--player-hover)] lg:grid-cols-[1.2fr,1fr,1.5fr,40px] lg:gap-4 lg:py-4"
                         >
                           <div className="min-w-0">
                             <div className="truncate font-semibold text-[var(--player-text-primary)]">{user.username}</div>
-                            <div className="mt-1 truncate text-xs text-[var(--player-text-muted)] lg:hidden">
+                            <div className="mt-0.5 truncate text-xs text-[var(--player-text-muted)] lg:hidden">
                               {user.oidcDisplayName || user.oidcEmail || 'No identity'}
                             </div>
                           </div>
@@ -1673,7 +1673,7 @@ export default function AdminPanel({
                               <div className="truncate text-xs text-[var(--player-text-muted)]">{user.oidcEmail}</div>
                             ) : null}
                           </div>
-                          <div className="relative flex min-w-0 flex-wrap items-center gap-2">
+                          <div className="relative col-span-2 flex min-w-0 flex-wrap items-center gap-2 lg:col-span-1">
                             {visibleRoles.map((role) => (
                               <span
                                 key={role.id}
@@ -1710,7 +1710,7 @@ export default function AdminPanel({
                                   <Plus size={13} />
                                 </button>
                                 {rolePickerUserId === user.id ? (
-                                  <div className="player-menu absolute right-0 top-full z-40 mt-2 max-h-72 w-64 overflow-auto rounded-xl p-1.5">
+                                  <div className="player-menu absolute left-0 top-full z-40 mt-2 max-h-72 w-64 overflow-auto rounded-xl p-1.5 lg:left-auto lg:right-0">
                                     {customAssignableRoles.map((role) => {
                                       const checked = userRoleIds.has(role.id);
                                       return (
@@ -1735,7 +1735,7 @@ export default function AdminPanel({
                             ) : null}
                           </div>
                           <div
-                            className="relative flex justify-end"
+                            className="relative col-start-2 row-start-1 flex justify-end lg:col-start-auto lg:row-start-auto"
                             ref={userActionMenuId === user.id ? userActionMenuRef : null}
                           >
                             <button
@@ -1766,7 +1766,7 @@ export default function AdminPanel({
                                 <button
                                   type="button"
                                   onClick={() => openUserActionModal('delete', user)}
-                                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
+                                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
                                 >
                                   Delete user
                                 </button>

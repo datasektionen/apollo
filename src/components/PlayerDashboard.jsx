@@ -5,21 +5,34 @@ import {
   ChevronsLeftRightEllipsis,
   CircleUserRound,
   Clock,
+  Copy,
   Download,
+  FolderInput,
+  FolderPlus,
   HeadphoneOff,
   Headphones,
+  Info,
+  ListPlus,
   Loader2,
+  LogOut,
   Metronome,
   MicVocal,
   MoreHorizontal,
   Pause,
+  Pencil,
   Play,
+  Plus,
   Repeat1,
   Repeat,
   Scale,
+  Settings,
+  Shield,
   Shuffle,
   SkipBack,
   SkipForward,
+  SlidersHorizontal,
+  Trash2,
+  User,
   Volume2,
   VolumeX,
 } from 'lucide-react';
@@ -3858,16 +3871,17 @@ function PlayerDashboard({
               <CircleUserRound size={18} />
             </button>
             {profileMenuOpen ? (
-              <div className="player-menu absolute right-0 top-full mt-2 min-w-40 rounded-xl py-1 z-[110] overflow-hidden">
+              <div className="player-menu absolute right-0 top-full mt-2 min-w-44 rounded-xl py-1 z-[110] overflow-hidden">
                 {onOpenProfile ? (
                   <button
                     onClick={() => {
                       setProfileMenuOpen(false);
                       onOpenProfile();
                     }}
-                    className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                    className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                   >
-                    My Profile
+                    <User size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                    <span>My Profile</span>
                   </button>
                 ) : null}
                 <button
@@ -3876,9 +3890,10 @@ function PlayerDashboard({
                     setProfileMenuOpen(false);
                     refreshAudioDevices();
                   }}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
-                  Settings
+                  <Settings size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                  <span>Settings</span>
                 </button>
                 {session?.user?.isAdmin ? (
                   <button
@@ -3886,9 +3901,10 @@ function PlayerDashboard({
                       setProfileMenuOpen(false);
                       onOpenAdmin?.();
                     }}
-                    className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                    className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                   >
-                    Admin
+                    <Shield size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                    <span>Admin</span>
                   </button>
                 ) : null}
                 <div className="my-1 border-t border-[var(--player-border-subtle)]" />
@@ -3897,9 +3913,10 @@ function PlayerDashboard({
                     setProfileMenuOpen(false);
                     onLogout();
                   }}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
                 >
-                  Log out
+                  <LogOut size={15} className="shrink-0" />
+                  <span>Log out</span>
                 </button>
               </div>
             ) : null}
@@ -4453,20 +4470,22 @@ function PlayerDashboard({
           className="fixed z-50"
           style={libraryContextMenuStyle || undefined}
         >
-          <div className="player-menu min-w-[176px] rounded-xl py-1">
+          <div className="player-menu min-w-[196px] rounded-xl py-1">
             <button
               type="button"
               onClick={async () => handleLibraryContextAction('create_playlist')}
-              className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+              className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
             >
-              Create playlist
+              <ListPlus size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+              <span>Create playlist</span>
             </button>
             <button
               type="button"
               onClick={async () => handleLibraryContextAction('create_folder')}
-              className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+              className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
             >
-              Create folder
+              <FolderPlus size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+              <span>Create folder</span>
             </button>
             {libraryContextMenu.entry ? (
               <div className="my-1 border-t border-[var(--player-border-subtle)]" />
@@ -4476,51 +4495,59 @@ function PlayerDashboard({
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('credits')}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
-                  Show Credits
+                  <Info size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                  <span>Show Credits</span>
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('rename')}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
-                  Rename
+                  <Pencil size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                  <span>Rename</span>
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('move')}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
-                  Move
+                  <FolderInput size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                  <span>Move</span>
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('duplicate')}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
-                  Create duplicate
+                  <Copy size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                  <span>Create duplicate</span>
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('edit_mix')}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
-                  Edit mix
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => handleLibraryContextAction('delete')}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
-                >
-                  Delete
+                  <SlidersHorizontal size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                  <span>Edit mix</span>
                 </button>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('new_from_project')}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
-                  Create new mix from this project
+                  <Plus size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                  <span>Create new mix from this project</span>
+                </button>
+                <div className="my-1 border-t border-[var(--player-border-subtle)]" />
+                <button
+                  type="button"
+                  onClick={async () => handleLibraryContextAction('delete')}
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
+                >
+                  <Trash2 size={15} className="shrink-0" />
+                  <span>Delete</span>
                 </button>
               </>
             ) : libraryContextMenu.entry ? (
@@ -4535,62 +4562,71 @@ function PlayerDashboard({
                     onClick={() => setLibraryMoveSubmenuOpen((previous) => !previous)}
                     className="player-menu-item flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm"
                   >
-                    Move to folder
+                    <span className="flex items-center gap-2.5">
+                      <FolderInput size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                      <span>Move to folder</span>
+                    </span>
                     <ChevronRight size={14} className="shrink-0 text-[var(--player-text-muted)]" />
                   </button>
                   {libraryMoveSubmenuOpen ? (
                     <div
-                      className={`player-menu absolute top-0 z-[60] max-h-64 min-w-[168px] overflow-auto rounded-xl py-1 ${
+                      className={`absolute top-0 z-[60] ${
                         libraryContextMenu.x > (typeof window !== 'undefined' ? window.innerWidth - 320 : 0)
-                          ? 'right-full -mr-px'
-                          : 'left-full -ml-px'
+                          ? 'right-full pr-1.5'
+                          : 'left-full pl-1.5'
                       }`}
                     >
-                      <button
-                        type="button"
-                        onClick={async () => handleLibraryContextAction('move_to_new_folder')}
-                        className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
-                      >
-                        New folder
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => handleLibraryContextAction('move_to_folder', null)}
-                        className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
-                      >
-                        Your Library
-                      </button>
-                      {listLibraryFolderMoveTargets(
-                        folders,
-                        libraryContextMenu.entry?.kind === 'folder'
-                          ? libraryContextMenu.entry.folder?.id
-                          : null
-                      ).map((folder) => (
+                      <div className="player-menu max-h-64 min-w-[176px] overflow-auto rounded-xl py-1">
                         <button
-                          key={folder.id}
                           type="button"
-                          onClick={async () => handleLibraryContextAction('move_to_folder', folder.id)}
+                          onClick={async () => handleLibraryContextAction('move_to_new_folder')}
+                          className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
+                        >
+                          <FolderPlus size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                          <span>New folder</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => handleLibraryContextAction('move_to_folder', null)}
                           className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                         >
-                          {folder.name}
+                          Your Library
                         </button>
-                      ))}
+                        {listLibraryFolderMoveTargets(
+                          folders,
+                          libraryContextMenu.entry?.kind === 'folder'
+                            ? libraryContextMenu.entry.folder?.id
+                            : null
+                        ).map((folder) => (
+                          <button
+                            key={folder.id}
+                            type="button"
+                            onClick={async () => handleLibraryContextAction('move_to_folder', folder.id)}
+                            className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                          >
+                            {folder.name}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                 </div>
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('rename')}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
-                  Rename
+                  <Pencil size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                  <span>Rename</span>
                 </button>
+                <div className="my-1 border-t border-[var(--player-border-subtle)]" />
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('delete')}
-                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
+                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
                 >
-                  Delete
+                  <Trash2 size={15} className="shrink-0" />
+                  <span>Delete</span>
                 </button>
               </>
             ) : null}
@@ -4601,21 +4637,23 @@ function PlayerDashboard({
       {projectContextMenu ? (
         <div
           ref={projectContextMenuRef}
-          className="player-menu fixed z-50 min-w-[168px] rounded-xl py-1 overflow-hidden"
+          className="player-menu fixed z-50 min-w-[176px] rounded-xl py-1 overflow-hidden"
           style={projectContextMenuStyle || undefined}
         >
           <button
             onClick={handleShowCreditsFromContextMenu}
-            className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+            className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
           >
-            Show Credits
+            <Info size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+            <span>Show Credits</span>
           </button>
           {projectContextMenu.mix?.canCreateMixes !== false ? (
             <button
               onClick={handleCreateMixFromContextMenu}
-              className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+              className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
             >
-              Create mix
+              <SlidersHorizontal size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+              <span>Create mix</span>
             </button>
           ) : null}
         </div>

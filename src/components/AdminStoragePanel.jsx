@@ -248,17 +248,17 @@ function suggestionMatches(value, draft) {
 }
 
 const TABLE_COLUMNS = [
-  { key: 'fileName', label: 'File', defaultWidth: 220, minWidth: 96, required: true },
-  { key: 'format', label: 'Format', defaultWidth: 88, minWidth: 64 },
-  { key: 'createdByUsername', label: 'Uploader', defaultWidth: 140, minWidth: 80 },
-  { key: 'sha256', label: 'Hash', defaultWidth: 120, minWidth: 72 },
-  { key: 'sizeBytes', label: 'Size', defaultWidth: 90, minWidth: 64 },
-  { key: 'projectCount', label: 'Projects', defaultWidth: 90, minWidth: 64 },
-  { key: 'projectNames', label: 'Used in', defaultWidth: 160, minWidth: 80 },
-  { key: 'clipCount', label: 'Clips', defaultWidth: 70, minWidth: 56 },
-  { key: 'createdAt', label: 'Created', defaultWidth: 170, minWidth: 120 },
-  { key: 'unreferencedAt', label: 'Quarantine date', defaultWidth: 170, minWidth: 120 },
-  { key: 'quarantinedByUsername', label: 'Quarantiner', defaultWidth: 140, minWidth: 80 },
+  { key: 'fileName', label: 'File', defaultWidth: 320, minWidth: 110, required: true },
+  { key: 'format', label: 'Format', defaultWidth: 80, minWidth: 64 },
+  { key: 'createdByUsername', label: 'Uploader', defaultWidth: 120, minWidth: 80 },
+  { key: 'sha256', label: 'Hash', defaultWidth: 110, minWidth: 72 },
+  { key: 'sizeBytes', label: 'Size', defaultWidth: 88, minWidth: 64 },
+  { key: 'projectCount', label: 'Projects', defaultWidth: 86, minWidth: 64 },
+  { key: 'projectNames', label: 'Used in', defaultWidth: 150, minWidth: 80 },
+  { key: 'clipCount', label: 'Clips', defaultWidth: 68, minWidth: 56 },
+  { key: 'createdAt', label: 'Created', defaultWidth: 152, minWidth: 120 },
+  { key: 'unreferencedAt', label: 'Quarantine date', defaultWidth: 164, minWidth: 120 },
+  { key: 'quarantinedByUsername', label: 'Quarantiner', defaultWidth: 120, minWidth: 80 },
 ];
 
 const DEFAULT_COLUMN_ORDER = TABLE_COLUMNS.map((column) => column.key);

@@ -482,10 +482,10 @@ export function PlayerControlsSidebar({
                   onClick={onToggleMetronomeMute}
                   disabled={isRendering}
                   data-active={isMetronomeMuted ? 'false' : 'true'}
-                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 hover:bg-[var(--player-hover)] ${
+                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-50 ${
                     isMetronomeMuted
-                      ? 'text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]'
-                      : 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                      ? 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
+                      : 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
                   }`}
                   title={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
                   aria-label="Metronome"
@@ -594,10 +594,10 @@ export function PlayerControlsSidebar({
                   onClick={onTogglePracticeFocus}
                   disabled={focusControlDisabled}
                   data-active={isFocusActive ? 'true' : 'false'}
-                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--player-hover)] ${
+                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     isFocusActive
-                      ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                      : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                      ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                      : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                   }`}
                   title="Cycle practice focus: stored dB → Solo → Omitted"
                   aria-label="Practice focus"
@@ -731,10 +731,10 @@ export function PlayerControlsSidebar({
                   onClick={onTogglePracticePanRange}
                   disabled={panControlDisabled || isRendering}
                   data-active={isPanActive ? 'true' : 'false'}
-                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--player-hover)] ${
+                  className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     isPanActive
-                      ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                      : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                      ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                      : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                   }`}
                   title="Jump transformed pan range to the farthest extreme"
                   aria-label="Transformed pan range"
@@ -881,10 +881,10 @@ export function PlayerControlsSidebar({
                     onClick={handleSpeedButtonClick}
                     disabled={isRendering}
                     data-active={isSpeedActive ? 'true' : 'false'}
-                    className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 hover:bg-[var(--player-hover)] ${
+                    className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-50 ${
                       isSpeedActive
-                        ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                        : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                        ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                        : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                     }`}
                     title={`Playback speed: ${speedFormatted} (click for ${nextSpeedFormatted})`}
                     aria-label="Playback speed"
@@ -1024,10 +1024,10 @@ export function PlayerControlsSidebar({
                     onClick={handleTransposeButtonClick}
                     disabled={isRendering}
                     data-active={isTransposeActive ? 'true' : 'false'}
-                    className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-md transition-colors disabled:opacity-50 hover:bg-[var(--player-hover)] ${
+                    className={`h-8 w-8 shrink-0 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-50 ${
                       isTransposeActive
-                        ? 'text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                        : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
+                        ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                        : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                     }`}
                     title={isTransposeActive
                       ? `Pitch transpose: ${transposeFormatted}`

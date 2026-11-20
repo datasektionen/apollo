@@ -26,8 +26,8 @@
   --player-bg-surface: #0c0c0e;
   --player-bg-surface-subtle: #09090b;
   --player-bg-elevated: #141416;
-  --player-bg-popover: #1c1e24;
-  --player-bg-active-segment: #242428;
+  --player-bg-popover: #1b1a1d;
+  --player-bg-active-segment: #242327;
   --player-bg-scrim: rgba(0, 0, 0, 0.76);
 
   /* Crisp Hairline Borders */
@@ -117,11 +117,11 @@
   --player-info-border: rgba(96, 165, 250, 0.36);
 
   /* Storage Breakdown Chart Palette */
-  --player-chart-media: #f87171;
-  --player-chart-database: #fb923c;
+  --player-chart-media: #d97070;
+  --player-chart-database: #e09145;
   --player-chart-quarantine: var(--player-gold-300);
   --player-chart-other: #8e8e98;
-  --player-chart-free: #242428;
+  --player-chart-free: #303036;
 
   /* Elevation */
   --player-shadow-elevated: 0 12px 32px rgba(0, 0, 0, 0.56);

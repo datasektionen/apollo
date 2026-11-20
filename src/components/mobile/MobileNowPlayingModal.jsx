@@ -788,7 +788,7 @@ export function MobileNowPlayingModal({
           </div>
 
           {hasCurrentLyrics ? (
-            <div className="h-[380px] flex flex-col overflow-hidden rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)]">
+            <div className="-mx-2 h-[380px] flex flex-col overflow-hidden">
               <PlayerLyricsView
                 lyrics={currentPlaybackLyrics}
                 currentTimeMs={currentTimeSec * 1000}

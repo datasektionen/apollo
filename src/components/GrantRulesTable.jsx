@@ -255,13 +255,13 @@ export function GrantRulesTable({
     <div className="overflow-x-auto">
       <table className="w-full table-fixed border-collapse text-left">
         <colgroup>
+          <col className="w-[21%]" />
+          <col className="w-[19%]" />
           <col className="w-[16%]" />
-          <col className="w-[16%]" />
-          <col className="w-[18%]" />
           <col className="w-[12%]" />
+          <col className="w-[10%]" />
           <col className="w-[11%]" />
-          <col className="w-[12%]" />
-          <col className="w-[15%]" />
+          <col className="w-[11%]" />
         </colgroup>
         <thead>
           <tr className="bg-[var(--player-bg-surface-subtle)] text-[11px] font-bold uppercase tracking-wider text-[var(--player-text-muted)]">
@@ -297,7 +297,7 @@ export function GrantRulesTable({
                   </div>
                   {inherited && grant.sourceRoleName ? (
                     <div className="mt-1">
-                      <span className="inline-block max-w-full whitespace-normal rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2 py-0.5 text-xs leading-snug text-[var(--player-accent-text)]">
+                      <span className="inline-block max-w-full truncate rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2 py-0.5 text-[11px] font-medium leading-tight text-[var(--player-accent-text)]">
                         Inherited from {grant.sourceRoleName}
                       </span>
                     </div>
