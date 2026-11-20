@@ -628,7 +628,7 @@ export function PlayerControlsSidebar({
                     <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-slider-track)] pointer-events-none z-0" />
                     <span
                       aria-hidden="true"
-                      className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)] z-10"
+                      className="pointer-events-none absolute left-1/2 top-1/2 h-3.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)] z-10"
                     />
                     <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none z-10">
                       <div
@@ -772,7 +772,7 @@ export function PlayerControlsSidebar({
                   <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-slider-track)] overflow-hidden pointer-events-none" />
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)] z-10"
+                    className="pointer-events-none absolute left-1/2 top-1/2 h-3.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)] z-10"
                   />
                   <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none overflow-hidden">
                     {(() => {
@@ -916,7 +916,7 @@ export function PlayerControlsSidebar({
                 >
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+                    className="pointer-events-none absolute left-1/2 top-1/2 h-3.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
                   />
                   <input
                     type="range"
@@ -1061,7 +1061,7 @@ export function PlayerControlsSidebar({
                 >
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+                    className="pointer-events-none absolute left-1/2 top-1/2 h-3.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
                   />
                   <input
                     type="range"

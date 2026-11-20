@@ -732,7 +732,7 @@ function StorageBar({
             }`}
           >
             <span
-              className="block h-2.5 w-2.5 shrink-0 translate-y-[0.5px] rounded-full"
+              className="block h-2.5 w-2.5 shrink-0 translate-y-[0.5px] rounded-full ring-1 ring-[var(--player-border-default)]"
               style={{ backgroundColor: segment.color }}
             />
             <span className="leading-none">{segment.label}</span>
@@ -1573,7 +1573,7 @@ export default function AdminStoragePanel({
             onClick={requestQuarantineSelected}
             className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               busy || !quarantinableItems.length
-                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] opacity-70'
+                ? 'cursor-not-allowed border-[var(--player-border-subtle)] bg-transparent text-[var(--player-text-muted)] opacity-60'
                 : 'border-[var(--player-warning-border)] bg-[var(--player-warning-soft)] text-[var(--player-warning-text)] hover:bg-[var(--player-accent-soft)]'
             }`}
           >
@@ -1585,7 +1585,7 @@ export default function AdminStoragePanel({
             onClick={requestRestoreSelected}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               busy || !restorableItems.length
-                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] opacity-70'
+                ? 'cursor-not-allowed border-[var(--player-border-subtle)] bg-transparent text-[var(--player-text-muted)] opacity-60'
                 : 'border-[var(--player-success-border)] bg-[var(--player-success-soft)] text-[var(--player-success-text)] hover:bg-[var(--player-success-surface)]'
             }`}
           >
@@ -1598,7 +1598,7 @@ export default function AdminStoragePanel({
             onClick={requestDeleteSelected}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               busy || !selectedItems.length
-                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] opacity-70'
+                ? 'cursor-not-allowed border-[var(--player-border-subtle)] bg-transparent text-[var(--player-text-muted)] opacity-60'
                 : 'border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] text-[var(--player-danger-text)] hover:bg-[var(--player-danger-surface)]'
             }`}
           >

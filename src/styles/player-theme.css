@@ -122,7 +122,7 @@
   --player-chart-database: #bfb9ad;
   --player-chart-quarantine: #c86f58;
   --player-chart-other: #6d6d76;
-  --player-chart-free: #232328;
+  --player-chart-free: #2b2b33;
 
   /* Elevation */
   --player-shadow-elevated: 0 12px 32px rgba(0, 0, 0, 0.56);
@@ -219,6 +219,15 @@
 .player-theme .player-menu-item:hover {
   background-color: var(--player-hover);
   color: var(--player-text-primary);
+}
+
+.player-theme .player-menu-item.player-menu-item-danger {
+  color: var(--player-danger);
+}
+
+.player-theme .player-menu-item.player-menu-item-danger:hover {
+  background-color: var(--player-danger-soft);
+  color: var(--player-danger);
 }
 
 /* Precision Range Sliders */
@@ -346,8 +355,8 @@
     to bottom,
     transparent 0px,
     transparent 10px,
-    rgba(0, 0, 0, 0.45) 26px,
-    #000 54px,
+    rgba(0, 0, 0, 0.35) 32px,
+    #000 62px,
     #000 calc(100% - 118px),
     rgba(0, 0, 0, 0.28) calc(100% - 54px),
     transparent calc(100% - 16px),
@@ -357,8 +366,8 @@
     to bottom,
     transparent 0px,
     transparent 10px,
-    rgba(0, 0, 0, 0.45) 26px,
-    #000 54px,
+    rgba(0, 0, 0, 0.35) 32px,
+    #000 62px,
     #000 calc(100% - 118px),
     rgba(0, 0, 0, 0.28) calc(100% - 54px),
     transparent calc(100% - 16px),

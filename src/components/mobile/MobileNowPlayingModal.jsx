@@ -654,7 +654,23 @@ export function MobileNowPlayingModal({
           >
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+              className={`pointer-events-none absolute left-0 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full transition-colors ${
+                focusStep === 'omitted'
+                  ? 'bg-[var(--player-accent)] ring-2 ring-[var(--player-focus-ring)]'
+                  : 'bg-[var(--player-border-strong)]'
+              }`}
+            />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+            />
+            <span
+              aria-hidden="true"
+              className={`pointer-events-none absolute right-0 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full transition-colors ${
+                focusStep === 'solo'
+                  ? 'bg-[var(--player-accent)] ring-2 ring-[var(--player-focus-ring)]'
+                  : 'bg-[var(--player-border-strong)]'
+              }`}
             />
             <input
               type="range"
@@ -680,7 +696,7 @@ export function MobileNowPlayingModal({
           >
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
             />
             <input
               type="range"
@@ -706,7 +722,7 @@ export function MobileNowPlayingModal({
           >
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
             />
             <input
               type="range"
@@ -732,7 +748,7 @@ export function MobileNowPlayingModal({
           >
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
             />
             <input
               type="range"
@@ -789,13 +805,14 @@ export function MobileNowPlayingModal({
           </div>
 
           {hasCurrentLyrics ? (
-            <div className="-mx-2 h-[380px] flex flex-col overflow-hidden">
+            <div className="h-[380px] flex flex-col overflow-hidden">
               <PlayerLyricsView
                 lyrics={currentPlaybackLyrics}
                 currentTimeMs={currentTimeSec * 1000}
                 durationMs={durationSec * 1000}
                 songTitle={title}
                 showHeader={false}
+                contentClassName="px-0 pt-5 pb-6"
                 onSeek={onSeek}
               />
             </div>

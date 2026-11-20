@@ -21,6 +21,7 @@ function PlayerLyricsView({
   isLoading = false,
   songTitle = '',
   showHeader = true,
+  contentClassName = 'px-6 pt-4 pb-4 sm:px-12',
   onSeek,
 }) {
   const lines = Array.isArray(lyrics?.lines) ? lyrics.lines : [];
@@ -210,7 +211,7 @@ function PlayerLyricsView({
       ) : null}
       <div
         ref={scrollContainerRef}
-        className="player-scrollfade min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-4 sm:px-12"
+        className={`player-scrollfade min-h-0 flex-1 overflow-y-auto ${contentClassName}`}
         aria-label="Lyrics lines"
         onScroll={handleScroll}
       >

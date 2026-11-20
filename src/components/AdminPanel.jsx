@@ -131,7 +131,7 @@ function ToggleSwitch({
         className={`absolute top-0.5 h-5 w-5 rounded-full shadow transition-transform ${
           checked
             ? 'translate-x-5 bg-[var(--player-accent-foreground)]'
-            : 'translate-x-0.5 bg-[var(--player-text-body)]'
+            : 'translate-x-0.5 bg-[var(--player-text-muted)]'
         }`}
       />
     </button>
@@ -1079,7 +1079,7 @@ export default function AdminPanel({
                       setProfileMenuOpen(false);
                       leaveAdmin(() => onLogout?.());
                     }}
-                    className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
+                    className="player-menu-item player-menu-item-danger w-full px-3.5 py-2 text-left text-sm"
                   >
                     Log out
                   </button>
@@ -1108,7 +1108,7 @@ export default function AdminPanel({
                       onClick={() => selectAdminTab(item.id)}
                       className={`relative flex min-w-0 items-center justify-center rounded-lg border px-1 py-1.5 text-center text-[11px] sm:text-xs transition-colors md:w-full md:justify-between md:gap-1.5 md:border-transparent md:px-2.5 md:py-2 md:text-left md:text-sm ${
                         active
-                          ? 'border-[var(--player-accent-border)] bg-[var(--player-bg-elevated)] text-[var(--player-accent-text)] font-semibold md:border-transparent md:text-[var(--player-text-primary)]'
+                          ? 'border-transparent bg-[var(--player-bg-active-segment)] text-[var(--player-accent-text)] font-semibold md:bg-[var(--player-bg-elevated)] md:text-[var(--player-text-primary)]'
                           : 'border-transparent text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                       }`}
                     >
@@ -1778,7 +1778,7 @@ export default function AdminPanel({
                                 <button
                                   type="button"
                                   onClick={() => openUserActionModal('delete', user)}
-                                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
+                                  className="player-menu-item player-menu-item-danger w-full px-3.5 py-2 text-left text-sm"
                                 >
                                   Delete user
                                 </button>

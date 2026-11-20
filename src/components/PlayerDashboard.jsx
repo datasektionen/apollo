@@ -3915,7 +3915,7 @@ function PlayerDashboard({
                     setProfileMenuOpen(false);
                     onLogout();
                   }}
-                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
+                  className="player-menu-item player-menu-item-danger flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
                   <LogOut size={15} className="shrink-0" />
                   <span>Log out</span>
@@ -4379,10 +4379,17 @@ function PlayerDashboard({
                                   <Play size={14} className="fill-current" />
                                 </button>
                               </div>
-                              <div className={`tabular-nums text-xs font-medium ${
-                                isActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)]'
-                              }`}>
-                                <span aria-hidden="true">{mix.musicalNumber || '0.0'}</span>
+                              <div className="flex items-center">
+                                <span
+                                  aria-hidden="true"
+                                  className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums ${
+                                    isActive
+                                      ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                                      : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)]'
+                                  }`}
+                                >
+                                  {mix.musicalNumber || '0.0'}
+                                </span>
                               </div>
                               <div className="min-w-0 truncate">
                                 <span className="sr-only">{listTitle}</span>
@@ -4546,7 +4553,7 @@ function PlayerDashboard({
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('delete')}
-                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
+                  className="player-menu-item player-menu-item-danger flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
                   <Trash2 size={15} className="shrink-0" />
                   <span>Delete</span>
@@ -4627,7 +4634,7 @@ function PlayerDashboard({
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('delete')}
-                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-[var(--player-danger)] hover:bg-[var(--player-danger-soft)] hover:text-[var(--player-danger)]"
+                  className="player-menu-item player-menu-item-danger flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                 >
                   <Trash2 size={15} className="shrink-0" />
                   <span>Delete</span>
