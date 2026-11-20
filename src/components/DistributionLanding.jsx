@@ -38,7 +38,7 @@ function PlatformIconWell({ Icon, active = false, size = 24, boxClass = 'h-10 w-
 
 function GuideStepList({ steps }) {
   return (
-    <ol className="space-y-3.5 text-sm leading-relaxed text-[var(--player-text-secondary)]">
+    <ol className="space-y-3.5 text-sm leading-relaxed text-[var(--player-text-body)]">
       {steps.map((step, index) => (
         <li key={index} className="flex items-start gap-3.5">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-xs font-bold tabular-nums text-[var(--player-accent-text)]">
@@ -53,12 +53,12 @@ function GuideStepList({ steps }) {
 
 function GuideHeader({ icon, title, subtitle, rightSlot = null }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--player-border-subtle)] pb-4">
+    <div className="flex flex-col gap-3 border-b border-[var(--player-border-subtle)] pb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <div className="flex items-center gap-3.5">
         <PlatformIconWell Icon={icon} active size={26} boxClass="h-12 w-12 rounded-xl" />
         <div>
           <div className="text-xl font-bold tracking-tight text-[var(--player-text-primary)]">{title}</div>
-          <span className="font-mono text-xs text-[var(--player-accent-text)]">{subtitle}</span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--player-accent-text)]">{subtitle}</span>
         </div>
       </div>
       {rightSlot}
@@ -91,7 +91,7 @@ function PlatformCard({
             {title}
           </span>
           <span
-            className={`rounded-md border px-2 py-0.5 font-mono text-[11px] font-medium ${
+            className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] ${
               active
                 ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
                 : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)]'
@@ -265,7 +265,7 @@ export default function DistributionLanding() {
             title="macOS"
             subtitle="Desktop PWA"
             rightSlot={(
-              <div className="flex rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)] p-0.5">
+              <div className="self-start sm:self-auto flex rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)] p-0.5">
                 <button
                   type="button"
                   onClick={() => setMacBrowserTab('safari')}
@@ -312,7 +312,7 @@ export default function DistributionLanding() {
               <GuideStepList
                 steps={[
                   <>
-                    In Google Chrome, Edge, or Brave, click the <span className="font-semibold text-[var(--player-text-primary)]">Install Apollo</span> icon in the right side of the address bar.
+                    In Chrome, Edge, or Brave, click <span className="font-semibold text-[var(--player-text-primary)]">Install Apollo</span> inside the address bar.
                   </>,
                   <>
                     Click <span className="font-semibold text-[var(--player-text-primary)]">Install</span> to add Apollo to your Mac Applications.
@@ -378,7 +378,7 @@ export default function DistributionLanding() {
       data-player-theme="dark-gold"
     >
       {/* Header with only Apollo Brand Wordmark */}
-      <header className="relative z-20 border-b border-[var(--player-border-subtle)] bg-transparent px-5 py-4 flex items-center">
+      <header className="relative z-20 border-b border-[var(--player-border-subtle)] bg-transparent px-4 sm:px-6 py-4 flex items-center">
         <div className="mx-auto w-full max-w-3xl flex items-center">
           <BrandWordmark className="h-9" />
         </div>

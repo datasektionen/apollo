@@ -176,7 +176,7 @@ function LibraryEntryRow({
     onHoverChange({
       name: entry.name,
       subtitle,
-      x: rect.right + 10,
+      x: rect.right + 16,
       y: rect.top + rect.height / 2,
     });
   };

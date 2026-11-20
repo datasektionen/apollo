@@ -55,22 +55,22 @@ export function MobileMiniPlayer({
         </div>
 
         {/* Right side controls */}
-        <div className="flex items-center shrink-0">
+        <div className="flex items-center shrink-0 pr-1.5">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               onTogglePlay();
             }}
-            className="flex h-11 w-11 items-center justify-center rounded-full text-[var(--player-text-primary)] hover:text-[var(--player-accent-text)] active:scale-90 transition-all"
+            className="player-play-cta flex h-9 w-9 items-center justify-center rounded-full"
             aria-label={isPlaying ? 'Pause' : 'Play'}
           >
             {isRendering ? (
-              <Loader2 size={20} className="animate-spin text-[var(--player-accent-text)]" />
+              <Loader2 size={17} className="animate-spin" />
             ) : isPlaying ? (
-              <Pause size={22} className="fill-current" />
+              <Pause size={17} className="fill-current" />
             ) : (
-              <Play size={22} className="fill-current translate-x-[1px]" />
+              <Play size={17} className="fill-current translate-x-[1px]" />
             )}
           </button>
         </div>

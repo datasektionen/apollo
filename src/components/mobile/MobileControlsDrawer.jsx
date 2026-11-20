@@ -118,8 +118,50 @@ export function MobileControlsDrawer({
           </button>
         </div>
 
+        {/* Metronome (if available in active snapshot) */}
+        {hasRealtimeMetronome && (
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center text-xs font-semibold">
+              <span className="text-[var(--player-text-secondary)]">Metronome</span>
+              <span className={`font-bold tabular-nums ${isMetronomeMuted ? 'text-[var(--player-text-muted)]' : 'text-[var(--player-accent-text)]'}`}>
+                {isMetronomeMuted ? 'Muted' : `${Math.round(effectiveMetronome)}%`}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  if (isMetronomeMuted) {
+                    onSetMetronomeVolume?.(previousMetronomeRef.current || 80);
+                  } else {
+                    previousMetronomeRef.current = effectiveMetronome;
+                    onSetMetronomeVolume?.(0);
+                  }
+                }}
+                aria-label={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                  !isMetronomeMuted
+                    ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                    : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-muted)]'
+                }`}
+              >
+                <Metronome size={18} />
+              </button>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={effectiveMetronome}
+                onChange={(e) => onSetMetronomeVolume?.(Number(e.target.value))}
+                style={{ '--player-range-pct': `${effectiveMetronome}%` }}
+                className="player-range player-range-touch flex-1 cursor-pointer"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Stem Practice Focus */}
-        <div className="space-y-1.5">
+        <div className={`space-y-1.5 ${hasRealtimeMetronome ? 'border-t border-[var(--player-border-subtle)] pt-3.5' : ''}`}>
           <div className="flex justify-between items-center text-xs font-semibold">
             <span className="text-[var(--player-text-secondary)]">Practice Focus</span>
             <span className={`font-bold tabular-nums ${isFocusActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-primary)]'}`}>
@@ -165,7 +207,7 @@ export function MobileControlsDrawer({
         {/* Playback Speed */}
         <div className="space-y-1.5 border-t border-[var(--player-border-subtle)] pt-3.5">
           <div className="flex justify-between items-center text-xs font-semibold">
-            <span className="text-[var(--player-text-secondary)]">Speed</span>
+            <span className="text-[var(--player-text-secondary)]">Playback Speed</span>
             <span className={`font-bold tabular-nums ${isSpeedActive ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-primary)]'}`}>
               {formatPlaybackSpeed(playbackSpeed)}x
             </span>
@@ -239,48 +281,6 @@ export function MobileControlsDrawer({
             />
           </div>
         </div>
-
-        {/* Metronome (if available in active snapshot) */}
-        {hasRealtimeMetronome && (
-          <div className="space-y-1.5 border-t border-[var(--player-border-subtle)] pt-3.5">
-            <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-[var(--player-text-secondary)]">Metronome Click</span>
-              <span className={`font-bold tabular-nums ${isMetronomeMuted ? 'text-[var(--player-text-muted)]' : 'text-[var(--player-accent-text)]'}`}>
-                {isMetronomeMuted ? 'Muted' : `${Math.round(effectiveMetronome)}%`}
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  if (isMetronomeMuted) {
-                    onSetMetronomeVolume?.(previousMetronomeRef.current || 80);
-                  } else {
-                    previousMetronomeRef.current = effectiveMetronome;
-                    onSetMetronomeVolume?.(0);
-                  }
-                }}
-                aria-label={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
-                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                  !isMetronomeMuted
-                    ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                    : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-muted)]'
-                }`}
-              >
-                <Metronome size={18} />
-              </button>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={effectiveMetronome}
-                onChange={(e) => onSetMetronomeVolume?.(Number(e.target.value))}
-                style={{ '--player-range-pct': `${effectiveMetronome}%` }}
-                className="player-range player-range-touch flex-1 cursor-pointer"
-              />
-            </div>
-          </div>
-        )}
 
         {/* Close Button */}
         <button

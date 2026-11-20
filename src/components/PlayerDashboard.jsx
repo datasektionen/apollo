@@ -7,11 +7,13 @@ import {
   Clock,
   Copy,
   Download,
+  Folder,
   FolderInput,
   FolderPlus,
   HeadphoneOff,
   Headphones,
   Info,
+  Library,
   ListPlus,
   Loader2,
   LogOut,
@@ -3871,7 +3873,7 @@ function PlayerDashboard({
               <CircleUserRound size={18} />
             </button>
             {profileMenuOpen ? (
-              <div className="player-menu absolute right-0 top-full mt-2 min-w-44 rounded-xl py-1 z-[110] overflow-hidden">
+              <div className="player-menu absolute right-0 top-full mt-2 min-w-[196px] rounded-xl py-1 z-[110] overflow-hidden">
                 {onOpenProfile ? (
                   <button
                     onClick={() => {
@@ -4576,21 +4578,22 @@ function PlayerDashboard({
                           : 'left-full pl-1.5'
                       }`}
                     >
-                      <div className="player-menu max-h-64 min-w-[176px] overflow-auto rounded-xl py-1">
+                      <div className="player-menu max-h-64 min-w-[184px] overflow-auto rounded-xl py-1">
                         <button
                           type="button"
                           onClick={async () => handleLibraryContextAction('move_to_new_folder')}
                           className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                         >
                           <FolderPlus size={15} className="shrink-0 text-[var(--player-text-muted)]" />
-                          <span>New folder</span>
+                          <span className="truncate">New folder</span>
                         </button>
                         <button
                           type="button"
                           onClick={async () => handleLibraryContextAction('move_to_folder', null)}
-                          className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                          className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                         >
-                          Your Library
+                          <Library size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                          <span className="truncate">Your Library</span>
                         </button>
                         {listLibraryFolderMoveTargets(
                           folders,
@@ -4602,9 +4605,10 @@ function PlayerDashboard({
                             key={folder.id}
                             type="button"
                             onClick={async () => handleLibraryContextAction('move_to_folder', folder.id)}
-                            className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
+                            className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
                           >
-                            {folder.name}
+                            <Folder size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                            <span className="truncate">{folder.name}</span>
                           </button>
                         ))}
                       </div>

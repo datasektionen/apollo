@@ -620,7 +620,31 @@ export function MobileNowPlayingModal({
             </h2>
           </div>
 
+          {hasRealtimeMetronome && (
+            <MobileSliderControl
+              label="Metronome"
+              readout={isMetronomeMuted ? 'Muted' : `${Math.round(effectiveMetronome)}%`}
+              active={!isMetronomeMuted}
+              icon={Metronome}
+              iconLabel={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
+              onIconClick={handleMetronomeIconClick}
+            >
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={effectiveMetronome}
+                onChange={(e) => onSetMetronomeVolume?.(Number(e.target.value))}
+                style={{ '--player-range-pct': `${effectiveMetronome}%` }}
+                className="player-range player-range-touch w-full cursor-pointer"
+                aria-label="Metronome Volume Slider"
+              />
+            </MobileSliderControl>
+          )}
+
           <MobileSliderControl
+            divider={hasRealtimeMetronome}
             label="Practice Focus"
             readout={focusLabel}
             active={isFocusActive}
@@ -699,7 +723,7 @@ export function MobileNowPlayingModal({
 
           <MobileSliderControl
             divider
-            label="Pitch Transposition"
+            label="Pitch Transpose"
             readout={formatPlaybackTranspose(playbackTranspose)}
             active={isTransposeActive}
             icon={Music}
@@ -747,30 +771,6 @@ export function MobileNowPlayingModal({
               aria-label="Master Volume Slider"
             />
           </MobileSliderControl>
-
-          {hasRealtimeMetronome && (
-            <MobileSliderControl
-              divider
-              label="Metronome Click"
-              readout={isMetronomeMuted ? 'Muted' : `${Math.round(effectiveMetronome)}%`}
-              active={!isMetronomeMuted}
-              icon={Metronome}
-              iconLabel={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
-              onIconClick={handleMetronomeIconClick}
-            >
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={effectiveMetronome}
-                onChange={(e) => onSetMetronomeVolume?.(Number(e.target.value))}
-                style={{ '--player-range-pct': `${effectiveMetronome}%` }}
-                className="player-range player-range-touch w-full cursor-pointer"
-                aria-label="Metronome Volume Slider"
-              />
-            </MobileSliderControl>
-          )}
         </section>
 
         {/* ============================================================ */}

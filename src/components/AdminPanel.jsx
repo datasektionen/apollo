@@ -124,14 +124,14 @@ function ToggleSwitch({
       className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border transition ${
         checked
           ? 'border-[var(--player-accent-border)] bg-[var(--player-accent)]'
-          : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)]'
+          : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)]'
       } ${disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-[var(--player-accent-hover)]'}`}
     >
       <span
         className={`absolute top-0.5 h-5 w-5 rounded-full shadow transition-transform ${
           checked
             ? 'translate-x-5 bg-[var(--player-accent-foreground)]'
-            : 'translate-x-0.5 bg-[var(--player-text-secondary)]'
+            : 'translate-x-0.5 bg-[var(--player-text-muted)]'
         }`}
       />
     </button>
@@ -1020,11 +1020,19 @@ export default function AdminPanel({
             <BrandWordmark className="h-8" />
           </button>
           <div className="flex items-center gap-3">
-            <div className="flex items-center rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] p-0.5">
+            <div className="flex items-center rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-0.5">
+              <button
+                type="button"
+                onClick={() => leaveAdmin(() => onClose?.())}
+                className="rounded-full px-3.5 py-1 text-xs font-medium text-[var(--player-text-secondary)] transition-colors hover:text-[var(--player-text-primary)]"
+                title="Switch to Player"
+              >
+                Player
+              </button>
               <button
                 type="button"
                 disabled
-                className="rounded-full px-3.5 py-1 text-xs font-bold tracking-wider text-[var(--player-accent-text)] cursor-default"
+                className="rounded-full bg-[var(--player-bg-active-segment)] px-3.5 py-1 text-xs font-bold tracking-wider text-[var(--player-accent-text)] cursor-default"
                 title="Current page"
               >
                 ADMIN
@@ -1089,7 +1097,7 @@ export default function AdminPanel({
         <div className="min-h-0 flex-1 overflow-hidden px-3 pb-3 pt-2.5">
           <div className="flex h-full flex-col gap-2.5 overflow-hidden md:flex-row">
             <aside className="shrink-0 rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-1.5 md:w-48 md:p-2">
-              <nav className="grid grid-cols-5 gap-1 md:block md:space-y-1" aria-label="Admin Navigation">
+              <nav className="grid grid-cols-5 gap-0.5 md:block md:space-y-1" aria-label="Admin Navigation">
                 {navItems.map((item) => {
                   const active = tab === item.id;
                   return (
@@ -1097,16 +1105,16 @@ export default function AdminPanel({
                       key={item.id}
                       type="button"
                       onClick={() => selectAdminTab(item.id)}
-                      className={`relative flex min-w-0 items-center justify-center rounded-lg px-1 py-1.5 text-center text-xs transition-colors md:w-full md:justify-between md:gap-1.5 md:px-2.5 md:py-2 md:text-left md:text-sm ${
+                      className={`relative flex min-w-0 items-center justify-center rounded-lg border px-1.5 py-1.5 text-center text-xs transition-colors md:w-full md:justify-between md:gap-1.5 md:border-transparent md:px-2.5 md:py-2 md:text-left md:text-sm ${
                         active
-                          ? 'bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)]'
-                          : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
+                          ? 'border-[var(--player-accent-border)] bg-[var(--player-bg-elevated)] text-[var(--player-accent-text)] font-semibold md:border-transparent md:text-[var(--player-text-primary)]'
+                          : 'border-transparent text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                       }`}
                     >
                       {active ? (
                         <span
                           aria-hidden="true"
-                          className="absolute inset-x-2 bottom-0 h-[2px] rounded-t-full bg-[var(--player-accent)] md:inset-y-2 md:inset-x-auto md:left-0 md:h-auto md:w-[2.5px] md:rounded-r-full md:rounded-tl-none"
+                          className="hidden md:block absolute inset-y-2 left-0 w-[2.5px] rounded-r-full bg-[var(--player-accent)]"
                         />
                       ) : null}
                       <span className={`font-medium md:pl-1.5 ${active ? 'text-[var(--player-accent-text)] font-semibold' : ''}`}>
@@ -1202,11 +1210,14 @@ export default function AdminPanel({
                               setSelectedRoleId('');
                             }
                           })}
-                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2.5 py-1.5 text-left text-sm font-medium text-[var(--player-text-primary)] transition hover:bg-[var(--player-hover)]"
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2.5 py-1.5 text-left text-sm font-medium text-[var(--player-text-primary)] transition hover:bg-[var(--player-hover)] lg:hidden"
                         >
                           <ArrowLeft size={16} className="shrink-0" />
                           <span className="truncate">Back</span>
                         </button>
+                        <span className="hidden lg:block flex-1 truncate px-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
+                          Roles
+                        </span>
                         <button
                           type="button"
                           disabled={saving}
@@ -1705,7 +1716,7 @@ export default function AdminPanel({
                                   title="Add role"
                                   disabled={saving}
                                   onClick={() => setRolePickerUserId((current) => (current === user.id ? '' : user.id))}
-                                  className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] opacity-100 transition hover:bg-[var(--player-hover)] hover:text-[var(--player-accent-text)] md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
+                                  className="flex h-6 items-center justify-center rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2.5 text-[var(--player-text-secondary)] opacity-100 transition hover:bg-[var(--player-hover)] hover:text-[var(--player-accent-text)] md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
                                 >
                                   <Plus size={13} />
                                 </button>

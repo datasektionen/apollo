@@ -248,17 +248,17 @@ function suggestionMatches(value, draft) {
 }
 
 const TABLE_COLUMNS = [
-  { key: 'fileName', label: 'File', defaultWidth: 320, minWidth: 110, required: true },
-  { key: 'format', label: 'Format', defaultWidth: 80, minWidth: 64 },
+  { key: 'fileName', label: 'File', defaultWidth: 340, minWidth: 110, required: true },
+  { key: 'format', label: 'Format', defaultWidth: 82, minWidth: 64 },
   { key: 'createdByUsername', label: 'Uploader', defaultWidth: 120, minWidth: 80 },
   { key: 'sha256', label: 'Hash', defaultWidth: 110, minWidth: 72 },
-  { key: 'sizeBytes', label: 'Size', defaultWidth: 88, minWidth: 64 },
-  { key: 'projectCount', label: 'Projects', defaultWidth: 86, minWidth: 64 },
+  { key: 'sizeBytes', label: 'Size', defaultWidth: 84, minWidth: 64 },
+  { key: 'projectCount', label: 'Projects', defaultWidth: 92, minWidth: 64 },
   { key: 'projectNames', label: 'Used in', defaultWidth: 150, minWidth: 80 },
-  { key: 'clipCount', label: 'Clips', defaultWidth: 68, minWidth: 56 },
-  { key: 'createdAt', label: 'Created', defaultWidth: 152, minWidth: 120 },
-  { key: 'unreferencedAt', label: 'Quarantine date', defaultWidth: 164, minWidth: 120 },
-  { key: 'quarantinedByUsername', label: 'Quarantiner', defaultWidth: 120, minWidth: 80 },
+  { key: 'clipCount', label: 'Clips', defaultWidth: 70, minWidth: 56 },
+  { key: 'createdAt', label: 'Created', defaultWidth: 142, minWidth: 120 },
+  { key: 'unreferencedAt', label: 'Quarantine date', defaultWidth: 158, minWidth: 120 },
+  { key: 'quarantinedByUsername', label: 'Quarantiner', defaultWidth: 116, minWidth: 80 },
 ];
 
 const DEFAULT_COLUMN_ORDER = TABLE_COLUMNS.map((column) => column.key);
@@ -1571,7 +1571,11 @@ export default function AdminStoragePanel({
             type="button"
             disabled={busy || !quarantinableItems.length}
             onClick={requestQuarantineSelected}
-            className="rounded-lg border border-[var(--player-warning-border)] bg-[var(--player-warning-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--player-warning-text)] hover:bg-[var(--player-accent-soft)] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+              busy || !quarantinableItems.length
+                ? 'cursor-not-allowed border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)] opacity-60'
+                : 'border-[var(--player-warning-border)] bg-[var(--player-warning-soft)] text-[var(--player-warning-text)] hover:bg-[var(--player-accent-soft)]'
+            }`}
           >
             Quarantine
           </button>
@@ -1579,7 +1583,11 @@ export default function AdminStoragePanel({
             type="button"
             disabled={busy || !restorableItems.length}
             onClick={requestRestoreSelected}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--player-success-border)] bg-[var(--player-success-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--player-success-text)] hover:bg-[var(--player-success-surface)] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+              busy || !restorableItems.length
+                ? 'cursor-not-allowed border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)] opacity-60'
+                : 'border-[var(--player-success-border)] bg-[var(--player-success-soft)] text-[var(--player-success-text)] hover:bg-[var(--player-success-surface)]'
+            }`}
           >
             <RotateCcw size={12} />
             Restore
@@ -1588,7 +1596,11 @@ export default function AdminStoragePanel({
             type="button"
             disabled={busy || !selectedItems.length}
             onClick={requestDeleteSelected}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--player-danger-text)] hover:bg-[var(--player-danger-surface)] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+              busy || !selectedItems.length
+                ? 'cursor-not-allowed border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)] opacity-60'
+                : 'border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] text-[var(--player-danger-text)] hover:bg-[var(--player-danger-surface)]'
+            }`}
           >
             <Trash2 size={12} />
             Delete
@@ -1695,7 +1707,7 @@ export default function AdminStoragePanel({
                 {visibleColumns.map((column, columnIndex) => (
                   <div
                     key={column.key}
-                    className={`min-w-0 whitespace-nowrap px-3 py-2 ${
+                    className={`flex min-w-0 items-center whitespace-nowrap px-3 py-2 ${
                       columnIndex === visibleColumns.length - 1 ? '' : 'border-r border-[var(--player-border-subtle)]'
                     }`}
                   >
