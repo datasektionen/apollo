@@ -10,6 +10,7 @@ import ProfileDialog from './components/ProfileDialog';
 import LoadProgressDialog from './components/LoadProgressDialog';
 import DistributionLanding from './components/DistributionLanding';
 import UpdateNotificationModal from './components/UpdateNotificationModal';
+import './styles/player-theme.css';
 import { isStandaloneApp } from './utils/platform';
 import { audioManager } from './lib/audioManager';
 import { importFromZIP } from './lib/projectPortability';
@@ -104,24 +105,27 @@ function remapProjectBlobIds(project, idMap) {
 
 function AdminAccessDenied({ onBack, onLogout }) {
   return (
-    <div className="flex h-full w-full items-center justify-center bg-gray-900 px-6 text-white">
-      <div className="w-full max-w-md rounded-2xl border border-gray-700 bg-gray-800 p-6 shadow-2xl">
-        <h1 className="text-xl font-semibold">Admin access required</h1>
-        <p className="mt-2 text-sm text-gray-300">
+    <div
+      className="player-theme player-showcase-surface flex h-full w-full items-center justify-center bg-[var(--player-bg-canvas)] px-6 text-[var(--player-text-primary)]"
+      data-player-theme="dark-gold"
+    >
+      <div className="player-hero-surface w-full max-w-md rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] p-6 shadow-[var(--player-shadow-popover)]">
+        <h1 className="text-xl font-bold tracking-tight text-[var(--player-text-primary)]">Admin access required</h1>
+        <p className="mt-2 text-sm text-[var(--player-text-secondary)]">
           Your account does not have permission to open the admin page.
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
           <button
             type="button"
             onClick={onBack}
-            className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500"
+            className="rounded-lg bg-[var(--player-accent)] px-4 py-2 text-sm font-bold text-[var(--player-accent-foreground)] transition-colors hover:bg-[var(--player-accent-hover)]"
           >
             Back to Apollo
           </button>
           <button
             type="button"
             onClick={onLogout}
-            className="rounded bg-gray-700 px-4 py-2 text-sm text-gray-100 hover:bg-gray-600"
+            className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--player-text-primary)] transition-colors hover:bg-[var(--player-hover)]"
           >
             Log out
           </button>

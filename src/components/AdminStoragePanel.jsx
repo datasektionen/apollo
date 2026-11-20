@@ -559,18 +559,18 @@ function SearchField({
 
   return (
     <div ref={rootRef} className="relative min-w-0 flex-1">
-      <label className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-300 focus-within:border-gray-500">
-        <Search size={16} className="shrink-0 text-gray-500" />
+      <label className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3 py-2 text-sm text-[var(--player-text-secondary)] focus-within:border-[var(--player-accent-border)] focus-within:ring-1 focus-within:ring-[var(--player-focus-ring)]">
+        <Search size={16} className="shrink-0 text-[var(--player-text-muted)]" />
         {filters.map((filter) => (
           <span
             key={filter.id}
-            className="inline-flex max-w-full items-center gap-1 rounded-[4px] bg-[#5865F2]/30 px-1.5 py-[3px] text-[13px] leading-none"
+            className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2 py-0.5 text-[13px] leading-none"
           >
-            <span className="shrink-0 font-medium text-[#c9cdfb]">{filterLabel(filter)}</span>
-            <span className="truncate text-white">{filter.value}</span>
+            <span className="shrink-0 font-semibold text-[var(--player-accent-text)]">{filterLabel(filter)}</span>
+            <span className="truncate text-[var(--player-text-primary)]">{filter.value}</span>
             <button
               type="button"
-              className="rounded p-0.5 text-gray-300 hover:bg-white/10 hover:text-white"
+              className="rounded p-0.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]"
               onClick={() => onFiltersChange(filters.filter((current) => current.id !== filter.id))}
               aria-label={`Remove ${filterLabel(filter)} ${filter.value}`}
             >
@@ -579,7 +579,7 @@ function SearchField({
           </span>
         ))}
         {pendingKeyword ? (
-          <span className="shrink-0 text-xs text-[#b8b9f4]">
+          <span className="shrink-0 text-xs font-medium text-[var(--player-accent-text)]">
             {pending.sub ? `${pendingKeyword.label} ${pending.sub}:` : `${pendingKeyword.label}${pendingKeyword.subs ? '' : ':'}`}
           </span>
         ) : null}
@@ -591,19 +591,21 @@ function SearchField({
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder={empty ? placeholder : pending?.sub ? '21 Aug 2026' : ''}
-          className="min-w-[8rem] flex-1 bg-transparent py-1 text-sm text-gray-100 outline-none placeholder:text-gray-500"
+          className="min-w-[8rem] flex-1 bg-transparent py-1 text-sm text-[var(--player-text-primary)] outline-none placeholder:text-[var(--player-text-muted)]"
         />
       </label>
       {showMenu ? (
-        <div className="absolute left-0 right-0 z-40 mt-1 overflow-hidden rounded-xl border border-gray-700 bg-gray-900 py-1 shadow-2xl">
+        <div className="player-menu absolute left-0 right-0 z-40 mt-1 overflow-hidden rounded-xl py-1">
           {suggestions.map((suggestion, index) => (
             <button
               key={`${suggestion.kind}-${suggestion.label}-${suggestion.value || suggestion.sub || suggestion.key}`}
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => applySuggestion(suggestion)}
-              className={`flex w-full items-center px-3 py-1.5 text-left text-sm ${
-                index === activeIndex ? 'bg-blue-600 text-white' : 'text-gray-200 hover:bg-gray-800'
+              className={`flex w-full items-center px-3 py-1.5 text-left text-sm transition-colors ${
+                index === activeIndex
+                  ? 'bg-[var(--player-bg-active-segment)] font-semibold text-[var(--player-accent-text)]'
+                  : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
               }`}
             >
               {suggestion.label}
@@ -616,11 +618,11 @@ function SearchField({
 }
 
 const STORAGE_COLORS = {
-  media: '#ff453a',
-  database: '#ff9f0a',
-  quarantine: '#ffd60a',
-  other: '#8e8e93',
-  free: '#3a3a3c',
+  media: 'var(--player-chart-media)',
+  database: 'var(--player-chart-database)',
+  quarantine: 'var(--player-chart-quarantine)',
+  other: 'var(--player-chart-other)',
+  free: 'var(--player-chart-free)',
 };
 
 function StorageBar({
@@ -676,18 +678,18 @@ function StorageBar({
   }, [hoveredId]);
 
   return (
-    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-5 py-3">
+    <div className="rounded-2xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-5 py-3.5">
       <div className="mb-2 flex items-end justify-between gap-3">
-        <div className="inline-flex items-center gap-2 text-sm font-semibold text-white">
-          <Icon size={16} className="text-gray-500" />
+        <div className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--player-text-primary)]">
+          <Icon size={16} className="text-[var(--player-accent-text)]" />
           {title}
         </div>
-        <div className="text-sm text-gray-400">{usedLabel}</div>
+        <div className="text-sm tabular-nums text-[var(--player-text-secondary)]">{usedLabel}</div>
       </div>
 
       <div
         ref={barRef}
-        className="flex h-12 overflow-hidden rounded-[8px] bg-[#2c2c2e]"
+        className="flex h-12 overflow-hidden rounded-lg bg-[var(--player-bg-elevated)]"
         onMouseLeave={() => setHoveredId(null)}
       >
         {segments.map((segment, index) => {
@@ -714,19 +716,19 @@ function StorageBar({
                 }}
               />
               {isLast ? null : (
-                <div className="h-full w-px shrink-0 bg-black" />
+                <div className="h-full w-px shrink-0 bg-[var(--player-bg-canvas)]" />
               )}
             </div>
           );
         })}
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+      <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-2">
         {segments.map((segment) => (
           <div
             key={segment.id}
-            className={`flex items-center gap-[7px] text-sm leading-none ${
-              hoveredId === segment.id ? 'text-white' : 'text-gray-400'
+            className={`flex items-center gap-[7px] text-sm leading-none transition-colors ${
+              hoveredId === segment.id ? 'text-[var(--player-text-primary)] font-medium' : 'text-[var(--player-text-secondary)]'
             }`}
           >
             <span
@@ -742,16 +744,18 @@ function StorageBar({
         <>
           <div
             ref={tooltipRef}
-            className="pointer-events-none fixed z-[60]"
+            className="player-theme pointer-events-none fixed z-[60]"
+            data-player-theme="dark-gold"
             style={{ left: anchor.tooltipLeft, top: anchor.tooltipTop }}
           >
-            <div className="rounded-xl bg-gray-800 px-3 py-2 text-center text-white shadow-2xl ring-1 ring-white/10">
-              <div className="text-sm font-semibold text-white">{hovered.label}</div>
-              <div className="text-xs text-gray-400">{formatBytes(hovered.bytes)}</div>
+            <div className="player-menu rounded-xl px-3 py-2 text-center">
+              <div className="text-sm font-semibold text-[var(--player-text-primary)]">{hovered.label}</div>
+              <div className="text-xs tabular-nums text-[var(--player-text-secondary)]">{formatBytes(hovered.bytes)}</div>
             </div>
           </div>
           <div
-            className="pointer-events-none fixed z-[60] h-0 w-0 border-x-[7px] border-t-[8px] border-x-transparent border-t-gray-800"
+            className="player-theme pointer-events-none fixed z-[60] h-0 w-0 border-x-[7px] border-t-[8px] border-x-transparent border-t-[var(--player-bg-popover)]"
+            data-player-theme="dark-gold"
             style={{ left: anchor.caretX, top: anchor.caretTop, transform: 'translateX(-50%)' }}
           />
         </>,
@@ -912,7 +916,7 @@ function sortValue(item, key) {
 function renderStorageCell(column, item) {
   if (column.key === 'fileName') {
     return (
-      <span className="block truncate font-semibold text-white" title={item.fileName}>
+      <span className="block truncate font-semibold text-[var(--player-text-primary)]" title={item.fileName}>
         {item.fileName}
       </span>
     );
@@ -920,7 +924,7 @@ function renderStorageCell(column, item) {
   if (column.key === 'createdByUsername') {
     const name = item.createdByUsername || '—';
     return (
-      <span className="block truncate text-sm text-gray-300" title={name}>
+      <span className="block truncate text-sm text-[var(--player-text-secondary)]" title={name}>
         {name}
       </span>
     );
@@ -928,47 +932,47 @@ function renderStorageCell(column, item) {
   if (column.key === 'sha256') {
     const hash = item.sha256 ? String(item.sha256) : '';
     return (
-      <span className="block truncate font-mono text-xs text-gray-400" title={hash || undefined}>
+      <span className="block truncate font-mono text-xs text-[var(--player-text-muted)]" title={hash || undefined}>
         {hash ? hash.slice(0, 12) : '—'}
       </span>
     );
   }
   if (column.key === 'sizeBytes') {
-    return <span className="text-sm text-gray-200">{formatBytes(item.sizeBytes)}</span>;
+    return <span className="text-sm tabular-nums text-[var(--player-text-primary)]">{formatBytes(item.sizeBytes)}</span>;
   }
   if (column.key === 'format') {
     const format = formatFromItem(item);
-    return <span className="text-sm text-gray-200">{format || '—'}</span>;
+    return <span className="text-sm font-mono text-[var(--player-text-primary)]">{format || '—'}</span>;
   }
   if (column.key === 'projectCount') {
-    return <span className="text-sm text-gray-300">{item.projectCount}</span>;
+    return <span className="text-sm tabular-nums text-[var(--player-text-secondary)]">{item.projectCount}</span>;
   }
   if (column.key === 'projectNames') {
     const names = (item.projectNames || []).join(', ');
     return (
-      <span className="block truncate text-sm text-gray-300" title={names || undefined}>
+      <span className="block truncate text-sm text-[var(--player-text-secondary)]" title={names || undefined}>
         {names || '—'}
       </span>
     );
   }
   if (column.key === 'clipCount') {
-    return <span className="text-sm text-gray-300">{item.clipCount}</span>;
+    return <span className="text-sm tabular-nums text-[var(--player-text-secondary)]">{item.clipCount}</span>;
   }
   if (column.key === 'createdAt') {
-    return <span className="text-xs text-gray-300">{formatDate(item.createdAt)}</span>;
+    return <span className="text-xs tabular-nums text-[var(--player-text-secondary)]">{formatDate(item.createdAt)}</span>;
   }
   if (column.key === 'unreferencedAt') {
-    return <span className="text-xs text-gray-300">{formatDate(item.unreferencedAt)}</span>;
+    return <span className="text-xs tabular-nums text-[var(--player-text-secondary)]">{formatDate(item.unreferencedAt)}</span>;
   }
   if (column.key === 'quarantinedByUsername') {
     const name = item.quarantinedByUsername || '—';
     return (
-      <span className="block truncate text-sm text-gray-300" title={name}>
+      <span className="block truncate text-sm text-[var(--player-text-secondary)]" title={name}>
         {name}
       </span>
     );
   }
-  return <span className="text-xs text-gray-300">—</span>;
+  return <span className="text-xs text-[var(--player-text-muted)]">—</span>;
 }
 
 function HeaderCell({
@@ -992,9 +996,9 @@ function HeaderCell({
 
   return (
     <div
-      className={`relative flex h-full min-h-[2.75rem] ${isLast ? '' : 'border-r border-gray-800'} ${
+      className={`relative flex h-full min-h-[2.75rem] ${isLast ? '' : 'border-r border-[var(--player-border-subtle)]'} ${
         dragging ? 'cursor-grabbing opacity-40' : ''
-      } ${dropTargetKey === column.key && !dragging ? 'bg-blue-900/40' : ''}`}
+      } ${dropTargetKey === column.key && !dragging ? 'bg-[var(--player-accent-soft)]' : ''}`}
       draggable
       onDragStart={(event) => {
         suppressClickRef.current = true;
@@ -1026,10 +1030,10 @@ function HeaderCell({
           }
           onSort(column.key);
         }}
-        className={`flex h-full w-full items-center gap-1 px-3 py-3 text-left text-xs font-semibold ${
+        className={`flex h-full w-full items-center gap-1 px-3 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] transition-colors ${
           dragging ? 'cursor-grabbing' : 'cursor-pointer'
         } ${
-          active ? 'text-gray-100' : 'text-gray-400 hover:bg-gray-800/70 hover:text-gray-200'
+          active ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
         }`}
       >
         {column.label}
@@ -1124,12 +1128,13 @@ function FloatingToast({ message, tone = 'success', onDone }) {
   }, [message, tone]);
 
   const toneClass = tone === 'error'
-    ? 'border-red-700/40 bg-red-900/90 text-red-100'
-    : 'border-emerald-700/40 bg-emerald-900/90 text-emerald-100';
+    ? 'border-[var(--player-danger-border)] bg-[var(--player-danger-surface)] text-[var(--player-danger-text)]'
+    : 'border-[var(--player-success-border)] bg-[var(--player-success-surface)] text-[var(--player-success-text)]';
 
   return createPortal(
     <div
-      className="pointer-events-none fixed inset-x-0 z-[200] flex justify-center px-4"
+      className="player-theme pointer-events-none fixed inset-x-0 z-[200] flex justify-center px-4"
+      data-player-theme="dark-gold"
       style={{ top }}
     >
       <div
@@ -1150,7 +1155,7 @@ function FloatingToast({ message, tone = 'success', onDone }) {
           hoveredRef.current = false;
           scheduleHideRef.current(TOAST_HOVER_MS);
         }}
-        className={`pointer-events-auto max-w-lg rounded-xl border px-4 py-3 text-sm shadow-2xl transition-opacity ${toneClass}`}
+        className={`pointer-events-auto max-w-lg rounded-xl border px-4 py-3 text-sm font-medium shadow-[var(--player-shadow-popover)] transition-opacity ${toneClass}`}
         style={{ opacity: opaque ? 1 : 0, transitionDuration: `${TOAST_FADE_MS}ms` }}
       >
         {message}
@@ -1170,24 +1175,24 @@ function ConfirmDialog({
   onConfirm,
 }) {
   const confirmClass = tone === 'amber'
-    ? 'bg-amber-600 hover:bg-amber-500'
-    : 'bg-red-700 hover:bg-red-600';
+    ? 'bg-[var(--player-warning-solid)] text-[var(--player-accent-foreground)] hover:bg-[var(--player-warning-solid-hover)]'
+    : 'bg-[var(--player-danger-solid)] text-[var(--player-danger-foreground)] hover:bg-[var(--player-danger-solid-hover)]';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl">
-        <div className="border-b border-gray-700 px-5 py-4">
-          <h3 className="text-lg font-semibold text-white">{title}</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4">
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] shadow-[var(--player-shadow-popover)]">
+        <div className="player-hero-surface border-b border-[var(--player-border-subtle)] px-5 py-4">
+          <h3 className="text-lg font-bold tracking-tight text-[var(--player-text-primary)]">{title}</h3>
         </div>
-        <div className="space-y-3 px-5 py-4 text-sm text-gray-300">
+        <div className="space-y-3 px-5 py-4 text-sm text-[var(--player-text-secondary)]">
           {children}
         </div>
-        <div className="flex justify-end gap-2 border-t border-gray-700 px-5 py-4">
+        <div className="flex justify-end gap-2 border-t border-[var(--player-border-subtle)] px-5 py-4">
           <button
             type="button"
             disabled={busy}
             onClick={onCancel}
-            className="rounded-lg bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:bg-gray-700 disabled:opacity-50"
+            className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3.5 py-2 text-sm font-medium text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] disabled:opacity-50 transition-colors"
           >
             Cancel
           </button>
@@ -1195,7 +1200,7 @@ function ConfirmDialog({
             type="button"
             disabled={busy}
             onClick={onConfirm}
-            className={`rounded-lg px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 ${confirmClass}`}
+            className={`rounded-lg px-3.5 py-2 text-sm font-bold transition-colors disabled:opacity-50 ${confirmClass}`}
           >
             {busy ? 'Working...' : confirmLabel}
           </button>
@@ -1539,7 +1544,7 @@ export default function AdminStoragePanel({
 
   if (!storage) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-700 bg-gray-950/50 px-4 py-4 text-sm text-gray-400">
+      <div className="rounded-xl border border-dashed border-[var(--player-border-default)] bg-[var(--player-bg-surface-subtle)] px-4 py-4 text-sm text-[var(--player-text-muted)]">
         Loading storage...
       </div>
     );
@@ -1566,7 +1571,7 @@ export default function AdminStoragePanel({
             type="button"
             disabled={busy || !quarantinableItems.length}
             onClick={requestQuarantineSelected}
-            className="rounded-lg border border-amber-800/80 bg-amber-950/40 px-2.5 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-900/50 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-lg border border-[var(--player-warning-border)] bg-[var(--player-warning-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--player-warning-text)] hover:bg-[var(--player-accent-soft)] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
           >
             Quarantine
           </button>
@@ -1574,7 +1579,7 @@ export default function AdminStoragePanel({
             type="button"
             disabled={busy || !restorableItems.length}
             onClick={requestRestoreSelected}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-800/80 bg-emerald-950/40 px-2.5 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-900/50 disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--player-success-border)] bg-[var(--player-success-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--player-success-text)] hover:bg-[var(--player-success-surface)] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
           >
             <RotateCcw size={12} />
             Restore
@@ -1583,13 +1588,13 @@ export default function AdminStoragePanel({
             type="button"
             disabled={busy || !selectedItems.length}
             onClick={requestDeleteSelected}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-red-800/80 bg-red-950/40 px-2.5 py-1.5 text-xs font-semibold text-red-100 hover:bg-red-900/50 disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--player-danger-text)] hover:bg-[var(--player-danger-surface)] disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
           >
             <Trash2 size={12} />
             Delete
           </button>
           {selectedItems.length ? (
-            <span className="text-xs text-gray-400">
+            <span className="text-xs tabular-nums text-[var(--player-text-secondary)]">
               {selectedItems.length} selected
             </span>
           ) : null}
@@ -1601,7 +1606,7 @@ export default function AdminStoragePanel({
             disabled={busy}
             title="Quarantine unused"
             aria-label="Quarantine unused"
-            className="inline-flex items-center justify-center rounded-lg border border-blue-700/70 bg-blue-950/40 p-1.5 text-blue-100 hover:bg-blue-900/50 disabled:opacity-50"
+            className="inline-flex items-center justify-center rounded-lg border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] p-1.5 text-[var(--player-accent-text)] hover:bg-[var(--player-bg-elevated)] disabled:opacity-50 transition-colors"
           >
             <ScanSearch size={14} className={busyAction === 'validate' ? 'animate-pulse' : ''} />
           </button>
@@ -1611,22 +1616,22 @@ export default function AdminStoragePanel({
             disabled={busy}
             title="Refresh"
             aria-label="Refresh"
-            className="inline-flex items-center justify-center rounded-lg border border-gray-700 bg-gray-950 p-1.5 text-gray-200 hover:bg-gray-900 disabled:opacity-50"
+            className="inline-flex items-center justify-center rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] p-1.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:opacity-50 transition-colors"
           >
             <RefreshCw size={14} className={busyAction === 'refresh' ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950/50">
+      <div className="overflow-x-auto rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)]">
         <div className="w-full min-w-max">
           <div
-            className="grid w-full min-w-max items-stretch border-b border-gray-800 text-xs font-semibold"
+            className="grid w-full min-w-max items-stretch border-b border-[var(--player-border-subtle)] text-xs font-semibold"
             style={{ gridTemplateColumns }}
             onContextMenu={openColumnsMenu}
           >
             <label
-              className="inline-flex h-full min-h-[2.75rem] items-center justify-center border-r border-gray-800 px-3"
+              className="inline-flex h-full min-h-[2.75rem] items-center justify-center border-r border-[var(--player-border-subtle)] px-3"
               title="Right-click to choose columns"
             >
               <input
@@ -1636,7 +1641,6 @@ export default function AdminStoragePanel({
                   if (node) node.indeterminate = someVisibleSelected && !allVisibleSelected;
                 }}
                 onChange={toggleSelectAllVisible}
-                className="accent-blue-500"
                 aria-label="Select all visible files"
               />
             </label>
@@ -1670,22 +1674,21 @@ export default function AdminStoragePanel({
             const selected = selectedIds.has(item.id);
             const striped = index % 2 === 1;
             const rowTone = selected
-              ? 'bg-blue-950/35'
+              ? 'bg-[var(--player-row-active)]'
               : item.status === 'quarantine'
-                ? (striped ? 'bg-red-900/45 hover:bg-red-900/60' : 'bg-red-900/30 hover:bg-red-900/45')
-                : (striped ? 'bg-gray-800/20 hover:bg-gray-800/50' : 'hover:bg-gray-900/50');
+                ? 'bg-[var(--player-danger-soft)] hover:bg-[var(--player-danger-surface)]'
+                : (striped ? 'bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)]' : 'hover:bg-[var(--player-hover)]');
             return (
               <div
                 key={item.id}
-                className={`grid w-full min-w-max items-stretch border-b border-gray-800 ${rowTone}`}
+                className={`grid w-full min-w-max items-stretch border-b border-[var(--player-border-subtle)] transition-colors ${rowTone}`}
                 style={{ gridTemplateColumns }}
               >
-                <label className="inline-flex items-center justify-center border-r border-gray-800 px-3 py-2">
+                <label className="inline-flex items-center justify-center border-r border-[var(--player-border-subtle)] px-3 py-2">
                   <input
                     type="checkbox"
                     checked={selected}
                     onChange={() => toggleSelected(item.id)}
-                    className="accent-blue-500"
                     aria-label={`Select ${item.fileName}`}
                   />
                 </label>
@@ -1693,7 +1696,7 @@ export default function AdminStoragePanel({
                   <div
                     key={column.key}
                     className={`min-w-0 whitespace-nowrap px-3 py-2 ${
-                      columnIndex === visibleColumns.length - 1 ? '' : 'border-r border-gray-800'
+                      columnIndex === visibleColumns.length - 1 ? '' : 'border-r border-[var(--player-border-subtle)]'
                     }`}
                   >
                     {renderStorageCell(column, item)}
@@ -1703,7 +1706,7 @@ export default function AdminStoragePanel({
             );
           })}
           {!filteredItems.length ? (
-            <div className="px-4 py-6 text-sm text-gray-400">
+            <div className="px-4 py-6 text-sm text-[var(--player-text-muted)]">
               No media matches the current filters.
             </div>
           ) : null}
@@ -1711,21 +1714,22 @@ export default function AdminStoragePanel({
       </div>
 
       {isResizing ? createPortal(
-        <div className="fixed inset-0 z-[80] cursor-col-resize" />,
+        <div className="player-theme fixed inset-0 z-[80] cursor-col-resize" data-player-theme="dark-gold" />,
         document.body
       ) : null}
 
       {columnsMenu ? createPortal(
         <div
           ref={columnsMenuRef}
-          className="fixed z-[70] w-56 rounded-xl border border-gray-700 bg-gray-900 p-2 shadow-2xl"
+          className="player-theme player-menu fixed z-[70] w-56 rounded-xl border border-[var(--player-border-strong)] bg-[var(--player-bg-popover)] p-2 shadow-[var(--player-shadow-popover)]"
+          data-player-theme="dark-gold"
           style={{ left: Math.max(8, columnsMenu.x), top: Math.max(8, columnsMenu.y) }}
         >
           {TABLE_COLUMNS.map((column) => (
             <label
               key={column.key}
-              className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${
-                column.required ? 'text-gray-500' : 'text-gray-200 hover:bg-gray-800'
+              className={`player-menu-item flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${
+                column.required ? 'text-[var(--player-text-muted)]' : 'text-[var(--player-text-primary)]'
               }`}
             >
               <input
@@ -1733,7 +1737,6 @@ export default function AdminStoragePanel({
                 checked={column.required || visibleColumnKeys.has(column.key)}
                 disabled={column.required}
                 onChange={() => toggleColumn(column.key)}
-                className="accent-blue-500"
               />
               {column.label}
             </label>

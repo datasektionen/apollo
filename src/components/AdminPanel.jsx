@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInRouterContext, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CircleUserRound, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import '../styles/player-theme.css';
 import { BrandWordmark } from './BrandLogo';
 import AdminShowsPanel from './AdminShowsPanel';
 import AdminStoragePanel from './AdminStoragePanel';
@@ -49,14 +50,14 @@ import {
 
 function Badge({ children, tone = 'slate' }) {
   const toneClass = {
-    slate: 'bg-gray-700 text-gray-200',
-    blue: 'bg-blue-900/40 text-blue-200',
-    amber: 'bg-amber-900/40 text-amber-200',
-    green: 'bg-green-900/40 text-green-200',
-  }[tone] || 'bg-gray-700 text-gray-200';
+    slate: 'border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]',
+    blue: 'border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]',
+    amber: 'border border-[var(--player-warning-border)] bg-[var(--player-warning-soft)] text-[var(--player-warning-text)]',
+    green: 'border border-[var(--player-success-border)] bg-[var(--player-success-soft)] text-[var(--player-success-text)]',
+  }[tone] || 'border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]';
 
   return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs ${toneClass}`}>
+    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${toneClass}`}>
       {children}
     </span>
   );
@@ -64,10 +65,10 @@ function Badge({ children, tone = 'slate' }) {
 
 function Panel({ title, actions = null, children }) {
   return (
-    <section className="rounded-xl border border-gray-700 bg-gray-900/40">
+    <section className="overflow-hidden rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)]">
       {(title || actions) ? (
-        <div className="flex items-center justify-between gap-3 border-b border-gray-700 px-4 py-3">
-          {title ? <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-200">{title}</h3> : <span />}
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--player-border-subtle)] px-4 py-3">
+          {title ? <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">{title}</h3> : <span />}
           {actions}
         </div>
       ) : null}
@@ -78,7 +79,7 @@ function Panel({ title, actions = null, children }) {
 
 function Empty({ children }) {
   return (
-    <div className="rounded-lg border border-dashed border-gray-700 bg-gray-950/50 px-4 py-4 text-sm text-gray-400">
+    <div className="rounded-lg border border-dashed border-[var(--player-border-default)] bg-[var(--player-bg-surface-subtle)] px-4 py-4 text-sm text-[var(--player-text-muted)]">
       {children}
     </div>
   );
@@ -91,14 +92,14 @@ function SearchField({
   className = '',
 }) {
   return (
-    <label className={`flex items-center gap-3 rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 text-sm text-gray-300 ${className}`}>
-      <Search size={16} className="shrink-0 text-gray-500" />
+    <label className={`flex items-center gap-3 rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-4 py-3 text-sm text-[var(--player-text-secondary)] focus-within:border-[var(--player-accent-border)] focus-within:ring-1 focus-within:ring-[var(--player-focus-ring)] ${className}`}>
+      <Search size={16} className="shrink-0 text-[var(--player-text-muted)]" />
       <input
         type="text"
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className="w-full bg-transparent text-sm text-gray-100 outline-none placeholder:text-gray-500"
+        className="w-full bg-transparent text-sm text-[var(--player-text-primary)] outline-none placeholder:text-[var(--player-text-muted)]"
       />
     </label>
   );
@@ -122,13 +123,15 @@ function ToggleSwitch({
       }}
       className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border transition ${
         checked
-          ? 'border-blue-500 bg-blue-600'
-          : 'border-gray-600 bg-gray-800'
-      } ${disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-blue-400'}`}
+          ? 'border-[var(--player-accent-border)] bg-[var(--player-accent)]'
+          : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)]'
+      } ${disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-[var(--player-accent-hover)]'}`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-5' : 'translate-x-0.5'
+        className={`absolute top-0.5 h-5 w-5 rounded-full shadow transition-transform ${
+          checked
+            ? 'translate-x-5 bg-[var(--player-accent-foreground)]'
+            : 'translate-x-0.5 bg-[var(--player-text-primary)]'
         }`}
       />
     </button>
@@ -143,12 +146,12 @@ function CompactAccessSection({
   titleExtra = null,
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-gray-800 bg-gray-950/50">
-      <div className="flex items-center justify-between gap-3 border-b border-gray-800 px-4 py-3">
+    <section className="overflow-hidden rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--player-border-subtle)] px-4 py-3">
         <div className="flex items-center gap-2">
-          <h3 className="text-xs font-black uppercase tracking-[0.18em] text-gray-200">{title}</h3>
+          <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--player-accent-text)]">{title}</h3>
           {count !== null ? (
-            <span className="rounded-full bg-gray-800 px-2 py-0.5 text-xs font-semibold text-gray-400">
+            <span className="rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2 py-0.5 text-xs font-semibold tabular-nums text-[var(--player-text-secondary)]">
               {count}
             </span>
           ) : null}
@@ -156,7 +159,7 @@ function CompactAccessSection({
         </div>
         {actions}
       </div>
-      <div className="divide-y divide-gray-800">{children}</div>
+      <div className="divide-y divide-[var(--player-border-subtle)]">{children}</div>
     </section>
   );
 }
@@ -171,12 +174,12 @@ function CompactAccessRow({
   return (
     <div
       title={titleAttr}
-      className={`grid grid-cols-[1fr,auto] items-center gap-4 px-4 py-2.5 transition hover:bg-gray-900/70 ${
+      className={`grid grid-cols-[1fr,auto] items-center gap-4 px-4 py-2.5 transition hover:bg-[var(--player-hover)] ${
         muted ? 'opacity-70' : ''
       }`}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <span className="truncate text-sm font-semibold text-white">{title}</span>
+        <span className="truncate text-sm font-semibold text-[var(--player-text-primary)]">{title}</span>
         {badges ? (
           <span className="flex min-w-0 shrink-0 items-center gap-2">
             {badges}
@@ -974,21 +977,54 @@ export default function AdminPanel({
     },
   ] : [];
 
+  const navItems = [
+    {
+      id: 'artists',
+      label: 'Artists',
+      count: (artists.users?.length || 0) + (artists.groups?.length || 0) + (artists.guests?.length || 0),
+    },
+    { id: 'users', label: 'Users', count: users.length },
+    { id: 'shows', label: 'Shows', count: catalog.shows?.length || 0 },
+    { id: 'roles', label: 'Roles', count: roles.length },
+    { id: 'storage', label: 'Storage', count: null },
+  ];
+
+  const selectAdminTab = (nextTab) => {
+    leaveAdmin(() => {
+      if (inRouter) {
+        navigate(`/admin/${nextTab}`);
+      } else {
+        setSelectedRoleId('');
+        setTab(nextTab);
+      }
+    });
+  };
+
   return (
-    <div className="h-full w-full overflow-hidden bg-gray-900 text-white">
+    <div
+      className="player-theme h-full w-full overflow-hidden bg-[var(--player-bg-canvas)] text-[var(--player-text-primary)]"
+      data-player-theme="dark-gold"
+    >
       <div className="flex h-full w-full flex-col overflow-hidden">
-        <div data-admin-topbar className="flex items-center justify-between gap-3 border-b border-gray-700 bg-gray-800 px-4 py-3">
-          <div>
-            <h1 className="m-0 leading-none">
-              <BrandWordmark className="h-9" />
-            </h1>
-          </div>
+        <div
+          data-admin-topbar
+          className="relative z-[100] flex h-16 shrink-0 items-center justify-between gap-3 border-b border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)] px-4"
+        >
+          <button
+            type="button"
+            onClick={() => leaveAdmin(() => onClose?.())}
+            className="m-0 leading-none rounded-md hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--player-focus-ring)]"
+            title="Go to Apollo"
+            aria-label="Go to Apollo"
+          >
+            <BrandWordmark className="h-8" />
+          </button>
           <div className="flex items-center gap-3">
-            <div className="flex items-center rounded-lg bg-gray-700 p-0.5">
+            <div className="flex items-center rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] p-0.5">
               <button
                 type="button"
                 disabled
-                className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white"
+                className="rounded-full px-3.5 py-1 text-xs font-bold tracking-wider text-[var(--player-accent-text)] cursor-default"
                 title="Current page"
               >
                 ADMIN
@@ -998,13 +1034,13 @@ export default function AdminPanel({
               <button
                 type="button"
                 onClick={() => setProfileMenuOpen((previous) => !previous)}
-                className="flex items-center justify-center rounded-lg bg-gray-700 p-2 text-white transition-colors hover:bg-gray-600"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)] transition-colors hover:bg-[var(--player-hover)]"
                 title="User menu"
               >
                 <CircleUserRound size={18} />
               </button>
               {profileMenuOpen ? (
-                <div className="absolute right-0 top-full z-30 mt-2 min-w-32 overflow-hidden rounded-md border border-gray-700 bg-gray-800 shadow-lg">
+                <div className="player-menu absolute right-0 top-full z-[110] mt-2 min-w-40 overflow-hidden rounded-xl py-1">
                   {onOpenProfile ? (
                     <button
                       type="button"
@@ -1012,28 +1048,29 @@ export default function AdminPanel({
                         setProfileMenuOpen(false);
                         onOpenProfile();
                       }}
-                      className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
+                      className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                     >
                       My Profile
                     </button>
                   ) : null}
                   <button
                     type="button"
-                      onClick={() => {
-                        setProfileMenuOpen(false);
-                        leaveAdmin(() => onClose?.());
-                      }}
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
+                    onClick={() => {
+                      setProfileMenuOpen(false);
+                      leaveAdmin(() => onClose?.());
+                    }}
+                    className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                   >
                     Go to app
                   </button>
+                  <div className="my-1 border-t border-[var(--player-border-subtle)]" />
                   <button
                     type="button"
-                      onClick={() => {
-                        setProfileMenuOpen(false);
-                        leaveAdmin(() => onLogout?.());
-                      }}
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-700"
+                    onClick={() => {
+                      setProfileMenuOpen(false);
+                      leaveAdmin(() => onLogout?.());
+                    }}
+                    className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
                   >
                     Log out
                   </button>
@@ -1044,152 +1081,55 @@ export default function AdminPanel({
         </div>
 
         {error ? (
-          <div className="border-b border-red-700/40 bg-red-900/20 px-5 py-3 text-sm text-red-200">
+          <div className="border-b border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] px-5 py-3 text-sm text-[var(--player-danger-text)]">
             {error}
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <div className="flex h-full flex-col overflow-hidden md:flex-row">
-            <aside className="shrink-0 border-b border-gray-800 bg-gray-950 p-2 md:w-44 md:border-b-0 md:border-r">
-              <nav className="flex gap-1.5 overflow-x-auto md:block md:space-y-1 md:overflow-visible">
-                <button
-                  type="button"
-                  onClick={() => {
-                    leaveAdmin(() => {
-                      if (inRouter) {
-                        navigate('/admin/artists');
-                      } else {
-                        setSelectedRoleId('');
-                        setTab('artists');
-                      }
-                    });
-                  }}
-                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
-                    tab === 'artists'
-                      ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
-                      : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
-                  }`}
-                >
-                  {tab === 'artists' ? (
-                    <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-500" />
-                  ) : null}
-                  <span className="pl-2 font-medium">Artists</span>
-                  <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
-                    {(artists.users?.length || 0) + (artists.groups?.length || 0) + (artists.guests?.length || 0)}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    leaveAdmin(() => {
-                      if (inRouter) {
-                        navigate('/admin/users');
-                      } else {
-                        setSelectedRoleId('');
-                        setTab('users');
-                      }
-                    });
-                  }}
-                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
-                    tab === 'users'
-                      ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
-                      : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
-                  }`}
-                >
-                  {tab === 'users' ? (
-                    <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-500" />
-                  ) : null}
-                  <span className="pl-2 font-medium">Users</span>
-                  <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
-                    {users.length}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    leaveAdmin(() => {
-                      if (inRouter) {
-                        navigate('/admin/shows');
-                      } else {
-                        setSelectedRoleId('');
-                        setTab('shows');
-                      }
-                    });
-                  }}
-                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
-                    tab === 'shows'
-                      ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
-                      : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
-                  }`}
-                >
-                  {tab === 'shows' ? (
-                    <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-500" />
-                  ) : null}
-                  <span className="pl-2 font-medium">Shows</span>
-                  <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
-                    {catalog.shows?.length || 0}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    leaveAdmin(() => {
-                      if (inRouter) {
-                        navigate('/admin/roles');
-                      } else {
-                        setSelectedRoleId('');
-                        setTab('roles');
-                      }
-                    });
-                  }}
-                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
-                    tab === 'roles'
-                      ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
-                      : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
-                  }`}
-                >
-                  {tab === 'roles' ? (
-                    <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-500" />
-                  ) : null}
-                  <span className="pl-2 font-medium">Roles</span>
-                  <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
-                    {roles.length}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    leaveAdmin(() => {
-                      if (inRouter) {
-                        navigate('/admin/storage');
-                      } else {
-                        setSelectedRoleId('');
-                        setTab('storage');
-                      }
-                    });
-                  }}
-                  className={`relative flex min-w-28 items-center justify-between rounded-lg px-2 py-2 text-left text-sm transition md:w-full ${
-                    tab === 'storage'
-                      ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
-                      : 'text-gray-400 hover:bg-gray-900 hover:text-gray-100'
-                  }`}
-                >
-                  {tab === 'storage' ? (
-                    <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-500" />
-                  ) : null}
-                  <span className="pl-2 font-medium">Storage</span>
-                </button>
+        <div className="min-h-0 flex-1 overflow-hidden px-3 pb-3 pt-2.5">
+          <div className="flex h-full flex-col gap-2.5 overflow-hidden md:flex-row">
+            <aside className="shrink-0 rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-2 md:w-48">
+              <nav className="flex gap-1.5 overflow-x-auto scrollbar-hidden md:block md:space-y-1 md:overflow-visible" aria-label="Admin Navigation">
+                {navItems.map((item) => {
+                  const active = tab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => selectAdminTab(item.id)}
+                      className={`relative flex min-w-28 items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition-colors md:w-full ${
+                        active
+                          ? 'bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)]'
+                          : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
+                      }`}
+                    >
+                      {active ? (
+                        <span
+                          aria-hidden="true"
+                          className="absolute inset-x-3 bottom-0 h-[2px] rounded-t-full bg-[var(--player-accent)] md:inset-y-2 md:inset-x-auto md:left-0 md:h-auto md:w-[2.5px] md:rounded-r-full md:rounded-tl-none"
+                        />
+                      ) : null}
+                      <span className={`pl-1.5 font-medium ${active ? 'text-[var(--player-accent-text)] font-semibold' : ''}`}>
+                        {item.label}
+                      </span>
+                      {item.count !== null ? (
+                        <span className="rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)] px-2 py-0.5 text-xs tabular-nums text-[var(--player-text-muted)]">
+                          {item.count}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
               </nav>
             </aside>
 
-            <div className={`min-w-0 flex-1 overflow-auto p-3 ${accessDirty ? 'pb-24' : ''}`}>
+            <div className={`min-w-0 flex-1 overflow-auto rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-4 ${accessDirty ? 'pb-24' : ''}`}>
               {loading ? (
                 <Empty>Loading...</Empty>
               ) : tab === 'artists' ? (
                 <div className="mx-auto max-w-6xl space-y-5">
-                  <div className="overflow-hidden rounded-xl border border-gray-800 bg-gray-950/50">
-                    <div className="grid grid-cols-[1fr,150px,80px] gap-4 border-b border-gray-800 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  <div className="overflow-hidden rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)]">
+                    <div className="grid grid-cols-[1fr,150px,80px] gap-4 border-b border-[var(--player-border-subtle)] px-4 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-text-muted)]">
                       <span>Artist</span>
                       <span>Type</span>
                       <span />
@@ -1197,17 +1137,17 @@ export default function AdminPanel({
                     {allArtists.map((artist) => (
                       <div
                         key={`${artist.kind}:${artist.id}`}
-                        className="grid grid-cols-[1fr,150px,80px] items-center gap-4 border-b border-gray-800 px-4 py-4 last:border-b-0 hover:bg-gray-900/70"
+                        className="grid grid-cols-[1fr,150px,80px] items-center gap-4 border-b border-[var(--player-border-subtle)] px-4 py-4 last:border-b-0 transition-colors hover:bg-[var(--player-hover)]"
                       >
                         <div className="min-w-0">
-                          <div className="truncate font-semibold text-white">{artist.name}</div>
+                          <div className="truncate font-semibold text-[var(--player-text-primary)]">{artist.name}</div>
                           {artist.description ? (
-                            <div className="mt-1 truncate text-sm text-gray-400">{artist.description}</div>
+                            <div className="mt-1 truncate text-sm text-[var(--player-text-secondary)]">{artist.description}</div>
                           ) : (
-                            <div className="mt-1 text-sm text-gray-600">No artist description.</div>
+                            <div className="mt-1 text-sm text-[var(--player-text-disabled)]">No artist description.</div>
                           )}
                         </div>
-                        <div className="text-sm text-gray-300">
+                        <div className="text-sm text-[var(--player-text-secondary)]">
                           {artist.kind === 'group' && artist.groupType
                             ? artist.groupType
                             : artist.kindLabel}
@@ -1219,7 +1159,7 @@ export default function AdminPanel({
                             title="Edit"
                             aria-label={`Edit ${artist.name}`}
                             onClick={() => handleEditArtistDescription(artist)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <Pencil size={14} />
                           </button>
@@ -1229,7 +1169,7 @@ export default function AdminPanel({
                             title="Delete"
                             aria-label={`Delete ${artist.name}`}
                             onClick={() => handleDeleteArtist(artist)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-200 hover:border-red-800 hover:bg-gray-700 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:border-[var(--player-danger-border)] hover:bg-[var(--player-hover)] hover:text-[var(--player-danger)] transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -1251,7 +1191,7 @@ export default function AdminPanel({
               ) : tab === 'roles' ? (
                 selectedRole ? (
                   <div className="grid gap-3 lg:grid-cols-[12.5rem,minmax(0,1fr)]">
-                    <aside className="space-y-2 rounded-xl border border-gray-800 bg-gray-950/60 p-2">
+                    <aside className="space-y-2 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-2">
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -1262,7 +1202,7 @@ export default function AdminPanel({
                               setSelectedRoleId('');
                             }
                           })}
-                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-gray-800 bg-gray-950/80 px-2 py-1.5 text-left text-sm font-medium text-gray-200 transition hover:border-gray-700 hover:bg-gray-900"
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2.5 py-1.5 text-left text-sm font-medium text-[var(--player-text-primary)] transition hover:bg-[var(--player-hover)]"
                         >
                           <ArrowLeft size={16} className="shrink-0" />
                           <span className="truncate">Back</span>
@@ -1272,7 +1212,7 @@ export default function AdminPanel({
                           disabled={saving}
                           onClick={handleCreateRole}
                           title="Create role"
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-800 bg-gray-950/80 text-gray-200 transition hover:border-gray-700 hover:bg-gray-900 disabled:opacity-50"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)] transition hover:border-[var(--player-accent-border)] hover:text-[var(--player-accent-text)] disabled:opacity-50"
                         >
                           <Plus size={16} />
                         </button>
@@ -1292,13 +1232,13 @@ export default function AdminPanel({
                                 }
                               });
                             }}
-                            className={`w-full rounded-lg px-2 py-1.5 text-left text-sm ${
+                            className={`relative w-full rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
                               role.id === selectedRoleId
-                                ? 'bg-gray-800 text-white ring-1 ring-blue-500/40'
-                                : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                                ? 'bg-[var(--player-bg-elevated)] text-[var(--player-accent-text)] font-semibold'
+                                : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                             }`}
                           >
-                            <div className="min-w-0 truncate font-medium">{getRoleDisplayName(role)}</div>
+                            <div className="min-w-0 truncate">{getRoleDisplayName(role)}</div>
                           </button>
                         ))}
                       </div>
@@ -1321,7 +1261,7 @@ export default function AdminPanel({
                                   event.currentTarget.blur();
                                 }
                               }}
-                              className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-900 px-3 py-2 text-xl font-semibold text-gray-100 disabled:cursor-default disabled:opacity-100"
+                              className="min-w-0 flex-1 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3.5 py-2 text-xl font-bold tracking-tight text-[var(--player-text-primary)] outline-none focus:border-[var(--player-accent-border)] disabled:cursor-default disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:opacity-100"
                             />
                             <div className="flex flex-wrap items-center gap-2">
                               {!selectedRole.isSystem ? (
@@ -1329,7 +1269,7 @@ export default function AdminPanel({
                                   type="button"
                                   disabled={saving}
                                   onClick={handleDeleteRole}
-                                  className="rounded bg-red-700 px-3 py-2 text-sm text-white hover:bg-red-600 disabled:bg-gray-700"
+                                  className="rounded-lg bg-[var(--player-danger-solid)] px-3.5 py-2 text-sm font-semibold text-[var(--player-danger-foreground)] transition-colors hover:bg-[var(--player-danger-solid-hover)] disabled:opacity-45"
                                 >
                                   Delete
                                 </button>
@@ -1340,7 +1280,7 @@ export default function AdminPanel({
                         </div>
                       </Panel>
 
-                      <div className="flex flex-wrap gap-2 border-b border-gray-700">
+                      <div className="flex flex-wrap gap-2 border-b border-[var(--player-border-subtle)]">
                         {roleTabs.map(({ value, label, disabled }) => (
                           <button
                             key={value}
@@ -1350,12 +1290,12 @@ export default function AdminPanel({
                               if (disabled || value === roleDetailTab) return;
                               leaveAdmin(() => setRoleDetailTab(value));
                             }}
-                            className={`border-b-2 px-3 py-2 text-sm font-semibold ${
+                            className={`border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
                               roleDetailTab === value
-                                ? 'border-blue-500 text-white'
+                                ? 'border-[var(--player-accent)] text-[var(--player-accent-text)]'
                                 : disabled
-                                  ? 'border-transparent text-gray-600 cursor-not-allowed'
-                                  : 'border-transparent text-gray-400 hover:text-gray-100'
+                                  ? 'border-transparent text-[var(--player-text-disabled)] cursor-not-allowed'
+                                  : 'border-transparent text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
                             }`}
                           >
                             {label}
@@ -1415,12 +1355,12 @@ export default function AdminPanel({
                               count={visibleRoleGrants.length}
                               titleExtra={<AccessTypeInfoButton />}
                               actions={(
-                                <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-gray-300">
+                                <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-[var(--player-text-secondary)]">
                                   <input
                                     type="checkbox"
                                     checked={showRedundantAccesses}
                                     onChange={(event) => setShowRedundantAccesses(event.target.checked)}
-                                    className="h-4 w-4 rounded border-gray-600 bg-gray-950 accent-blue-600"
+                                    className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-popover)]"
                                   />
                                   Show redundant accesses
                                 </label>
@@ -1451,20 +1391,20 @@ export default function AdminPanel({
                                   value={oidcClaimPathDraft}
                                   onChange={(event) => setOidcClaimPathDraft(event.target.value)}
                                   placeholder="Claim path"
-                                  className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
+                                  className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3 py-2 text-sm text-[var(--player-text-primary)] placeholder:text-[var(--player-text-muted)] outline-none focus:border-[var(--player-accent-border)]"
                                 />
                                 <input
                                   type="text"
                                   value={oidcClaimValueDraft}
                                   onChange={(event) => setOidcClaimValueDraft(event.target.value)}
                                   placeholder="Value"
-                                  className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
+                                  className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3 py-2 text-sm text-[var(--player-text-primary)] placeholder:text-[var(--player-text-muted)] outline-none focus:border-[var(--player-accent-border)]"
                                 />
                                 <button
                                   type="button"
                                   disabled={!oidcClaimValueDraft.trim() || saving}
                                   onClick={handleSaveRoleOidcLink}
-                                  className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500 disabled:bg-gray-700"
+                                  className="rounded-lg bg-[var(--player-accent)] px-4 py-2 text-sm font-bold text-[var(--player-accent-foreground)] transition-colors hover:bg-[var(--player-accent-hover)] disabled:opacity-45"
                                 >
                                   Add
                                 </button>
@@ -1474,7 +1414,7 @@ export default function AdminPanel({
                                 value={oidcDescriptionDraft}
                                 onChange={(event) => setOidcDescriptionDraft(event.target.value)}
                                 placeholder="Description"
-                                className="mt-3 w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
+                                className="mt-3 w-full rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3 py-2 text-sm text-[var(--player-text-primary)] placeholder:text-[var(--player-text-muted)] outline-none focus:border-[var(--player-accent-border)]"
                               />
                             </Panel>
                           ) : null}
@@ -1487,21 +1427,21 @@ export default function AdminPanel({
                                 {selectedRole.oidcLinks.map((link) => (
                                   <div
                                     key={link.id}
-                                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-3"
+                                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3.5 py-3"
                                   >
                                     <div className="min-w-0">
-                                      <div className="font-medium text-white">
+                                      <div className="font-medium text-[var(--player-text-primary)]">
                                         {link.claimPath ? `${link.claimPath} = ${link.claimValue}` : link.claimValue}
                                       </div>
                                       {link.description ? (
-                                        <div className="text-sm text-gray-400">{link.description}</div>
+                                        <div className="text-sm text-[var(--player-text-secondary)]">{link.description}</div>
                                       ) : null}
                                     </div>
                                     {canEditRoleLinks ? (
                                       <button
                                         type="button"
                                         onClick={() => handleDeleteRoleOidcLink(link)}
-                                        className="rounded bg-gray-700 px-3 py-1.5 text-xs text-gray-100 hover:bg-gray-600"
+                                        className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
                                       >
                                         Remove
                                       </button>
@@ -1523,7 +1463,7 @@ export default function AdminPanel({
                                   <select
                                     value={pendingRoleMemberId}
                                     onChange={(event) => setPendingRoleMemberId(event.target.value)}
-                                    className="flex-1 rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
+                                    className="flex-1 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3 py-2 text-sm text-[var(--player-text-primary)] outline-none focus:border-[var(--player-accent-border)]"
                                   >
                                     <option value="">Add user...</option>
                                     {availableRoleMembers.map((user) => (
@@ -1536,7 +1476,7 @@ export default function AdminPanel({
                                     type="button"
                                     disabled={!pendingRoleMemberId || saving}
                                     onClick={handleAddRoleMember}
-                                    className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500 disabled:bg-gray-700"
+                                    className="rounded-lg bg-[var(--player-accent)] px-4 py-2 text-sm font-bold text-[var(--player-accent-foreground)] transition-colors hover:bg-[var(--player-accent-hover)] disabled:opacity-45"
                                   >
                                     Add
                                   </button>
@@ -1549,17 +1489,17 @@ export default function AdminPanel({
                                     {selectedRole.members.map((member) => (
                                       <div
                                         key={member.id}
-                                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-3"
+                                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3.5 py-3"
                                       >
                                         <div className="flex flex-wrap items-center gap-2">
-                                          <span className="font-medium text-white">{member.username}</span>
+                                          <span className="font-medium text-[var(--player-text-primary)]">{member.username}</span>
                                           {member.isAdmin ? <Badge tone="blue">Admin</Badge> : null}
                                           {member.source === 'oidc_link' ? <Badge tone="green">OIDC</Badge> : null}
                                         </div>
                                         <button
                                           type="button"
                                           onClick={() => handleRemoveRoleMember(member.id)}
-                                          className="rounded bg-gray-700 px-3 py-1.5 text-xs text-gray-100 hover:bg-gray-600"
+                                          className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
                                         >
                                           Remove
                                         </button>
@@ -1577,7 +1517,7 @@ export default function AdminPanel({
                                     <select
                                       value={pendingChildRoleId}
                                       onChange={(event) => setPendingChildRoleId(event.target.value)}
-                                      className="flex-1 rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
+                                      className="flex-1 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3 py-2 text-sm text-[var(--player-text-primary)] outline-none focus:border-[var(--player-accent-border)]"
                                     >
                                       <option value="">Add role...</option>
                                       {availableChildRoles.map((role) => (
@@ -1590,7 +1530,7 @@ export default function AdminPanel({
                                       type="button"
                                       disabled={!pendingChildRoleId || saving}
                                       onClick={handleAddChildRole}
-                                      className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500 disabled:bg-gray-700"
+                                      className="rounded-lg bg-[var(--player-accent)] px-4 py-2 text-sm font-bold text-[var(--player-accent-foreground)] transition-colors hover:bg-[var(--player-accent-hover)] disabled:opacity-45"
                                     >
                                       Add
                                     </button>
@@ -1603,13 +1543,13 @@ export default function AdminPanel({
                                       {selectedRole.childRoles.map((role) => (
                                         <div
                                           key={role.id}
-                                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-3"
+                                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3.5 py-3"
                                         >
-                                          <div className="font-medium text-white">{role.name}</div>
+                                          <div className="font-medium text-[var(--player-text-primary)]">{role.name}</div>
                                           <button
                                             type="button"
                                             onClick={() => handleRemoveChildRole(role.id)}
-                                            className="rounded bg-gray-700 px-3 py-1.5 text-xs text-gray-100 hover:bg-gray-600"
+                                            className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
                                           >
                                             Remove
                                           </button>
@@ -1640,14 +1580,14 @@ export default function AdminPanel({
                         type="button"
                         disabled={saving}
                         onClick={handleCreateRole}
-                        className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-500 disabled:bg-gray-700"
+                        className="rounded-xl bg-[var(--player-accent)] px-4 py-3 text-sm font-bold text-[var(--player-accent-foreground)] transition-colors hover:bg-[var(--player-accent-hover)] disabled:opacity-45"
                       >
                         Create role
                       </button>
                     </div>
 
-                    <div className="overflow-hidden rounded-xl border border-gray-800 bg-gray-950/50">
-                      <div className="grid grid-cols-[1fr,140px] gap-4 border-b border-gray-800 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400 md:grid-cols-[1fr,150px,120px]">
+                    <div className="overflow-hidden rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)]">
+                      <div className="grid grid-cols-[1fr,140px] gap-4 border-b border-[var(--player-border-subtle)] px-4 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-text-muted)] md:grid-cols-[1fr,150px,120px]">
                         <span>Role</span>
                         <span>Members</span>
                         <span className="hidden md:block">Links</span>
@@ -1663,17 +1603,17 @@ export default function AdminPanel({
                               setSelectedRoleId(role.id);
                             }
                           }}
-                          className={`grid w-full grid-cols-[1fr,140px] items-center gap-4 border-b px-4 py-4 text-left last:border-b-0 hover:bg-gray-900 md:grid-cols-[1fr,150px,120px] ${
-                            role.isSystem ? 'border-gray-700 bg-gray-900/40' : 'border-gray-800'
+                          className={`grid w-full grid-cols-[1fr,140px] items-center gap-4 border-b border-[var(--player-border-subtle)] px-4 py-4 text-left last:border-b-0 transition-colors hover:bg-[var(--player-hover)] md:grid-cols-[1fr,150px,120px] ${
+                            role.isSystem ? 'bg-[var(--player-bg-elevated)]' : ''
                           }`}
                         >
                           <div className="min-w-0">
-                            <div className="truncate font-semibold text-white">{getRoleDisplayName(role)}</div>
+                            <div className="truncate font-semibold text-[var(--player-text-primary)]">{getRoleDisplayName(role)}</div>
                           </div>
-                          <span className="text-sm text-gray-300">
+                          <span className="text-sm tabular-nums text-[var(--player-text-secondary)]">
                             {role.memberCount || 0}
                           </span>
-                          <span className="hidden text-sm text-gray-300 md:block">{role.linkCount || 0}</span>
+                          <span className="hidden text-sm tabular-nums text-[var(--player-text-secondary)] md:block">{role.linkCount || 0}</span>
                         </button>
                       ))}
                       {!filteredRoles.length ? (
@@ -1701,8 +1641,8 @@ export default function AdminPanel({
                     />
                   </div>
 
-                  <div className="overflow-visible rounded-xl border border-gray-800 bg-gray-950/50">
-                    <div className="grid grid-cols-[1.1fr,1.6fr,40px] gap-4 border-b border-gray-800 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400 lg:grid-cols-[1.2fr,1fr,1.5fr,40px]">
+                  <div className="overflow-visible rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)]">
+                    <div className="grid grid-cols-[1.1fr,1.6fr,40px] gap-4 border-b border-[var(--player-border-subtle)] px-4 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-text-muted)] lg:grid-cols-[1.2fr,1fr,1.5fr,40px]">
                       <span>User</span>
                       <span className="hidden lg:block">Identity</span>
                       <span>Roles</span>
@@ -1717,40 +1657,40 @@ export default function AdminPanel({
                       return (
                         <div
                           key={user.id}
-                          className="group grid grid-cols-[1.1fr,1.6fr,40px] items-center gap-4 border-b border-gray-800 px-4 py-4 last:border-b-0 hover:bg-gray-900/70 lg:grid-cols-[1.2fr,1fr,1.5fr,40px]"
+                          className="group grid grid-cols-[1.1fr,1.6fr,40px] items-center gap-4 border-b border-[var(--player-border-subtle)] px-4 py-4 last:border-b-0 transition-colors hover:bg-[var(--player-hover)] lg:grid-cols-[1.2fr,1fr,1.5fr,40px]"
                         >
                           <div className="min-w-0">
-                            <div className="truncate font-semibold text-white">{user.username}</div>
-                            <div className="mt-1 truncate text-xs text-gray-500 lg:hidden">
+                            <div className="truncate font-semibold text-[var(--player-text-primary)]">{user.username}</div>
+                            <div className="mt-1 truncate text-xs text-[var(--player-text-muted)] lg:hidden">
                               {user.oidcDisplayName || user.oidcEmail || 'No identity'}
                             </div>
                           </div>
                           <div className="hidden min-w-0 lg:block">
-                            <div className="truncate text-sm text-gray-300">
+                            <div className="truncate text-sm text-[var(--player-text-secondary)]">
                               {user.oidcDisplayName || user.oidcEmail || '-'}
                             </div>
                             {user.oidcDisplayName && user.oidcEmail ? (
-                              <div className="truncate text-xs text-gray-500">{user.oidcEmail}</div>
+                              <div className="truncate text-xs text-[var(--player-text-muted)]">{user.oidcEmail}</div>
                             ) : null}
                           </div>
                           <div className="relative flex min-w-0 flex-wrap items-center gap-2">
                             {visibleRoles.map((role) => (
                               <span
                                 key={role.id}
-                                className="max-w-48 truncate rounded bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-100"
+                                className="max-w-48 truncate rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2.5 py-0.5 text-xs font-medium text-[var(--player-text-primary)]"
                               >
                                 {role.name}
                               </span>
                             ))}
                             {!userRoles.length ? (
-                              <span className="text-sm text-gray-500">No roles</span>
+                              <span className="text-sm text-[var(--player-text-muted)]">No roles</span>
                             ) : null}
                             {collapsedExtraRoleCount > 0 ? (
                               <button
                                 type="button"
                                 title={isExpanded ? 'Hide extra roles' : 'Show all roles'}
                                 onClick={() => toggleExpandedUserRoles(user.id)}
-                                className="rounded bg-gray-800 px-2.5 py-1 text-xs font-semibold text-gray-100 hover:bg-gray-700"
+                                className="rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
                               >
                                 {isExpanded ? '-' : `+${collapsedExtraRoleCount}`}
                               </button>
@@ -1765,18 +1705,18 @@ export default function AdminPanel({
                                   title="Add role"
                                   disabled={saving}
                                   onClick={() => setRolePickerUserId((current) => (current === user.id ? '' : user.id))}
-                                  className="flex h-6 w-6 items-center justify-center rounded bg-gray-800 text-gray-200 opacity-0 transition hover:bg-gray-700 group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
+                                  className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] opacity-100 transition hover:bg-[var(--player-hover)] hover:text-[var(--player-accent-text)] md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
                                 >
                                   <Plus size={13} />
                                 </button>
                                 {rolePickerUserId === user.id ? (
-                                  <div className="absolute right-0 top-full z-40 mt-2 max-h-72 w-64 overflow-auto rounded-xl border border-gray-700 bg-gray-900 p-2 shadow-2xl">
+                                  <div className="player-menu absolute right-0 top-full z-40 mt-2 max-h-72 w-64 overflow-auto rounded-xl p-1.5">
                                     {customAssignableRoles.map((role) => {
                                       const checked = userRoleIds.has(role.id);
                                       return (
                                       <label
                                         key={role.id}
-                                        className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm text-gray-100 hover:bg-gray-800"
+                                        className="player-menu-item flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm"
                                       >
                                         <span className="truncate">{role.name}</span>
                                         <input
@@ -1784,7 +1724,7 @@ export default function AdminPanel({
                                           checked={checked}
                                           disabled={saving}
                                           onChange={(event) => handleSetUserRoleFromList(user.id, role.id, event.target.checked)}
-                                          className="h-4 w-4 rounded border-gray-600 bg-gray-950 accent-blue-600"
+                                          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)]"
                                         />
                                       </label>
                                       );
@@ -1802,30 +1742,31 @@ export default function AdminPanel({
                               type="button"
                               title="More actions"
                               onClick={() => setUserActionMenuId((current) => (current === user.id ? '' : user.id))}
-                              className="flex h-8 w-8 items-center justify-center rounded bg-gray-800 text-gray-300 opacity-0 transition hover:bg-gray-700 hover:text-white group-hover:opacity-100 focus:opacity-100"
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] opacity-100 transition hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                             >
                               <MoreHorizontal size={17} />
                             </button>
                             {userActionMenuId === user.id ? (
-                              <div className="absolute right-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-xl border border-gray-700 bg-gray-900 p-1 shadow-2xl">
+                              <div className="player-menu absolute right-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-xl py-1">
                                 <button
                                   type="button"
                                   onClick={() => openUserAccessModal(user)}
-                                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-gray-100 hover:bg-gray-800"
+                                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                                 >
                                   Manage direct access
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => openUserActionModal('transfer', user)}
-                                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-gray-100 hover:bg-gray-800"
+                                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm"
                                 >
                                   Transfer all ownership
                                 </button>
+                                <div className="my-1 border-t border-[var(--player-border-subtle)]" />
                                 <button
                                   type="button"
                                   onClick={() => openUserActionModal('delete', user)}
-                                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-200 hover:bg-red-950/40"
+                                  className="player-menu-item w-full px-3.5 py-2 text-left text-sm text-[var(--player-danger)]"
                                 >
                                   Delete user
                                 </button>
@@ -1848,21 +1789,21 @@ export default function AdminPanel({
         </div>
       </div>
       {userAccessModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-gray-700 px-5 py-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4">
+          <div className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] shadow-[var(--player-shadow-popover)]">
+            <div className="player-hero-surface flex items-start justify-between gap-4 border-b border-[var(--player-border-subtle)] px-5 py-4">
               <div className="min-w-0">
-                <h2 className="truncate text-lg font-semibold text-white">
+                <h2 className="truncate text-lg font-bold tracking-tight text-[var(--player-text-primary)]">
                   Direct access: {userAccessModal.user?.username || 'User'}
                 </h2>
-                <div className="mt-1 truncate text-sm text-gray-400">
+                <div className="mt-1 truncate text-sm text-[var(--player-text-secondary)]">
                   {userAccessModal.user?.oidcDisplayName || userAccessModal.user?.oidcEmail || 'Apollo user'}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={closeUserAccessModal}
-                className="rounded bg-gray-800 px-3 py-1.5 text-sm text-gray-100 hover:bg-gray-700"
+                className="rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3.5 py-1.5 text-xs font-semibold text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
               >
                 Close
               </button>
@@ -1897,12 +1838,12 @@ export default function AdminPanel({
                     count={visibleUserDirectGrants.length}
                     titleExtra={<AccessTypeInfoButton />}
                     actions={(
-                      <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-gray-300">
+                      <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-[var(--player-text-secondary)]">
                         <input
                           type="checkbox"
                           checked={showRedundantUserAccesses}
                           onChange={(event) => setShowRedundantUserAccesses(event.target.checked)}
-                          className="h-4 w-4 rounded border-gray-600 bg-gray-950 accent-blue-600"
+                          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-popover)]"
                         />
                         Show redundant accesses
                       </label>
@@ -1926,13 +1867,13 @@ export default function AdminPanel({
         </div>
       ) : null}
       {userActionModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] p-6 shadow-[var(--player-shadow-popover)]">
             <div className="space-y-2">
-              <h2 className="text-lg font-semibold text-white">
+              <h2 className="text-lg font-bold tracking-tight text-[var(--player-text-primary)]">
                 {userActionModal.type === 'delete' ? 'Delete user' : 'Transfer ownership'}
               </h2>
-              <p className="text-sm text-gray-400">
+              <p className="text-sm text-[var(--player-text-secondary)]">
                 {userActionModal.type === 'delete'
                   ? `Choose who should receive all ownership from ${userActionModalUser?.username || 'this user'} before deletion.`
                   : `Transfer all ownership from ${userActionModalUser?.username || 'this user'} to another user.`}
@@ -1940,7 +1881,7 @@ export default function AdminPanel({
             </div>
 
             <div className="mt-4 space-y-2">
-              <label className="text-sm text-gray-300" htmlFor="ownership-transfer-target">
+              <label className="text-sm font-medium text-[var(--player-text-secondary)]" htmlFor="ownership-transfer-target">
                 Transfer ownership to
               </label>
               <select
@@ -1949,7 +1890,7 @@ export default function AdminPanel({
                 onChange={(event) => setUserActionModal((current) => (
                   current ? { ...current, targetUserId: event.target.value } : current
                 ))}
-                className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100"
+                className="w-full rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3 py-2 text-sm text-[var(--player-text-primary)] outline-none focus:border-[var(--player-accent-border)]"
               >
                 <option value="">Select user...</option>
                 {userActionTargetUsers.map((user) => (
@@ -1964,7 +1905,7 @@ export default function AdminPanel({
               <button
                 type="button"
                 onClick={() => setUserActionModal(null)}
-                className="rounded bg-gray-800 px-4 py-2 text-sm text-gray-100 hover:bg-gray-700"
+                className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
               >
                 Cancel
               </button>
@@ -1972,10 +1913,10 @@ export default function AdminPanel({
                 type="button"
                 disabled={saving || !userActionModal.targetUserId}
                 onClick={handleConfirmUserAction}
-                className={`rounded px-4 py-2 text-sm text-white disabled:bg-gray-700 ${
+                className={`rounded-lg px-4 py-2 text-sm font-bold transition-colors disabled:opacity-45 ${
                   userActionModal.type === 'delete'
-                    ? 'bg-red-700 hover:bg-red-600'
-                    : 'bg-blue-600 hover:bg-blue-500'
+                    ? 'bg-[var(--player-danger-solid)] text-[var(--player-danger-foreground)] hover:bg-[var(--player-danger-solid-hover)]'
+                    : 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] hover:bg-[var(--player-accent-hover)]'
                 }`}
               >
                 {userActionModal.type === 'delete' ? 'Delete user' : 'Transfer ownership'}

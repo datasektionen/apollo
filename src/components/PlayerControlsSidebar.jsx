@@ -97,7 +97,6 @@ export function PlayerControlsSidebar({
   focusSliderPosition = 50,
   onTogglePracticeFocus,
   onFocusSliderClick,
-  onSelectPracticeFocus,
   practicePanRange = 100,
   panControlDisabled = false,
   showPanRangeHighlight = false,
@@ -106,7 +105,6 @@ export function PlayerControlsSidebar({
   showPanFocusAxisMarker = false,
   practicePanFocusAxisPixel = 0,
   onTogglePracticePanRange,
-  onSelectPlaybackSpeed,
   isRendering = false,
   sliderDragTooltip = null,
   sliderEditTooltip = null,
@@ -695,37 +693,6 @@ export function PlayerControlsSidebar({
                 </div>
               </div>
             </div>
-            {!fullyMinimized && progress > 0.85 && onSelectPracticeFocus ? (
-              <div
-                className="grid grid-cols-5 gap-1 pt-1"
-                style={{ paddingLeft: rowPaddingLeft, paddingRight: 16, opacity: sliderOpacity }}
-              >
-                {[
-                  { idx: 0, label: 'Omit' },
-                  { idx: 4, label: '-6 dB' },
-                  { idx: 6, label: '0 dB' },
-                  { idx: 8, label: '+6 dB' },
-                  { idx: 12, label: 'Solo' },
-                ].map((preset) => {
-                  const selected = Number(practiceFocusControl) === preset.idx;
-                  return (
-                    <button
-                      key={preset.label}
-                      type="button"
-                      disabled={focusControlDisabled || isRendering}
-                      onClick={() => onSelectPracticeFocus(preset.idx)}
-                      className={`h-6 rounded-md border px-0.5 text-[10px] font-semibold whitespace-nowrap transition-colors disabled:opacity-45 ${
-                        selected
-                          ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                          : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]'
-                      }`}
-                    >
-                      {preset.label}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
             </div>
           ) : null}
 
@@ -1018,31 +985,6 @@ export function PlayerControlsSidebar({
                 )}
               </div>
             </div>
-            {!fullyMinimized && progress > 0.85 && onSelectPlaybackSpeed ? (
-              <div
-                className="grid grid-cols-4 gap-1 pt-1"
-                style={{ paddingLeft: rowPaddingLeft, paddingRight: 16, opacity: sliderOpacity }}
-              >
-                {[0.8, 0.9, 1, 1.2].map((presetSpeed) => {
-                  const selected = Math.abs((Number(playbackSpeed) || 1) - presetSpeed) < 0.01;
-                  return (
-                    <button
-                      key={presetSpeed}
-                      type="button"
-                      disabled={isRendering}
-                      onClick={() => onSelectPlaybackSpeed(presetSpeed)}
-                      className={`h-6 rounded-md border px-1 text-[10px] font-semibold tabular-nums whitespace-nowrap transition-colors disabled:opacity-45 ${
-                        selected
-                          ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                          : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]'
-                      }`}
-                    >
-                      {presetSpeed}x
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
             </div>
           ) : null}
 
@@ -1188,29 +1130,6 @@ export function PlayerControlsSidebar({
                 )}
               </div>
             </div>
-            </div>
-          ) : null}
-
-          {!fullyMinimized && progress > 0.85 ? (
-            <div className="mt-2 mx-3 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3 py-2.5 text-[11px] leading-relaxed text-[var(--player-text-muted)]">
-              {practiceControlsEnabled ? (
-                <div className="space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--player-accent-text)]">
-                    Active Session
-                  </div>
-                  <div className="text-[var(--player-text-secondary)] tabular-nums">
-                    {focusReadout} · {panControlDisabled ? 'Fixed width' : `${Math.round(practicePanRange)}% width`} · {speedFormatted}x
-                  </div>
-                  <div>Double-click any slider bar for exact numeric input.</div>
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-secondary)]">
-                    Practice Tools
-                  </div>
-                  <div>Start any track to unlock Practice Focus and Choir Width controls.</div>
-                </div>
-              )}
             </div>
           ) : null}
 

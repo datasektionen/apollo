@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import '../styles/player-theme.css';
 import { updateMyProfile } from '../lib/serverApi';
 
 function getCurrentArtistDisplayName(session) {
@@ -65,7 +66,10 @@ export default function ProfileDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+    <div
+      className="player-theme fixed inset-0 z-[120] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
+      data-player-theme="dark-gold"
+    >
       <button
         type="button"
         className="absolute inset-0 cursor-default"
@@ -76,67 +80,69 @@ export default function ProfileDialog({
       />
       <form
         onSubmit={handleSubmit}
-        className="relative w-full max-w-md rounded-2xl border border-gray-700 bg-gray-900 p-5 text-white shadow-2xl"
+        className="relative w-full max-w-md overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)]"
       >
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold">My Profile</h2>
+        <div className="player-hero-surface border-b border-[var(--player-border-subtle)] px-6 py-4">
+          <h2 className="text-lg font-bold tracking-tight text-[var(--player-text-primary)]">My Profile</h2>
         </div>
 
-        <label className="block text-sm font-medium text-gray-200" htmlFor="artist-display-name">
-          Artist Display Name
-        </label>
-        <input
-          id="artist-display-name"
-          type="text"
-          value={artistDisplayName}
-          maxLength={120}
-          onChange={(event) => setArtistDisplayName(event.target.value)}
-          className="mt-2 w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition-colors placeholder:text-gray-500 focus:border-blue-500"
-          placeholder="Optional artist name"
-          autoFocus
-        />
-        <div className="mt-1 text-right text-xs text-gray-500">
-          {artistDisplayName.length}/120
-        </div>
-
-        <label className="mt-4 block text-sm font-medium text-gray-200" htmlFor="artist-description">
-          Artist Description
-        </label>
-        <textarea
-          id="artist-description"
-          value={artistDescription}
-          maxLength={2000}
-          rows={4}
-          onChange={(event) => setArtistDescription(event.target.value)}
-          className="mt-2 w-full resize-none rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none transition-colors placeholder:text-gray-500 focus:border-blue-500"
-          placeholder="Optional artist bio"
-        />
-        <div className="mt-1 text-right text-xs text-gray-500">
-          {artistDescription.length}/2000
-        </div>
-
-        {error ? (
-          <div className="mt-4 rounded-lg border border-red-700/50 bg-red-950/40 px-3 py-2 text-sm text-red-200">
-            {error}
+        <div className="p-6">
+          <label className="block text-sm font-medium text-[var(--player-text-secondary)]" htmlFor="artist-display-name">
+            Artist Display Name
+          </label>
+          <input
+            id="artist-display-name"
+            type="text"
+            value={artistDisplayName}
+            maxLength={120}
+            onChange={(event) => setArtistDisplayName(event.target.value)}
+            className="mt-2 w-full rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3.5 py-2.5 text-sm text-[var(--player-text-primary)] outline-none transition-colors placeholder:text-[var(--player-text-muted)] focus:border-[var(--player-accent-border)] focus:ring-1 focus:ring-[var(--player-focus-ring)]"
+            placeholder="Optional artist name"
+            autoFocus
+          />
+          <div className="mt-1 text-right text-xs tabular-nums text-[var(--player-text-muted)]">
+            {artistDisplayName.length}/120
           </div>
-        ) : null}
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-200 transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-gray-700"
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
+          <label className="mt-4 block text-sm font-medium text-[var(--player-text-secondary)]" htmlFor="artist-description">
+            Artist Description
+          </label>
+          <textarea
+            id="artist-description"
+            value={artistDescription}
+            maxLength={2000}
+            rows={4}
+            onChange={(event) => setArtistDescription(event.target.value)}
+            className="mt-2 w-full resize-none rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3.5 py-2.5 text-sm text-[var(--player-text-primary)] outline-none transition-colors placeholder:text-[var(--player-text-muted)] focus:border-[var(--player-accent-border)] focus:ring-1 focus:ring-[var(--player-focus-ring)]"
+            placeholder="Optional artist bio"
+          />
+          <div className="mt-1 text-right text-xs tabular-nums text-[var(--player-text-muted)]">
+            {artistDescription.length}/2000
+          </div>
+
+          {error ? (
+            <div className="mt-4 rounded-xl border border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] px-3.5 py-2.5 text-sm text-[var(--player-danger-text)]">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--player-text-primary)] transition-colors hover:bg-[var(--player-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-lg bg-[var(--player-accent)] px-4 py-2 text-sm font-bold text-[var(--player-accent-foreground)] transition-colors hover:bg-[var(--player-accent-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
         </div>
       </form>
     </div>

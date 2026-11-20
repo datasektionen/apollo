@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, Copy, Loader2, X } from 'lucide-react';
+import '../styles/player-theme.css';
 import {
   abortLoadProgress,
   dismissLoadProgress,
@@ -12,11 +13,11 @@ import {
 } from '../lib/loadProgress';
 
 function levelClass(level) {
-  if (level === 'ok') return 'text-emerald-300';
-  if (level === 'error') return 'text-red-300';
-  if (level === 'warn') return 'text-amber-300';
-  if (level === 'start') return 'text-sky-300';
-  return 'text-gray-300';
+  if (level === 'ok') return 'text-[var(--player-success)]';
+  if (level === 'error') return 'text-[var(--player-danger)]';
+  if (level === 'warn') return 'text-[var(--player-accent-text)]';
+  if (level === 'start') return 'text-[var(--player-info)]';
+  return 'text-[var(--player-text-secondary)]';
 }
 
 function barPercent(done, total) {
@@ -39,25 +40,25 @@ function ProgressCount({
 }) {
   const percent = barPercent(done, total);
   const barHeight = size === 'main' ? 'h-2.5' : 'h-1.5';
-  const fill = tone === 'step' ? 'bg-sky-400' : 'bg-green-500';
+  const fill = tone === 'step' ? 'bg-[var(--player-accent)]' : 'bg-[var(--player-success)]';
   const labelClass = size === 'main'
-    ? 'text-sm font-medium text-gray-100'
-    : 'text-sm text-gray-300';
+    ? 'text-sm font-semibold text-[var(--player-text-primary)]'
+    : 'text-sm text-[var(--player-text-secondary)]';
   return (
     <div>
       <div className={`mb-1.5 flex items-center justify-between ${labelClass}`}>
         <span>{label}</span>
-        <span>{done}/{total}</span>
+        <span className="tabular-nums">{done}/{total}</span>
       </div>
       <div
-        className={`${barHeight} w-full overflow-hidden rounded border border-gray-700 bg-gray-800`}
+        className={`${barHeight} w-full overflow-hidden rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)]`}
         role="progressbar"
         aria-label={label}
         aria-valuemin={0}
         aria-valuemax={total}
         aria-valuenow={done}
       >
-        <div className={`h-full ${fill}`} style={{ width: `${percent}%` }} />
+        <div className={`h-full transition-all duration-150 ${fill}`} style={{ width: `${percent}%` }} />
       </div>
     </div>
   );
@@ -74,7 +75,7 @@ function StemMeters({ stems, now }) {
         total={stems.total || 0}
         size="main"
       />
-      <div className="space-y-3 border-l border-gray-800 pl-3">
+      <div className="space-y-3 border-l border-[var(--player-border-subtle)] pl-3">
         {stems.cached > 0 ? (
           <ProgressCount
             label="Already loaded"
@@ -96,7 +97,7 @@ function StemMeters({ stems, now }) {
               done={stems.serverCached || 0}
               total={stems.fetchTotal}
             />
-            <div className="space-y-3 border-l border-gray-800 pl-3">
+            <div className="space-y-3 border-l border-[var(--player-border-subtle)] pl-3">
               <ProgressCount
                 label="Downloaded"
                 done={stems.fetched || 0}
@@ -110,7 +111,7 @@ function StemMeters({ stems, now }) {
                 tone="step"
               />
               {pipeline ? (
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-[var(--player-text-muted)] tabular-nums">
                   Download busy {formatLoadDuration(pipeline.downloadBusyMs)}
                   {' · '}
                   Convert busy {formatLoadDuration(pipeline.convertBusyMs)}
@@ -139,10 +140,13 @@ function OpenLoadPage({ state, now }) {
   const waveforms = state.waveforms || { ready: 0, total: 0 };
   const running = state.status === 'running';
   return (
-    <div className="fixed inset-0 z-[80] bg-gray-950 text-white">
+    <div
+      className="player-theme player-showcase-surface fixed inset-0 z-[80] bg-[var(--player-bg-canvas)] text-[var(--player-text-primary)]"
+      data-player-theme="dark-gold"
+    >
       <button
         type="button"
-        className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-gray-200 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3.5 py-1.5 text-sm font-medium text-[var(--player-text-primary)] transition hover:bg-[var(--player-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--player-focus-ring)]"
         onClick={() => abortLoadProgress()}
         aria-label="Back"
       >
@@ -154,18 +158,18 @@ function OpenLoadPage({ state, now }) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="open-progress-title"
-          className="w-full max-w-lg space-y-5"
+          className="w-full max-w-lg space-y-5 rounded-2xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-6 shadow-[var(--player-shadow-elevated)]"
         >
           <div>
-            <div className="text-xs uppercase tracking-wide text-gray-500">
+            <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
               {state.status === 'error' ? 'Could not open project' : 'Opening project'}
             </div>
-            <h2 id="open-progress-title" className="mt-1 truncate text-2xl font-semibold">
+            <h2 id="open-progress-title" className="mt-1 truncate text-2xl font-bold tracking-tight text-[var(--player-text-primary)]">
               {state.title}
             </h2>
           </div>
-          <div className="flex items-center gap-2 text-sm text-gray-300">
-            {running ? <Loader2 size={16} className="animate-spin text-sky-300" /> : null}
+          <div className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)]">
+            {running ? <Loader2 size={16} className="animate-spin text-[var(--player-accent-text)]" /> : null}
             <span>{state.current || 'Preparing project…'}</span>
           </div>
           {(stems.total > 0) ? <StemMeters stems={stems} now={now} /> : null}
@@ -179,9 +183,9 @@ function OpenLoadPage({ state, now }) {
             />
           ) : null}
           {state.error ? (
-            <p className="text-sm text-red-300">{state.error}</p>
+            <p className="text-sm text-[var(--player-danger)]">{state.error}</p>
           ) : null}
-          <div className="text-xs text-gray-500">
+          <div className="text-xs tabular-nums text-[var(--player-text-muted)]">
             Elapsed {formatLoadDuration(elapsedMs)}
           </div>
         </div>
@@ -196,32 +200,33 @@ function PlayLoadBars({ state, now }) {
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4"
+      className="player-theme fixed inset-0 z-[70] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
+      data-player-theme="dark-gold"
       onClick={() => dismissLoadProgress()}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="play-progress-title"
-        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 text-white"
+        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-gray-800 px-5 py-4">
+        <div className="player-hero-surface flex items-start justify-between gap-3 border-b border-[var(--player-border-subtle)] px-5 py-4">
           <div className="min-w-0">
-            <div className="text-xs uppercase tracking-wide text-gray-500">
+            <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
               {state.status === 'error'
                 ? "Couldn't load audio"
                 : state.status === 'done'
                   ? 'Audio ready'
                   : 'Loading audio'}
             </div>
-            <h2 id="play-progress-title" className="mt-1 truncate text-lg font-semibold">
+            <h2 id="play-progress-title" className="mt-1 truncate text-lg font-bold tracking-tight text-[var(--player-text-primary)]">
               {state.title}
             </h2>
           </div>
           <button
             type="button"
-            className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
+            className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
             onClick={() => dismissLoadProgress()}
             aria-label="Close"
           >
@@ -232,9 +237,9 @@ function PlayLoadBars({ state, now }) {
         <div className="space-y-4 px-5 py-4">
           <StemMeters stems={stems} now={now} />
           {state.error ? (
-            <p className="text-sm text-red-300">{state.error}</p>
+            <p className="text-sm text-[var(--player-danger)]">{state.error}</p>
           ) : null}
-          <div className="text-xs text-gray-400">
+          <div className="text-xs tabular-nums text-[var(--player-text-muted)]">
             Elapsed {formatLoadDuration(elapsedMs)}
           </div>
         </div>
@@ -311,28 +316,31 @@ export default function LoadProgressDialog() {
     : null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4">
+    <div
+      className="player-theme fixed inset-0 z-[70] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
+      data-player-theme="dark-gold"
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="load-progress-title"
-        className="relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 text-white"
+        className="relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)]"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-gray-800 px-5 py-4">
+        <div className="player-hero-surface flex items-start justify-between gap-3 border-b border-[var(--player-border-subtle)] px-5 py-4">
           <div className="min-w-0">
-            <div className="text-xs uppercase tracking-wide text-gray-500">
+            <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
               {state.kind === 'play' ? 'Play request' : 'Open request'}
             </div>
-            <h2 id="load-progress-title" className="mt-1 truncate text-lg font-semibold">
+            <h2 id="load-progress-title" className="mt-1 truncate text-lg font-bold tracking-tight text-[var(--player-text-primary)]">
               {state.title}
             </h2>
             {state.detail ? (
-              <p className="mt-1 truncate text-xs text-gray-500">{state.detail}</p>
+              <p className="mt-1 truncate text-xs text-[var(--player-text-muted)]">{state.detail}</p>
             ) : null}
           </div>
           <button
             type="button"
-            className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white disabled:opacity-40"
+            className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:opacity-40 transition-colors"
             onClick={() => dismissLoadProgress()}
             disabled={running}
             aria-label="Close"
@@ -341,61 +349,61 @@ export default function LoadProgressDialog() {
           </button>
         </div>
 
-        <div className="border-b border-gray-800 px-5 py-3">
+        <div className="border-b border-[var(--player-border-subtle)] px-5 py-3">
           <div className="flex items-center gap-2 text-sm">
-            {running ? <Loader2 size={16} className="animate-spin text-blue-300" /> : null}
-            <span className={state.status === 'error' ? 'text-red-300' : 'text-gray-100'}>
+            {running ? <Loader2 size={16} className="animate-spin text-[var(--player-accent-text)]" /> : null}
+            <span className={state.status === 'error' ? 'text-[var(--player-danger)]' : 'text-[var(--player-text-primary)]'}>
               {state.current}
             </span>
           </div>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
-            <span>Elapsed {formatLoadDuration(elapsedMs)}</span>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--player-text-secondary)]">
+            <span className="tabular-nums">Elapsed {formatLoadDuration(elapsedMs)}</span>
             {state.phase ? <span>Phase {state.phase}</span> : null}
-            {stemLabel ? <span>{stemLabel}</span> : null}
-            <span>{state.logs.length} log lines</span>
-            {state.status === 'done' ? <span className="text-emerald-400">Complete</span> : null}
-            {state.status === 'error' ? <span className="text-red-400">Failed</span> : null}
+            {stemLabel ? <span className="tabular-nums">{stemLabel}</span> : null}
+            <span className="tabular-nums">{state.logs.length} log lines</span>
+            {state.status === 'done' ? <span className="text-[var(--player-success)]">Complete</span> : null}
+            {state.status === 'error' ? <span className="text-[var(--player-danger)]">Failed</span> : null}
           </div>
           {state.error ? (
-            <p className="mt-2 text-xs text-red-300">{state.error}</p>
+            <p className="mt-2 text-xs text-[var(--player-danger)]">{state.error}</p>
           ) : null}
         </div>
 
-        <div className="min-h-0 flex-1 select-text overflow-auto bg-gray-950 px-4 py-3 font-mono text-xs leading-5">
+        <div className="min-h-0 flex-1 select-text overflow-auto bg-[var(--player-bg-canvas)] px-4 py-3 font-mono text-xs leading-5">
           {state.logs.map((entry) => (
             <div
               key={entry.id}
               className={`${levelClass(entry.level)}`}
               style={{ paddingLeft: `${8 + entry.depth * 14}px` }}
             >
-              <span className="text-gray-600">+{formatLoadDuration(entry.atMs)}</span>
+              <span className="text-[var(--player-text-disabled)]">+{formatLoadDuration(entry.atMs)}</span>
               {'  '}
-              <span className="text-gray-500">{loadLogLevelPrefix(entry.level)}</span>
+              <span className="text-[var(--player-text-muted)]">{loadLogLevelPrefix(entry.level)}</span>
               {'  '}
               {entry.message}
               {entry.durationMs != null ? (
-                <span className="text-gray-500">  ({formatLoadDuration(entry.durationMs)})</span>
+                <span className="text-[var(--player-text-muted)]">  ({formatLoadDuration(entry.durationMs)})</span>
               ) : null}
               {entry.bytes != null ? (
-                <span className="text-gray-500">  {formatLoadBytes(entry.bytes)}</span>
+                <span className="text-[var(--player-text-muted)]">  {formatLoadBytes(entry.bytes)}</span>
               ) : null}
             </div>
           ))}
           <div ref={logEndRef} />
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-gray-800 px-5 py-3">
+        <div className="flex justify-end gap-2 border-t border-[var(--player-border-subtle)] px-5 py-3">
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded bg-gray-800 px-4 py-2 text-sm hover:bg-gray-700"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
             onClick={copyLog}
           >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? <Check size={14} className="text-[var(--player-success)]" /> : <Copy size={14} />}
             {copied ? 'Copied' : 'Copy log'}
           </button>
           <button
             type="button"
-            className="rounded bg-gray-700 px-4 py-2 text-sm hover:bg-gray-600 disabled:opacity-40"
+            className="rounded-lg bg-[var(--player-accent)] px-4 py-2 text-sm font-bold text-[var(--player-accent-foreground)] hover:bg-[var(--player-accent-hover)] disabled:opacity-40 transition-colors"
             onClick={() => dismissLoadProgress()}
             disabled={running}
           >

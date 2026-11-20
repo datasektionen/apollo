@@ -18,6 +18,8 @@ import {
   VolumeX,
   Metronome,
   ChevronsLeftRightEllipsis,
+  Headphones,
+  HeadphoneOff,
   Scale,
 } from 'lucide-react';
 import { formatClock, formatDurationMs } from '../../utils/playerTime';
@@ -31,6 +33,7 @@ import {
   PLAYBACK_TRANSPOSE_BOUNDS,
   formatPlaybackSpeed,
   formatPlaybackTranspose,
+  getNextPlaybackSpeed,
 } from '../../utils/playerControlsSidebar';
 import { getPlacedLyricLines } from '../../utils/lyricTimeline';
 import { getProjectCredits } from '../../lib/serverApi';
@@ -51,6 +54,57 @@ function getBipolarTrackStyle(pct) {
     '--player-bipolar-start': `${Math.min(50, clamped)}%`,
     '--player-bipolar-end': `${Math.max(50, clamped)}%`,
   };
+}
+
+function MobileSliderControl({
+  label,
+  readout,
+  active = false,
+  danger = false,
+  icon: Icon,
+  iconLabel,
+  onIconClick,
+  children,
+  divider = false,
+}) {
+  return (
+    <div className={`space-y-1.5 ${divider ? 'border-t border-[var(--player-border-subtle)] pt-3.5' : ''}`}>
+      <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+        <span className="text-[var(--player-text-secondary)]">{label}</span>
+        <span
+          className={`tabular-nums font-bold ${
+            danger
+              ? 'text-[var(--player-danger)]'
+              : active
+                ? 'text-[var(--player-accent-text)]'
+                : 'text-[var(--player-text-primary)]'
+          }`}
+        >
+          {readout}
+        </span>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onIconClick}
+          aria-label={iconLabel}
+          title={iconLabel}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors active:scale-95 ${
+            danger
+              ? 'border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] text-[var(--player-danger)]'
+              : active
+                ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
+                : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
+          }`}
+        >
+          <Icon size={18} />
+        </button>
+        <div className="relative flex min-w-0 flex-1 items-center">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function MobileNowPlayingModal({
@@ -76,15 +130,20 @@ export function MobileNowPlayingModal({
   // Choir stem controls
   playbackSpeed = 1,
   onSetPlaybackSpeed,
+  onToggleSpeed,
   playbackTranspose = 0,
   onSetPlaybackTranspose,
+  onToggleTranspose,
   practiceFocusControl = ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX,
   onSetPracticeFocusControl,
+  onTogglePracticeFocus,
   practicePanRange = 100,
   onSetPracticePanRange,
+  onTogglePracticePanRange,
   hasRealtimeMetronome = false,
   metronomeVolume = 80,
   onSetMetronomeVolume,
+  onToggleMetronomeMute,
   // Lyrics & Session
   currentPlaybackLyrics,
   hasCurrentLyrics,
@@ -92,6 +151,9 @@ export function MobileNowPlayingModal({
 }) {
   const [isMuted, setIsMuted] = useState(false);
   const previousVolumeRef = useRef(volume);
+  const previousMetronomeRef = useRef(metronomeVolume || 80);
+  const previousTransposeRef = useRef(1);
+  const previousNumericFocusRef = useRef(ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX);
   const [creditsState, setCreditsState] = useState({ status: 'idle', data: null, error: '' });
   const [activeSection, setActiveSection] = useState('practice');
   const practiceSectionRef = useRef(null);
@@ -194,17 +256,13 @@ export function MobileNowPlayingModal({
         : ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX
     )
   );
-  const focusLabel = formatFocusBadge(focusSteps[clampedFocusIdx]);
+  const focusStep = focusSteps[clampedFocusIdx];
+  const focusLabel = formatFocusBadge(focusStep);
   const focusPct = focusSteps.length > 1 ? (clampedFocusIdx / (focusSteps.length - 1)) * 100 : 50;
-  const focusQuickOptions = [
-    { idx: 0, label: 'Omit' },
-    { idx: 4, label: '-6 dB' },
-    { idx: ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX, label: '0 dB' },
-    { idx: 8, label: '+6 dB' },
-    { idx: focusSteps.length - 1, label: 'Solo' },
-  ];
+  const FocusIcon = focusStep === 'omitted'
+    ? HeadphoneOff
+    : (focusStep === 'solo' ? Headphones : Scale);
 
-  const speedQuickOptions = [0.8, 0.9, 1.0, 1.1, 1.2];
   const clampedSpeed = Math.max(
     PLAYBACK_SPEED_DRAG_BOUNDS.MIN,
     Math.min(PLAYBACK_SPEED_DRAG_BOUNDS.MAX, Number(playbackSpeed) || 1)
@@ -226,19 +284,87 @@ export function MobileNowPlayingModal({
   const clampedPan = Math.max(0, Math.min(200, Number(practicePanRange) ?? 100));
   const panPct = (clampedPan / 200) * 100;
 
+  const isFocusActive = focusStep === 'omitted' || focusStep === 'solo' || Number(focusStep) !== 0;
+  const isPanActive = clampedPan !== 100;
+  const isSpeedActive = Math.abs((Number(playbackSpeed) || 1) - 1) > 0.005;
+  const isTransposeActive = Math.abs(Number(playbackTranspose) || 0) > 1e-4;
+  const effectiveMetronome = Math.max(0, Math.min(100, Number(metronomeVolume) || 0));
+  const isMetronomeMuted = effectiveMetronome <= 0;
+
   const effectiveVolume = isMuted ? 0 : Math.max(0, Math.min(100, Number(volume) || 0));
   const seekMax = Math.max(durationSec, 0.001);
   const seekVal = Math.min(currentTimeSec, durationSec || 0);
   const seekPct = durationSec > 0 ? Math.min(100, Math.max(0, (seekVal / durationSec) * 100)) : 0;
 
   const handleToggleMute = () => {
-    if (isMuted) {
+    if (isMuted || effectiveVolume <= 0) {
       setIsMuted(false);
       onSetVolume?.(previousVolumeRef.current || 80);
     } else {
       previousVolumeRef.current = volume;
       setIsMuted(true);
       onSetVolume?.(0);
+    }
+  };
+
+  const handleFocusIconClick = () => {
+    if (onTogglePracticeFocus) {
+      onTogglePracticeFocus();
+      return;
+    }
+    if (typeof focusStep === 'number') {
+      previousNumericFocusRef.current = clampedFocusIdx;
+      onSetPracticeFocusControl?.(focusSteps.length - 1);
+      return;
+    }
+    if (focusStep === 'solo') {
+      onSetPracticeFocusControl?.(0);
+      return;
+    }
+    onSetPracticeFocusControl?.(previousNumericFocusRef.current ?? ADVANCED_MIX_PRACTICE_FOCUS_DEFAULT_INDEX);
+  };
+
+  const handlePanIconClick = () => {
+    if (onTogglePracticePanRange) {
+      onTogglePracticePanRange();
+      return;
+    }
+    const distToMax = 200 - clampedPan;
+    onSetPracticePanRange?.(distToMax >= clampedPan ? 200 : 0);
+  };
+
+  const handleSpeedIconClick = () => {
+    if (onToggleSpeed) {
+      onToggleSpeed();
+      return;
+    }
+    onSetPlaybackSpeed?.(getNextPlaybackSpeed(playbackSpeed));
+  };
+
+  const handleTransposeIconClick = () => {
+    if (onToggleTranspose) {
+      onToggleTranspose();
+      return;
+    }
+    const current = Number(playbackTranspose) || 0;
+    if (Math.abs(current) > 1e-4) {
+      previousTransposeRef.current = current;
+      onSetPlaybackTranspose?.(0);
+    } else {
+      onSetPlaybackTranspose?.(previousTransposeRef.current || 1);
+    }
+  };
+
+  const handleMetronomeIconClick = () => {
+    if (onToggleMetronomeMute) {
+      onToggleMetronomeMute();
+      return;
+    }
+    if (isMetronomeMuted) {
+      onSetMetronomeVolume?.(previousMetronomeRef.current || 80);
+    } else {
+      previousMetronomeRef.current = effectiveMetronome;
+      onSetMetronomeVolume?.(0);
     }
   };
 
@@ -303,16 +429,16 @@ export function MobileNowPlayingModal({
             {lyricPreview ? (
               <div className="my-4 space-y-2">
                 <p
-                  className={`border-l-2 pl-3.5 text-lg font-bold leading-snug line-clamp-3 ${
+                  className={`text-lg font-bold leading-snug line-clamp-3 ${
                     lyricPreview.mode === 'synced'
-                      ? 'border-[var(--player-accent)] text-[var(--player-text-primary)]'
-                      : 'border-[var(--player-border-strong)] text-[var(--player-lyric-upcoming)]'
+                      ? 'text-[var(--player-text-primary)]'
+                      : 'text-[var(--player-lyric-upcoming)]'
                   }`}
                 >
                   {lyricPreview.primary}
                 </p>
                 {lyricPreview.secondary ? (
-                  <p className="pl-4 text-xs font-medium leading-snug text-[var(--player-lyric-past)] line-clamp-2">
+                  <p className="text-xs font-medium leading-snug text-[var(--player-lyric-past)] line-clamp-2">
                     {lyricPreview.secondary}
                   </p>
                 ) : null}
@@ -485,7 +611,7 @@ export function MobileNowPlayingModal({
         {/* ============================================================ */}
         <section
           ref={practiceSectionRef}
-          className="space-y-5 rounded-2xl bg-[var(--player-bg-surface)] border border-[var(--player-border-subtle)] p-5 scroll-mt-16"
+          className="space-y-4 rounded-2xl bg-[var(--player-bg-surface)] border border-[var(--player-border-subtle)] p-5 scroll-mt-16"
         >
           <div className="flex items-center gap-2 border-b border-[var(--player-border-subtle)] pb-3">
             <Sliders size={17} className="shrink-0 text-[var(--player-accent-text)]" />
@@ -494,204 +620,118 @@ export function MobileNowPlayingModal({
             </h2>
           </div>
 
-          {/* 1. Practice Focus Slider (full 13-step desktop parity) */}
-          <div className="space-y-2">
-            <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
-                <Scale size={14} className="text-[var(--player-accent-text)]" />
-                <span>Practice Focus</span>
-              </span>
-              <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
-                {focusLabel}
-              </span>
-            </div>
-            <div className="relative flex items-center">
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
-              />
-              <input
-                type="range"
-                min="0"
-                max={focusSteps.length - 1}
-                step="1"
-                value={clampedFocusIdx}
-                onChange={(e) => onSetPracticeFocusControl?.(Number(e.target.value))}
-                style={getBipolarTrackStyle(focusPct)}
-                className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
-                aria-label="Practice Focus Slider"
-              />
-            </div>
-            <div className="grid grid-cols-5 gap-1.5 pt-1">
-              {focusQuickOptions.map((opt) => {
-                const active = clampedFocusIdx === opt.idx;
-                return (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    onClick={() => onSetPracticeFocusControl?.(opt.idx)}
-                    aria-pressed={active}
-                    className={`py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${
-                      active
-                        ? 'bg-[var(--player-accent-soft)] border-[var(--player-accent-border)] text-[var(--player-accent-text)]'
-                        : 'bg-[var(--player-bg-elevated)] border-[var(--player-border-subtle)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <MobileSliderControl
+            label="Practice Focus"
+            readout={focusLabel}
+            active={isFocusActive}
+            icon={FocusIcon}
+            iconLabel="Cycle practice focus"
+            onIconClick={handleFocusIconClick}
+          >
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+            />
+            <input
+              type="range"
+              min="0"
+              max={focusSteps.length - 1}
+              step="1"
+              value={clampedFocusIdx}
+              onChange={(e) => onSetPracticeFocusControl?.(Number(e.target.value))}
+              style={getBipolarTrackStyle(focusPct)}
+              className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
+              aria-label="Practice Focus Slider"
+            />
+          </MobileSliderControl>
 
-          {/* 2. Choir Width Slider (0 - 200%) */}
-          <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
-            <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
-                <ChevronsLeftRightEllipsis size={14} className="text-[var(--player-accent-text)]" />
-                <span>Choir Width</span>
-              </span>
-              <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
-                {clampedPan}%
-              </span>
-            </div>
-            <div className="relative flex items-center">
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
-              />
-              <input
-                type="range"
-                min="0"
-                max="200"
-                step="5"
-                value={clampedPan}
-                onChange={(e) => onSetPracticePanRange?.(Number(e.target.value))}
-                style={getBipolarTrackStyle(panPct)}
-                className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
-                aria-label="Practice Pan Range Slider"
-              />
-            </div>
-            <div className="flex justify-between text-[10px] text-[var(--player-text-muted)] font-medium pt-0.5 pb-1">
-              <span>0% Mono</span>
-              <span>100% Stereo</span>
-              <span>200% Wide</span>
-            </div>
-          </div>
+          <MobileSliderControl
+            divider
+            label="Choir Width"
+            readout={`${clampedPan}%`}
+            active={isPanActive}
+            icon={ChevronsLeftRightEllipsis}
+            iconLabel="Jump choir width to extreme"
+            onIconClick={handlePanIconClick}
+          >
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+            />
+            <input
+              type="range"
+              min="0"
+              max="200"
+              step="5"
+              value={clampedPan}
+              onChange={(e) => onSetPracticePanRange?.(Number(e.target.value))}
+              style={getBipolarTrackStyle(panPct)}
+              className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
+              aria-label="Practice Pan Range Slider"
+            />
+          </MobileSliderControl>
 
-          {/* 3. Playback Speed Slider & Quick Buttons */}
-          <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
-            <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
-                <Gauge size={14} className="text-[var(--player-accent-text)]" />
-                <span>Playback Speed</span>
-              </span>
-              <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
-                {formatPlaybackSpeed(playbackSpeed)}x
-              </span>
-            </div>
-            <div className="relative flex items-center">
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
-              />
-              <input
-                type="range"
-                min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
-                max={PLAYBACK_SPEED_DRAG_BOUNDS.MAX}
-                step={PLAYBACK_SPEED_DRAG_BOUNDS.STEP}
-                value={clampedSpeed}
-                onChange={(e) => onSetPlaybackSpeed?.(Number(e.target.value))}
-                style={getBipolarTrackStyle(speedPct)}
-                className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
-                aria-label="Playback Speed Slider"
-              />
-            </div>
-            <div className="grid grid-cols-5 gap-1.5 pt-1">
-              {speedQuickOptions.map((s) => {
-                const active = Math.abs(Number(playbackSpeed) - s) < 0.01;
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => onSetPlaybackSpeed?.(s)}
-                    aria-pressed={active}
-                    className={`py-1.5 rounded-lg border text-xs font-semibold tabular-nums transition-colors ${
-                      active
-                        ? 'bg-[var(--player-accent)] border-[var(--player-accent)] text-[var(--player-accent-foreground)] font-bold'
-                        : 'bg-[var(--player-bg-elevated)] border-[var(--player-border-subtle)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
-                    }`}
-                  >
-                    {s}x
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <MobileSliderControl
+            divider
+            label="Playback Speed"
+            readout={`${formatPlaybackSpeed(playbackSpeed)}x`}
+            active={isSpeedActive}
+            icon={Gauge}
+            iconLabel="Step playback speed"
+            onIconClick={handleSpeedIconClick}
+          >
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+            />
+            <input
+              type="range"
+              min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
+              max={PLAYBACK_SPEED_DRAG_BOUNDS.MAX}
+              step={PLAYBACK_SPEED_DRAG_BOUNDS.STEP}
+              value={clampedSpeed}
+              onChange={(e) => onSetPlaybackSpeed?.(Number(e.target.value))}
+              style={getBipolarTrackStyle(speedPct)}
+              className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
+              aria-label="Playback Speed Slider"
+            />
+          </MobileSliderControl>
 
-          {/* 4. Pitch Transpose Slider */}
-          <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
-            <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
-                <Music size={14} className="text-[var(--player-accent-text)]" />
-                <span>Pitch Transposition</span>
-              </span>
-              <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
-                {formatPlaybackTranspose(playbackTranspose)}
-              </span>
-            </div>
-            <div className="relative flex items-center">
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
-              />
-              <input
-                type="range"
-                min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
-                max={PLAYBACK_TRANSPOSE_BOUNDS.MAX}
-                step={PLAYBACK_TRANSPOSE_BOUNDS.STEP}
-                value={clampedTranspose}
-                onChange={(e) => onSetPlaybackTranspose?.(Number(e.target.value))}
-                style={getBipolarTrackStyle(transposePct)}
-                className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
-                aria-label="Pitch Transpose Slider"
-              />
-            </div>
-            <div className="flex justify-between items-center text-[11px] text-[var(--player-text-muted)] pt-1 tabular-nums">
-              <span>{PLAYBACK_TRANSPOSE_BOUNDS.MIN} st</span>
-              <button
-                type="button"
-                onClick={() => onSetPlaybackTranspose?.(0)}
-                className="px-3 py-1 rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] active:scale-95 font-semibold"
-              >
-                Reset to Original
-              </button>
-              <span>+{PLAYBACK_TRANSPOSE_BOUNDS.MAX} st</span>
-            </div>
-          </div>
+          <MobileSliderControl
+            divider
+            label="Pitch Transposition"
+            readout={formatPlaybackTranspose(playbackTranspose)}
+            active={isTransposeActive}
+            icon={Music}
+            iconLabel={isTransposeActive ? 'Reset pitch transpose to 0 st' : 'Restore previous pitch transpose'}
+            onIconClick={handleTransposeIconClick}
+          >
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+            />
+            <input
+              type="range"
+              min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
+              max={PLAYBACK_TRANSPOSE_BOUNDS.MAX}
+              step={PLAYBACK_TRANSPOSE_BOUNDS.STEP}
+              value={clampedTranspose}
+              onChange={(e) => onSetPlaybackTranspose?.(Number(e.target.value))}
+              style={getBipolarTrackStyle(transposePct)}
+              className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
+              aria-label="Pitch Transpose Slider"
+            />
+          </MobileSliderControl>
 
-          {/* 5. Master Volume Slider with Mute */}
-          <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
-            <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleToggleMute}
-                  aria-label={isMuted || volume === 0 ? 'Unmute master volume' : 'Mute master volume'}
-                  className="hover:text-[var(--player-text-primary)] transition-colors"
-                >
-                  {isMuted || volume === 0 ? (
-                    <VolumeX size={16} className="text-[var(--player-danger)]" />
-                  ) : (
-                    <Volume2 size={16} className="text-[var(--player-text-secondary)]" />
-                  )}
-                </button>
-                <span>Master Volume</span>
-              </span>
-              <span className="text-[var(--player-text-primary)] font-bold tabular-nums">
-                {isMuted ? 'Muted' : `${volume}%`}
-              </span>
-            </div>
+          <MobileSliderControl
+            divider
+            label="Master Volume"
+            readout={isMuted || effectiveVolume === 0 ? 'Muted' : `${effectiveVolume}%`}
+            danger={isMuted || effectiveVolume === 0}
+            icon={isMuted || effectiveVolume === 0 ? VolumeX : Volume2}
+            iconLabel={isMuted || effectiveVolume === 0 ? 'Unmute master volume' : 'Mute master volume'}
+            onIconClick={handleToggleMute}
+          >
             <input
               type="range"
               min="0"
@@ -706,32 +746,30 @@ export function MobileNowPlayingModal({
               className="player-range player-range-touch w-full cursor-pointer"
               aria-label="Master Volume Slider"
             />
-          </div>
+          </MobileSliderControl>
 
-          {/* 6. Metronome Click Volume (if snapshot has metronome) */}
           {hasRealtimeMetronome && (
-            <div className="space-y-2 border-t border-[var(--player-border-subtle)] pt-4">
-              <div className="flex justify-between items-center text-xs font-semibold">
-                <span className="text-[var(--player-text-secondary)] flex items-center gap-1.5">
-                  <Metronome size={14} className="text-[var(--player-accent-text)]" />
-                  <span>Metronome Click</span>
-                </span>
-                <span className="text-[var(--player-accent-text)] font-bold tabular-nums">
-                  {metronomeVolume}%
-                </span>
-              </div>
+            <MobileSliderControl
+              divider
+              label="Metronome Click"
+              readout={isMetronomeMuted ? 'Muted' : `${Math.round(effectiveMetronome)}%`}
+              active={!isMetronomeMuted}
+              icon={Metronome}
+              iconLabel={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
+              onIconClick={handleMetronomeIconClick}
+            >
               <input
                 type="range"
                 min="0"
                 max="100"
                 step="1"
-                value={metronomeVolume}
+                value={effectiveMetronome}
                 onChange={(e) => onSetMetronomeVolume?.(Number(e.target.value))}
-                style={{ '--player-range-pct': `${metronomeVolume}%` }}
+                style={{ '--player-range-pct': `${effectiveMetronome}%` }}
                 className="player-range player-range-touch w-full cursor-pointer"
                 aria-label="Metronome Volume Slider"
               />
-            </div>
+            </MobileSliderControl>
           )}
         </section>
 

@@ -3723,15 +3723,20 @@ function PlayerDashboard({
           // Stem & Choir controls
           playbackSpeed={playbackSpeed}
           onSetPlaybackSpeed={setPlaybackSpeed}
+          onToggleSpeed={handleTogglePlaybackSpeed}
           playbackTranspose={playbackTranspose}
           onSetPlaybackTranspose={setPlaybackTranspose}
+          onToggleTranspose={handleToggleTranspose}
           practiceFocusControl={practiceFocusControl}
           onSetPracticeFocusControl={setPracticeFocusControl}
+          onTogglePracticeFocus={handleTogglePracticeFocus}
           practicePanRange={practicePanRange}
           onSetPracticePanRange={setPracticePanRange}
+          onTogglePracticePanRange={handleTogglePracticePanRange}
           hasRealtimeMetronome={hasRealtimeMetronome}
           metronomeVolume={metronomeVolume}
           onSetMetronomeVolume={setMetronomeVolume}
+          onToggleMetronomeMute={handleToggleMetronomeMute}
           // Lyrics & Credits
           currentPlaybackLyrics={currentPlaybackLyrics}
           hasCurrentLyrics={hasCurrentLyrics}
@@ -3796,7 +3801,7 @@ function PlayerDashboard({
         >
           <BrandWordmark className="h-8" />
         </button>
-        <div className="flex min-w-0 justify-center overflow-hidden">
+        <div className="flex min-w-0 justify-center">
           <div className="w-full min-w-0 max-w-lg">
             <PlayerSearchBar
               value={searchDraft}
@@ -4421,16 +4426,6 @@ function PlayerDashboard({
               focusSliderPosition={focusSliderPosition}
               onTogglePracticeFocus={handleTogglePracticeFocus}
               onFocusSliderClick={handleFocusSliderClick}
-              onSelectPracticeFocus={(focusIndex) => {
-                if (!isRendering && !focusControlDisabled) {
-                  setPracticeFocusControl(focusIndex);
-                }
-              }}
-              onSelectPlaybackSpeed={(nextSpeed) => {
-                if (!isRendering) {
-                  setPlaybackSpeed(nextSpeed);
-                }
-              }}
               practicePanRange={practicePanRange}
               panControlDisabled={panControlDisabled}
               showPanRangeHighlight={showPanRangeHighlight}
@@ -4869,11 +4864,7 @@ function PlayerDashboard({
                   </>
                 );
               })()
-            ) : (
-              <div className="truncate text-xs text-[var(--player-text-muted)]">
-                Select a number to begin rehearsal
-              </div>
-            )}
+            ) : null}
           </div>
 
           <div className="flex min-h-[76px] w-full flex-col justify-center">

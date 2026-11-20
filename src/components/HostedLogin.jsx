@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import '../styles/player-theme.css';
 import { BrandWordmark } from './BrandLogo';
 
 const GLARE_RANGE_PX = 680;
@@ -81,7 +82,10 @@ function HostedLogin({
   const glareMid = 0.04 + glare.intensity * 0.08;
 
   return (
-    <div className="grid h-full grid-rows-[minmax(0,45fr)_auto_minmax(0,55fr)] justify-items-center bg-gray-900 p-6 text-white">
+    <div
+      className="player-theme player-showcase-surface grid h-full grid-rows-[minmax(0,45fr)_auto_minmax(0,55fr)] justify-items-center bg-[var(--player-bg-canvas)] p-6 text-[var(--player-text-primary)]"
+      data-player-theme="dark-gold"
+    >
       <BrandWordmark className="row-start-2 h-24 w-auto max-w-[90vw] sm:h-32 md:h-40" />
 
       <div className="row-start-3 flex min-h-0 w-full flex-col items-center">
@@ -92,7 +96,7 @@ function HostedLogin({
           type="button"
           onClick={onSsoLogin}
           disabled={loading}
-          className="relative inline-flex items-center justify-center overflow-hidden rounded-full bg-[#a98c4d] pl-5 pr-4 py-2.5 text-3xl font-semibold leading-none tracking-wide text-gray-950 shadow-[0_0_0_1px_rgba(122,98,46,0.55),0_10px_28px_rgba(0,0,0,0.45)] transition duration-150 hover:scale-[1.05] hover:shadow-[0_0_0_1px_rgba(169,140,77,0.45),0_0px_32px_rgba(122,98,46,0.22)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#a98c4d]/80 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900 active:scale-[1.02] disabled:pointer-events-none disabled:opacity-50"
+          className="relative inline-flex items-center justify-center overflow-hidden rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent)] hover:bg-[var(--player-accent-hover)] pl-5 pr-4 py-2.5 text-3xl font-semibold leading-none tracking-wide text-[var(--player-accent-foreground)] shadow-[var(--player-shadow-elevated)] transition duration-150 hover:scale-[1.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--player-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--player-bg-canvas)] active:scale-[1.02] disabled:pointer-events-none disabled:opacity-50"
         >
           <span
             aria-hidden="true"
@@ -121,7 +125,7 @@ function HostedLogin({
           </span>
         </button>
 
-        {error ? <p className="max-w-xs text-center text-sm text-red-300">{error}</p> : null}
+        {error ? <p className="max-w-xs text-center text-sm text-[var(--player-danger)]">{error}</p> : null}
         </div>
         <div className="min-h-0 flex-[33]" aria-hidden="true" />
       </div>

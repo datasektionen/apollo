@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
+import '../styles/player-theme.css';
 import {
   ACCESS_TYPE_COLUMNS,
   ACCESS_TYPE_ROWS,
@@ -10,7 +11,7 @@ import {
 } from './grantAccess';
 import { useGrantForm } from './useGrantForm';
 
-const selectClass = 'w-full min-w-0 rounded border border-gray-700 bg-gray-900 px-1.5 py-1.5 text-xs text-gray-100 disabled:cursor-not-allowed disabled:text-gray-500';
+const selectClass = 'w-full min-w-0 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-2 py-1.5 text-xs text-[var(--player-text-primary)] outline-none focus:border-[var(--player-accent-border)] disabled:cursor-not-allowed disabled:text-[var(--player-text-muted)] disabled:opacity-75';
 const COLUMN_COUNT = SCOPE_COLUMNS.length + 2;
 
 function IconAction({ label, disabled, onClick, tone = 'default', children }) {
@@ -21,8 +22,8 @@ function IconAction({ label, disabled, onClick, tone = 'default', children }) {
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50 ${
-        tone === 'danger' ? 'hover:border-red-800 hover:text-red-200' : ''
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        tone === 'danger' ? 'hover:border-[var(--player-danger-border)] hover:text-[var(--player-danger)]' : ''
       }`}
     >
       {children}
@@ -32,18 +33,18 @@ function IconAction({ label, disabled, onClick, tone = 'default', children }) {
 
 function ScopeValue({ cell }) {
   if (cell.kind === 'na') {
-    return <span className="text-sm text-gray-600">—</span>;
+    return <span className="text-sm text-[var(--player-text-disabled)]">—</span>;
   }
   if (cell.kind === 'virtual') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-indigo-800/50 bg-indigo-950/30 px-2 py-0.5 text-xs font-semibold text-indigo-100">
+      <span className="inline-flex items-center gap-1 rounded-full border border-[var(--player-info-border)] bg-[var(--player-info-soft)] px-2.5 py-0.5 text-xs font-semibold text-[var(--player-info-text)]">
         {cell.text}
       </span>
     );
   }
   if (cell.kind === 'all') {
     return (
-      <span className="inline-flex rounded-full border border-dashed border-gray-700 bg-gray-950 px-2 py-0.5 text-xs font-semibold text-gray-500">
+      <span className="inline-flex rounded-full border border-dashed border-[var(--player-border-default)] bg-[var(--player-bg-surface-subtle)] px-2.5 py-0.5 text-xs font-semibold text-[var(--player-text-muted)]">
         All
       </span>
     );
@@ -51,7 +52,7 @@ function ScopeValue({ cell }) {
   return (
     <span
       title={cell.text}
-      className="inline-block max-w-full truncate rounded-full border border-blue-800/60 bg-blue-950/40 px-2 py-0.5 text-xs font-semibold text-blue-100"
+      className="inline-block max-w-full truncate rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2.5 py-0.5 text-xs font-semibold text-[var(--player-accent-text)]"
     >
       {cell.text}
     </span>
@@ -124,7 +125,7 @@ function GrantEditRow({
   }, [payloadKey]);
 
   return (
-    <tr className="bg-gray-950" data-grant-edit={grant?.id || 'new'}>
+    <tr className="bg-[var(--player-bg-surface-subtle)]" data-grant-edit={grant?.id || 'new'}>
       <td className="min-w-0 px-2 py-2 align-top">
         <select
           value={form.permissionKey}
@@ -137,7 +138,7 @@ function GrantEditRow({
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
-        {grant?.isRedundant ? <div className="mt-1"><span className="inline-flex rounded-full bg-gray-700 px-2 py-0.5 text-xs text-gray-200">Redundant</span></div> : null}
+        {grant?.isRedundant ? <div className="mt-1"><span className="inline-flex rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2 py-0.5 text-xs text-[var(--player-text-muted)]">Redundant</span></div> : null}
       </td>
       <td className="min-w-0 px-2 py-2 align-top">
         {form.hasShowScope ? (
@@ -243,7 +244,7 @@ export function GrantRulesTable({
   if (!grants.length && !canEdit) {
     return (
       <div className="p-4">
-        <div className="rounded-lg border border-dashed border-gray-700 bg-gray-950/50 px-4 py-4 text-sm text-gray-400">
+        <div className="rounded-lg border border-dashed border-[var(--player-border-default)] bg-[var(--player-bg-surface-subtle)] px-4 py-4 text-sm text-[var(--player-text-muted)]">
           No access rules.
         </div>
       </div>
@@ -263,10 +264,10 @@ export function GrantRulesTable({
           <col className="w-[15%]" />
         </colgroup>
         <thead>
-          <tr className="bg-gray-950 text-[11px] font-extrabold uppercase tracking-wide text-gray-400">
-            <th className="px-2 py-2 font-extrabold leading-tight">Access type</th>
+          <tr className="bg-[var(--player-bg-surface-subtle)] text-[11px] font-bold uppercase tracking-wider text-[var(--player-text-muted)]">
+            <th className="px-2 py-2 font-bold leading-tight">Access type</th>
             {SCOPE_COLUMNS.map((column) => (
-              <th key={column.id} className="px-2 py-2 font-extrabold leading-tight">{column.label}</th>
+              <th key={column.id} className="px-2 py-2 font-bold leading-tight">{column.label}</th>
             ))}
             <th className="px-2 py-2" />
           </tr>
@@ -289,21 +290,21 @@ export function GrantRulesTable({
             }
             const cells = grantScopeCells(grant, catalog || {});
             return (
-              <tr key={grant.id} className={`border-t border-gray-800 ${grant.isRedundant ? 'opacity-60' : ''}`}>
+              <tr key={grant.id} className={`border-t border-[var(--player-border-subtle)] hover:bg-[var(--player-hover)] transition-colors ${grant.isRedundant ? 'opacity-60' : ''}`}>
                 <td className="overflow-hidden px-2 py-2 align-middle">
-                  <div className="truncate text-sm font-semibold text-white" title={grant.permissionLabel || grant.permissionKey}>
+                  <div className="truncate text-sm font-semibold text-[var(--player-text-primary)]" title={grant.permissionLabel || grant.permissionKey}>
                     {grant.permissionLabel || grant.permissionKey}
                   </div>
                   {inherited && grant.sourceRoleName ? (
                     <div className="mt-1">
-                      <span className="inline-block max-w-full whitespace-normal rounded-full bg-amber-900/40 px-2 py-0.5 text-xs leading-snug text-amber-200">
+                      <span className="inline-block max-w-full whitespace-normal rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2 py-0.5 text-xs leading-snug text-[var(--player-accent-text)]">
                         Inherited from {grant.sourceRoleName}
                       </span>
                     </div>
                   ) : null}
                   {grant.isRedundant ? (
                     <div className="mt-1">
-                      <span className="inline-flex rounded-full bg-gray-700 px-2 py-0.5 text-xs text-gray-200">Redundant</span>
+                      <span className="inline-flex rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2 py-0.5 text-xs text-[var(--player-text-muted)]">Redundant</span>
                     </div>
                   ) : null}
                 </td>
@@ -328,7 +329,7 @@ export function GrantRulesTable({
             );
           })}
           {canEdit ? (
-            <tr className="border-t border-gray-800">
+            <tr className="border-t border-[var(--player-border-subtle)]">
               <td colSpan={COLUMN_COUNT} className="p-0">
                 <button
                   type="button"
@@ -337,7 +338,7 @@ export function GrantRulesTable({
                     const id = onAdd?.();
                     if (id) setEditingId(id);
                   }}
-                  className="flex w-full items-center gap-2 px-2 py-2.5 text-left text-sm font-semibold text-gray-300 hover:bg-gray-900/70 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex w-full items-center gap-2 px-2 py-2.5 text-left text-sm font-semibold text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-accent-text)] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
                 >
                   <Plus size={16} />
                   Add access
@@ -370,35 +371,36 @@ export function AccessTypeInfoButton() {
         title="What each access type allows"
         aria-label="What each access type allows"
         onClick={() => setOpen(true)}
-        className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border border-gray-400 font-serif text-[11px] font-bold leading-none text-gray-200 hover:border-white hover:text-white"
+        className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border border-[var(--player-border-strong)] font-serif text-[11px] font-bold leading-none text-[var(--player-text-secondary)] hover:border-[var(--player-accent-border)] hover:text-[var(--player-accent-text)] transition-colors"
       >
         i
       </button>
       {open ? (
         <div
-          className="fixed inset-0 z-[70] flex items-start justify-center overflow-auto bg-black/60 px-4 py-8"
+          className="player-theme fixed inset-0 z-[70] flex items-start justify-center overflow-auto bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4 py-8"
+          data-player-theme="dark-gold"
           onClick={() => setOpen(false)}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="access-type-info-title"
-            className="w-full max-w-6xl rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl"
+            className="w-full max-w-6xl overflow-hidden rounded-2xl border border-[var(--player-border-default)] bg-[var(--player-bg-surface)] shadow-[var(--player-shadow-popover)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4 border-b border-gray-700 px-5 py-4">
+            <div className="player-hero-surface flex items-start justify-between gap-4 border-b border-[var(--player-border-subtle)] px-5 py-4">
               <div>
-                <h2 id="access-type-info-title" className="text-lg font-semibold text-white">
+                <h2 id="access-type-info-title" className="text-lg font-bold tracking-tight text-[var(--player-text-primary)]">
                   What each access type allows
                 </h2>
-                <p className="mt-1 text-sm text-gray-400">
+                <p className="mt-1 text-sm text-[var(--player-text-secondary)]">
                   The scope on a rule only limits where this applies.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded bg-gray-800 px-3 py-1.5 text-sm text-gray-100 hover:bg-gray-700"
+                className="rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3.5 py-1.5 text-xs font-semibold text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors"
               >
                 Close
               </button>
@@ -406,10 +408,10 @@ export function AccessTypeInfoButton() {
             <div className="overflow-x-auto px-5 py-4">
               <table className="w-full min-w-[1100px] border-collapse text-center">
                 <thead>
-                  <tr className="text-xs font-bold text-gray-300">
-                    <th className="border-b border-gray-800 bg-gray-950 px-2 py-2 text-left">Access type</th>
+                  <tr className="text-xs font-bold text-[var(--player-text-secondary)]">
+                    <th className="border-b border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-2 py-2 text-left">Access type</th>
                     {ACCESS_TYPE_COLUMNS.map((column) => (
-                      <th key={column.id} className="border-b border-gray-800 bg-gray-950 px-2 py-2 align-bottom leading-tight">
+                      <th key={column.id} className="border-b border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-2 py-2 align-bottom leading-tight">
                         {column.lines.map((line) => (
                           <span key={line} className="block">{line}</span>
                         ))}
@@ -421,29 +423,29 @@ export function AccessTypeInfoButton() {
                   {ACCESS_TYPE_ROWS.map((row) => (
                     row.kind === 'group' ? (
                       <tr key={row.label}>
-                        <td colSpan={ACCESS_TYPE_COLUMNS.length + 1} className="bg-gray-950 px-2 py-1.5 text-left text-[11px] font-extrabold uppercase tracking-[0.14em] text-gray-400">
+                        <td colSpan={ACCESS_TYPE_COLUMNS.length + 1} className="bg-[var(--player-bg-surface-subtle)] px-2 py-1.5 text-left text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
                           {row.label}
                         </td>
                       </tr>
                     ) : (
-                      <tr key={row.permissionKey} className="border-b border-gray-800">
-                        <td className="px-2 py-2 text-left text-sm font-semibold text-white">{row.label}</td>
+                      <tr key={row.permissionKey} className="border-b border-[var(--player-border-subtle)]">
+                        <td className="px-2 py-2 text-left text-sm font-semibold text-[var(--player-text-primary)]">{row.label}</td>
                         {ACCESS_TYPE_COLUMNS.map((column) => {
                           const value = row.cells[column.id];
                           if (value === 'yes') {
-                            return <td key={column.id} className="px-2 py-2 text-base font-extrabold text-emerald-400">✓</td>;
+                            return <td key={column.id} className="px-2 py-2 text-base font-extrabold text-[var(--player-success)]">✓</td>;
                           }
                           if (value === 'if-all') {
-                            return <td key={column.id} className="px-2 py-2 text-xs font-extrabold text-amber-300">✓*</td>;
+                            return <td key={column.id} className="px-2 py-2 text-xs font-extrabold text-[var(--player-accent-text)]">✓*</td>;
                           }
-                          return <td key={column.id} className="px-2 py-2 text-gray-700">·</td>;
+                          return <td key={column.id} className="px-2 py-2 text-[var(--player-text-disabled)]">·</td>;
                         })}
                       </tr>
                     )
                   ))}
                 </tbody>
               </table>
-              <p className="mt-3 text-sm leading-relaxed text-gray-400">
+              <p className="mt-3 text-sm leading-relaxed text-[var(--player-text-secondary)]">
                 A check is included. A dot is not.
                 <br />
                 * Solo for Track manager only when the scope covers every track in that musical number.

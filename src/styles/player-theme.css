@@ -1,8 +1,8 @@
 /*
- * Apollo /player Scoped Multi-Theme Token Contract & Component Primitives
+ * Apollo Scoped Multi-Theme Token Contract & Component Primitives
  *
- * Strictly scoped under `.player-theme` so `/admin`, `/daw`, and shared styles
- * remain 100% isolated even after SPA navigation.
+ * Strictly scoped under `.player-theme` so DAW editor routes remain
+ * 100% isolated even after SPA navigation.
  *
  * Adding a new theme (e.g. `[data-player-theme="light-gold"]`) only requires
  * defining a new `[data-player-theme="..."]` variable block below.
@@ -26,14 +26,14 @@
   --player-bg-surface: #0c0c0e;
   --player-bg-surface-subtle: #09090b;
   --player-bg-elevated: #141416;
-  --player-bg-popover: #1b1b1e;
+  --player-bg-popover: #1c1e24;
   --player-bg-active-segment: #242428;
-  --player-bg-scrim: rgba(0, 0, 0, 0.74);
+  --player-bg-scrim: rgba(0, 0, 0, 0.76);
 
   /* Crisp Hairline Borders */
-  --player-border-subtle: rgba(255, 255, 255, 0.07);
-  --player-border-default: rgba(255, 255, 255, 0.13);
-  --player-border-strong: rgba(255, 255, 255, 0.22);
+  --player-border-subtle: rgba(255, 255, 255, 0.08);
+  --player-border-default: rgba(255, 255, 255, 0.14);
+  --player-border-strong: rgba(255, 255, 255, 0.24);
 
   /* Typography Ink Hierarchy */
   --player-text-primary: #f5f5f4;
@@ -47,9 +47,9 @@
   --player-accent-pressed: var(--player-gold-600);
   --player-accent-text: var(--player-gold-300);
   --player-accent-foreground: #0a0a0b;
-  --player-accent-soft: rgba(198, 155, 57, 0.13);
-  --player-accent-softer: rgba(198, 155, 57, 0.07);
-  --player-accent-border: rgba(198, 155, 57, 0.42);
+  --player-accent-soft: rgba(198, 155, 57, 0.14);
+  --player-accent-softer: rgba(198, 155, 57, 0.08);
+  --player-accent-border: rgba(198, 155, 57, 0.44);
   --player-accent-metallic: linear-gradient(
     135deg,
     #887037 6%,
@@ -64,11 +64,17 @@
     rgba(136, 112, 55, 0.03) 42%,
     transparent 70%
   );
+  --player-showcase-gradient: radial-gradient(
+    80% 55% at 50% 0%,
+    rgba(198, 155, 57, 0.14),
+    rgba(136, 112, 55, 0.04) 48%,
+    transparent 78%
+  );
   --player-focus-ring: rgba(217, 183, 109, 0.65);
 
   /* Interactive States & Chips */
-  --player-hover: rgba(255, 255, 255, 0.06);
-  --player-pressed: rgba(255, 255, 255, 0.11);
+  --player-hover: rgba(255, 255, 255, 0.075);
+  --player-pressed: rgba(255, 255, 255, 0.12);
   --player-row-active: var(--player-accent-softer);
   --player-pill-bg: var(--player-bg-elevated);
   --player-pill-fg: var(--player-text-secondary);
@@ -76,25 +82,52 @@
   --player-pill-active-fg: #0a0a0b;
 
   /* Sliders & Lyrics */
-  --player-slider-track: rgba(255, 255, 255, 0.15);
+  --player-slider-track: rgba(255, 255, 255, 0.16);
   --player-slider-fill: var(--player-accent);
   --player-slider-thumb: var(--player-text-primary);
-  --player-lyric-past: rgba(245, 245, 244, 0.36);
+  --player-lyric-past: rgba(245, 245, 244, 0.34);
   --player-lyric-upcoming: rgba(245, 245, 244, 0.64);
 
   /* Status & Feedback */
   --player-danger: #f87171;
-  --player-danger-soft: rgba(248, 113, 113, 0.12);
-  --player-danger-border: rgba(248, 113, 113, 0.34);
+  --player-danger-text: #fecaca;
+  --player-danger-soft: rgba(248, 113, 113, 0.13);
+  --player-danger-border: rgba(248, 113, 113, 0.36);
+  --player-danger-surface: #251316;
+  --player-danger-solid: #dc2626;
+  --player-danger-solid-hover: #ef4444;
+  --player-danger-foreground: #fef2f2;
+
   --player-warning-text: var(--player-gold-300);
   --player-warning-soft: var(--player-accent-soft);
   --player-warning-border: var(--player-accent-border);
+  --player-warning-surface: #231d10;
+  --player-warning-solid: var(--player-accent);
+  --player-warning-solid-hover: var(--player-accent-hover);
+
+  --player-success: #34d399;
+  --player-success-text: #a7f3d0;
+  --player-success-soft: rgba(52, 211, 153, 0.13);
+  --player-success-border: rgba(52, 211, 153, 0.36);
+  --player-success-surface: #0f231b;
+
+  --player-info: #60a5fa;
+  --player-info-text: #bfdbfe;
+  --player-info-soft: rgba(96, 165, 250, 0.13);
+  --player-info-border: rgba(96, 165, 250, 0.36);
+
+  /* Storage Breakdown Chart Palette */
+  --player-chart-media: #f87171;
+  --player-chart-database: #fb923c;
+  --player-chart-quarantine: var(--player-gold-300);
+  --player-chart-other: #8e8e98;
+  --player-chart-free: #242428;
 
   /* Elevation */
   --player-shadow-elevated: 0 12px 32px rgba(0, 0, 0, 0.56);
-  --player-shadow-popover: 0 18px 44px -12px rgba(0, 0, 0, 0.82), 0 0 0 1px var(--player-border-default);
+  --player-shadow-popover: 0 20px 44px rgba(0, 0, 0, 0.72), 0 0 0 1px var(--player-border-strong);
   --player-shadow-sheet: 0 -12px 40px rgba(0, 0, 0, 0.65);
-  --player-shadow-accent: 0 2px 6px rgba(0, 0, 0, 0.45);
+  --player-shadow-accent: 0 2px 8px rgba(0, 0, 0, 0.48);
 
   /* Typography & Motion */
   --player-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'SF Pro Text', 'Segoe UI', sans-serif;
@@ -104,29 +137,39 @@
   color: var(--player-text-primary);
 }
 
-/* Editorial Hero Ambient Gold Wash */
-.player-theme .player-hero-surface {
+/* Editorial Hero & Showcase Ambient Gold Washes */
+.player-theme .player-hero-surface,
+.player-theme.player-hero-surface {
   background-image: var(--player-hero-glow);
 }
 
+.player-theme .player-showcase-surface,
+.player-theme.player-showcase-surface {
+  background-image: var(--player-showcase-gradient);
+}
+
 /* Primary Apollo Crisp Champagne Gold Play CTA */
-.player-theme .player-play-cta {
+.player-theme .player-play-cta,
+.player-theme.player-play-cta {
   background: linear-gradient(180deg, var(--player-gold-300) 0%, var(--player-accent) 100%);
   color: var(--player-accent-foreground);
   box-shadow: inset 0 1px 0 rgba(255, 245, 214, 0.34), var(--player-shadow-accent);
   transition: transform 150ms var(--player-ease), filter 150ms var(--player-ease), box-shadow 150ms var(--player-ease);
 }
 
-.player-theme .player-play-cta:hover:not(:disabled) {
+.player-theme .player-play-cta:hover:not(:disabled),
+.player-theme.player-play-cta:hover:not(:disabled) {
   filter: brightness(1.08);
   transform: scale(1.04);
 }
 
-.player-theme .player-play-cta:active:not(:disabled) {
+.player-theme .player-play-cta:active:not(:disabled),
+.player-theme.player-play-cta:active:not(:disabled) {
   transform: scale(0.97);
 }
 
-.player-theme .player-play-cta:disabled {
+.player-theme .player-play-cta:disabled,
+.player-theme.player-play-cta:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -159,20 +202,22 @@
   background-color: var(--player-row-active);
 }
 
-.player-theme .player-menu {
+.player-theme .player-menu,
+.player-theme.player-menu {
   background-color: var(--player-bg-popover);
-  border: 1px solid var(--player-border-default);
+  border: 1px solid var(--player-border-strong);
   color: var(--player-text-primary);
   box-shadow: var(--player-shadow-popover);
 }
 
 .player-theme .player-menu-item {
   color: var(--player-text-primary);
-  transition: background-color 120ms var(--player-ease);
+  transition: background-color 120ms var(--player-ease), color 120ms var(--player-ease);
 }
 
 .player-theme .player-menu-item:hover {
   background-color: var(--player-hover);
+  color: var(--player-text-primary);
 }
 
 /* Precision Range Sliders */
@@ -350,16 +395,30 @@
   }
 }
 
-/* Thin obsidian scrollbars inside /player */
+/* Native control tinting inside scoped routes */
+.player-theme input[type='checkbox'],
+.player-theme input[type='radio'] {
+  accent-color: var(--player-accent);
+}
+
+.player-theme select option {
+  background-color: var(--player-bg-popover);
+  color: var(--player-text-primary);
+}
+
+/* Thin obsidian scrollbars inside scoped routes */
+.player-theme::-webkit-scrollbar,
 .player-theme ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
+.player-theme::-webkit-scrollbar-track,
 .player-theme ::-webkit-scrollbar-track {
   background: transparent;
 }
 
+.player-theme::-webkit-scrollbar-thumb,
 .player-theme ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.14);
   border-radius: 9999px;
@@ -367,6 +426,7 @@
   background-clip: padding-box;
 }
 
+.player-theme::-webkit-scrollbar-thumb:hover,
 .player-theme ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.26);
   border: 2px solid transparent;

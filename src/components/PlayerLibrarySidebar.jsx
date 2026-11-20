@@ -101,7 +101,7 @@ function LibraryHoverTooltip({ tooltip, playerTheme = 'dark-gold' }) {
   if (!tooltip || typeof document === 'undefined') return null;
   return createPortal(
     <div
-      className="player-theme player-menu pointer-events-none fixed z-[90] max-w-xs -translate-y-1/2 rounded-lg px-3 py-1.5"
+      className="player-theme player-menu pointer-events-none fixed z-[90] max-w-xs -translate-y-1/2 rounded-lg border border-[var(--player-border-strong)] bg-[var(--player-bg-popover)] px-3 py-1.5 shadow-[var(--player-shadow-popover)]"
       data-player-theme={playerTheme}
       style={{ left: tooltip.x, top: tooltip.y }}
     >
@@ -531,7 +531,7 @@ export function PlayerLibrarySidebar({
     ? createPortal(
       <div
         ref={createMenu.menuRef}
-        className="player-theme player-menu fixed z-[80] min-w-40 overflow-hidden rounded-lg py-1"
+        className="player-theme player-menu fixed z-[80] min-w-40 overflow-hidden rounded-lg border border-[var(--player-border-strong)] bg-[var(--player-bg-popover)] py-1 shadow-[var(--player-shadow-popover)]"
         data-player-theme={playerTheme}
         style={{ top: createMenu.coords.top, left: createMenu.coords.left }}
       >
@@ -564,7 +564,7 @@ export function PlayerLibrarySidebar({
     ? createPortal(
       <div
         ref={sortMenu.menuRef}
-        className="player-theme player-menu fixed z-[80] w-max overflow-hidden rounded-lg py-1"
+        className="player-theme player-menu fixed z-[80] w-max overflow-hidden rounded-lg border border-[var(--player-border-strong)] bg-[var(--player-bg-popover)] py-1 shadow-[var(--player-shadow-popover)]"
         data-player-theme={playerTheme}
         style={{ top: sortMenu.coords.top, right: sortMenu.coords.right }}
       >

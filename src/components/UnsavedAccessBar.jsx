@@ -26,17 +26,17 @@ export function UnsavedAccessBar({
       <div
         role="status"
         aria-live="polite"
-        className={`pointer-events-auto flex w-full max-w-3xl items-center justify-between gap-4 rounded-lg border border-black/50 bg-[#111214] px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.45)] ${
+        className={`pointer-events-auto flex w-full max-w-3xl items-center justify-between gap-4 rounded-xl border border-[var(--player-accent-border)] bg-[var(--player-bg-popover)] px-4 py-3 shadow-[var(--player-shadow-popover)] ${
           shake ? 'apollo-unsaved-shake' : ''
         }`}
       >
-        <p className="text-sm font-semibold text-white">You have unsaved access changes</p>
+        <p className="text-sm font-semibold text-[var(--player-text-primary)]">You have unsaved access changes</p>
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
             disabled={!open || saving}
             onClick={onDiscard}
-            className="rounded px-3 py-2 text-sm font-semibold text-gray-200 hover:underline disabled:opacity-50"
+            className="rounded-lg px-3 py-2 text-sm font-semibold text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:opacity-50 transition-colors"
           >
             Discard
           </button>
@@ -44,7 +44,7 @@ export function UnsavedAccessBar({
             type="button"
             disabled={!open || saving}
             onClick={onSave}
-            className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:bg-gray-700"
+            className="rounded-lg bg-[var(--player-accent)] px-4 py-2 text-sm font-bold text-[var(--player-accent-foreground)] hover:bg-[var(--player-accent-hover)] disabled:opacity-45 transition-colors"
           >
             {saving ? 'Saving...' : 'Save changes'}
           </button>

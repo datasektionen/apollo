@@ -259,12 +259,6 @@ function PlayerLyricsView({
                   onClick={() => handleSeekLine(line)}
                   className={`relative block w-full whitespace-pre-wrap break-words text-left text-[1.5rem] font-extrabold leading-[1.25] tracking-tight transition-colors sm:text-[2rem] disabled:cursor-default disabled:opacity-100 ${colorClass} ${canSeek ? 'cursor-pointer hover:text-[var(--player-text-primary)]' : 'cursor-default'}`}
                 >
-                  {isCurrent ? (
-                    <span
-                      aria-hidden="true"
-                      className="absolute -left-5 top-1.5 bottom-1.5 w-[3px] rounded-full bg-[var(--player-accent)]"
-                    />
-                  ) : null}
                   {text}
                 </button>
               );

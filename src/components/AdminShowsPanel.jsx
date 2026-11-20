@@ -32,10 +32,10 @@ function normalizeSettings(settings = {}, firstShowId = '') {
 
 function Panel({ title, children }) {
   return (
-    <section className="rounded-xl border border-gray-700 bg-gray-900/40">
+    <section className="overflow-hidden rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)]">
       {title ? (
-        <div className="border-b border-gray-700 px-4 py-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-200">{title}</h3>
+        <div className="border-b border-[var(--player-border-subtle)] px-4 py-3">
+          <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">{title}</h3>
         </div>
       ) : null}
       <div className="p-4">{children}</div>
@@ -45,7 +45,7 @@ function Panel({ title, children }) {
 
 function Empty({ children }) {
   return (
-    <div className="rounded-lg border border-dashed border-gray-700 bg-gray-950/50 px-4 py-4 text-sm text-gray-400">
+    <div className="rounded-lg border border-dashed border-[var(--player-border-default)] bg-[var(--player-bg-surface-subtle)] px-4 py-4 text-sm text-[var(--player-text-muted)]">
       {children}
     </div>
   );
@@ -54,11 +54,11 @@ function Empty({ children }) {
 function ShowSelect({ label, value, shows, onChange }) {
   return (
     <label className="block space-y-2">
-      <div className="pt-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">{label}</div>
+      <div className="pt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-text-muted)]">{label}</div>
       <select
         value={value || ''}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100"
+        className="w-full rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3 py-2 text-sm text-[var(--player-text-primary)] outline-none transition-colors focus:border-[var(--player-accent-border)] focus:ring-1 focus:ring-[var(--player-focus-ring)]"
       >
         {shows.map((show) => (
           <option key={show.id} value={show.id}>
@@ -73,7 +73,7 @@ function ShowSelect({ label, value, shows, onChange }) {
 function MessageField({ label, value, onChange, onBlur, disabled = false }) {
   return (
     <label className="block space-y-2">
-      <div className="pt-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">{label}</div>
+      <div className="pt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-text-muted)]">{label}</div>
       <textarea
         value={value}
         disabled={disabled}
@@ -81,7 +81,7 @@ function MessageField({ label, value, onChange, onBlur, disabled = false }) {
         onBlur={(event) => onBlur?.(event.target.value)}
         rows={2}
         maxLength={4000}
-        className="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3 py-2 text-sm text-[var(--player-text-primary)] outline-none transition-colors focus:border-[var(--player-accent-border)] focus:ring-1 focus:ring-[var(--player-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
       />
     </label>
   );
@@ -215,8 +215,8 @@ export default function AdminShowsPanel({
 
   if (loading) {
     return (
-      <div className="mx-auto flex max-w-6xl items-center justify-center py-16 text-sm text-gray-400">
-        <Loader2 size={18} className="mr-2 animate-spin" />
+      <div className="mx-auto flex max-w-6xl items-center justify-center py-16 text-sm text-[var(--player-text-secondary)]">
+        <Loader2 size={18} className="mr-2 animate-spin text-[var(--player-accent-text)]" />
         Loading show settings...
       </div>
     );
@@ -225,14 +225,14 @@ export default function AdminShowsPanel({
   return (
     <div className="mx-auto max-w-6xl space-y-5">
       {error ? (
-        <div className="rounded border border-red-700/40 bg-red-900/20 px-4 py-3 text-sm text-red-200">
+        <div className="rounded-xl border border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] px-4 py-3 text-sm text-[var(--player-danger-text)]">
           {error}
         </div>
       ) : null}
 
       <Panel title="General show index">
         {shows.length ? (
-          <div className="overflow-hidden rounded-lg border border-gray-800">
+          <div className="overflow-hidden rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)]">
             {shows.map((show, index) => (
               <div
                 key={show.id}
@@ -249,15 +249,15 @@ export default function AdminShowsPanel({
                 }}
                 onDrop={(event) => handleDrop(event, index)}
                 onDragEnd={() => setDragIndex(null)}
-                className={`flex items-center gap-3 border-b border-gray-800 px-3 py-3 last:border-b-0 ${
-                  dragIndex === index ? 'opacity-40' : 'hover:bg-gray-900/70'
+                className={`flex items-center gap-3 border-b border-[var(--player-border-subtle)] px-3.5 py-3 last:border-b-0 transition-colors ${
+                  dragIndex === index ? 'opacity-40' : 'hover:bg-[var(--player-hover)]'
                 }`}
               >
-                <GripVertical size={17} className="shrink-0 cursor-grab text-gray-500" />
-                <span className="w-6 shrink-0 text-sm tabular-nums text-gray-500">{index + 1}</span>
+                <GripVertical size={17} className="shrink-0 cursor-grab text-[var(--player-text-muted)]" />
+                <span className="w-6 shrink-0 text-sm font-mono tabular-nums text-[var(--player-text-muted)]">{index + 1}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold text-white">{show.name}</div>
-                  <div className="mt-0.5 text-xs text-gray-500">
+                  <div className="truncate font-semibold text-[var(--player-text-primary)]">{show.name}</div>
+                  <div className="mt-0.5 text-xs text-[var(--player-text-muted)]">
                     {show.projectCount || 0} musical number{show.projectCount === 1 ? '' : 's'}
                   </div>
                 </div>
@@ -272,13 +272,13 @@ export default function AdminShowsPanel({
       <Panel title="Landing defaults">
         <div className="space-y-4">
           {hasPublicShow ? (
-            <div className="rounded-lg border border-gray-800 bg-gray-950/50 px-3 py-3 text-sm text-gray-500">
+            <div className="rounded-lg border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3.5 py-3 text-sm text-[var(--player-text-muted)]">
               No-access messages are disabled because at least one published musical number is available to every user.
             </div>
           ) : null}
 
-          <div className="rounded-lg border border-gray-800 bg-gray-950/50 p-4">
-            <label className="flex items-start gap-3">
+          <div className="rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-4">
+            <label className="flex cursor-pointer items-start gap-3">
               <input
                 type="checkbox"
                 checked={settings.splitPlayerDawDefaults}
@@ -301,11 +301,11 @@ export default function AdminShowsPanel({
                       : settings.dawNoAccessMessage,
                   });
                 }}
-                className="mt-0.5 h-4 w-4 rounded border-gray-600 bg-gray-900 accent-blue-600"
+                className="mt-0.5 h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-popover)]"
               />
               <span
                 title="Use a different default show and no-access message for Player and DAW."
-                className="block text-sm font-semibold text-gray-200"
+                className="block text-sm font-semibold text-[var(--player-text-primary)]"
               >
                 Use separate defaults
               </span>
@@ -314,7 +314,7 @@ export default function AdminShowsPanel({
             {settings.splitPlayerDawDefaults ? (
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div className="space-y-1">
-                  <div className="text-sm font-semibold text-gray-200">Player</div>
+                  <div className="text-sm font-semibold text-[var(--player-text-primary)]">Player</div>
                   <ShowSelect
                     label="Default show"
                     value={settings.playerDefaultShowId}
@@ -330,7 +330,7 @@ export default function AdminShowsPanel({
                   />
                 </div>
                 <div className="space-y-1">
-                  <div className="text-sm font-semibold text-gray-200">DAW</div>
+                  <div className="text-sm font-semibold text-[var(--player-text-primary)]">DAW</div>
                   <ShowSelect
                     label="Default show"
                     value={settings.dawDefaultShowId}

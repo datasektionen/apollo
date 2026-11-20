@@ -65,15 +65,20 @@ export function MobilePlayerView({
   // Stem Controls
   playbackSpeed,
   onSetPlaybackSpeed,
+  onToggleSpeed,
   playbackTranspose,
   onSetPlaybackTranspose,
+  onToggleTranspose,
   practiceFocusControl,
   onSetPracticeFocusControl,
+  onTogglePracticeFocus,
   practicePanRange,
   onSetPracticePanRange,
+  onTogglePracticePanRange,
   hasRealtimeMetronome,
   metronomeVolume,
   onSetMetronomeVolume,
+  onToggleMetronomeMute,
   // Lyrics & Credits
   currentPlaybackLyrics,
   hasCurrentLyrics,
@@ -248,15 +253,20 @@ export function MobilePlayerView({
         // Choir practice sliders
         playbackSpeed={playbackSpeed}
         onSetPlaybackSpeed={onSetPlaybackSpeed}
+        onToggleSpeed={onToggleSpeed}
         playbackTranspose={playbackTranspose}
         onSetPlaybackTranspose={onSetPlaybackTranspose}
+        onToggleTranspose={onToggleTranspose}
         practiceFocusControl={practiceFocusControl}
         onSetPracticeFocusControl={onSetPracticeFocusControl}
+        onTogglePracticeFocus={onTogglePracticeFocus}
         practicePanRange={practicePanRange}
         onSetPracticePanRange={onSetPracticePanRange}
+        onTogglePracticePanRange={onTogglePracticePanRange}
         hasRealtimeMetronome={hasRealtimeMetronome}
         metronomeVolume={metronomeVolume}
         onSetMetronomeVolume={onSetMetronomeVolume}
+        onToggleMetronomeMute={onToggleMetronomeMute}
         // Lyrics & Session
         currentPlaybackLyrics={currentPlaybackLyrics}
         hasCurrentLyrics={hasCurrentLyrics}
