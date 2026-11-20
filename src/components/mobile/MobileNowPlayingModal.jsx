@@ -751,6 +751,7 @@ export function MobileNowPlayingModal({
             divider
             label="Master Volume"
             readout={isMuted || effectiveVolume === 0 ? 'Muted' : `${effectiveVolume}%`}
+            active={!isMuted && effectiveVolume > 0}
             danger={isMuted || effectiveVolume === 0}
             icon={isMuted || effectiveVolume === 0 ? VolumeX : Volume2}
             iconLabel={isMuted || effectiveVolume === 0 ? 'Unmute master volume' : 'Mute master volume'}

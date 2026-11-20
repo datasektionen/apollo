@@ -86,8 +86,8 @@
   --player-slider-track: rgba(255, 255, 255, 0.16);
   --player-slider-fill: var(--player-accent);
   --player-slider-thumb: var(--player-text-primary);
-  --player-lyric-past: rgba(245, 245, 244, 0.34);
-  --player-lyric-upcoming: rgba(245, 245, 244, 0.64);
+  --player-lyric-past: rgba(245, 245, 244, 0.28);
+  --player-lyric-upcoming: rgba(245, 245, 244, 0.42);
 
   /* Status & Feedback */
   --player-danger: #f87171;
@@ -119,7 +119,7 @@
 
   /* Storage Breakdown Chart Palette */
   --player-chart-media: var(--player-gold-500);
-  --player-chart-database: #8e7340;
+  --player-chart-database: #bfb9ad;
   --player-chart-quarantine: #c86f58;
   --player-chart-other: #6d6d76;
   --player-chart-free: #232328;
@@ -348,9 +348,9 @@
     transparent 10px,
     rgba(0, 0, 0, 0.45) 26px,
     #000 54px,
-    #000 calc(100% - 96px),
-    rgba(0, 0, 0, 0.35) calc(100% - 42px),
-    transparent calc(100% - 10px),
+    #000 calc(100% - 118px),
+    rgba(0, 0, 0, 0.28) calc(100% - 54px),
+    transparent calc(100% - 16px),
     transparent 100%
   );
   mask-image: linear-gradient(
@@ -359,9 +359,9 @@
     transparent 10px,
     rgba(0, 0, 0, 0.45) 26px,
     #000 54px,
-    #000 calc(100% - 96px),
-    rgba(0, 0, 0, 0.35) calc(100% - 42px),
-    transparent calc(100% - 10px),
+    #000 calc(100% - 118px),
+    rgba(0, 0, 0, 0.28) calc(100% - 54px),
+    transparent calc(100% - 16px),
     transparent 100%
   );
 }

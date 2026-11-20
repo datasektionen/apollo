@@ -33,7 +33,11 @@ function IconAction({ label, disabled, onClick, tone = 'default', children }) {
 
 function ScopeValue({ cell }) {
   if (cell.kind === 'na') {
-    return <span className="text-sm text-[var(--player-text-disabled)]">—</span>;
+    return (
+      <span className="inline-flex min-h-[22px] items-center text-sm leading-none text-[var(--player-text-disabled)]">
+        —
+      </span>
+    );
   }
   if (cell.kind === 'virtual') {
     return (
@@ -44,7 +48,7 @@ function ScopeValue({ cell }) {
   }
   if (cell.kind === 'all') {
     return (
-      <span className="inline-flex rounded-full border border-dashed border-[var(--player-border-default)] bg-[var(--player-bg-surface-subtle)] px-2.5 py-0.5 text-xs font-semibold text-[var(--player-text-muted)]">
+      <span className="inline-flex rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2.5 py-0.5 text-xs font-medium text-[var(--player-text-muted)]">
         All
       </span>
     );
@@ -297,7 +301,7 @@ export function GrantRulesTable({
                   </div>
                   {inherited && grant.sourceRoleName ? (
                     <div className="mt-1">
-                      <span className="inline-block max-w-full truncate rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2 py-0.5 text-[11px] font-medium leading-tight text-[var(--player-accent-text)]">
+                      <span className="inline-block max-w-full truncate rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2 py-0.5 text-[11px] font-medium leading-tight text-[var(--player-text-secondary)]">
                         Inherited from {grant.sourceRoleName}
                       </span>
                     </div>

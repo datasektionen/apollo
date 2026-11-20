@@ -235,12 +235,12 @@ function PlayerLyricsView({
                 ? 'static'
                 : (isCurrent ? 'current' : (isPast ? 'past' : 'upcoming'));
               const colorClass = !isSynced
-                ? 'text-[var(--player-text-primary)]'
+                ? 'font-extrabold text-[var(--player-text-primary)]'
                 : (isCurrent
-                    ? 'text-[var(--player-text-primary)]'
+                    ? 'font-extrabold text-[var(--player-text-primary)]'
                     : (isPast
-                        ? 'text-[var(--player-lyric-past)]'
-                        : 'text-[var(--player-lyric-upcoming)]'));
+                        ? 'font-semibold text-[var(--player-lyric-past)]'
+                        : 'font-semibold text-[var(--player-lyric-upcoming)]'));
               const canSeek = Number.isFinite(lineStartMs);
               return (
                 <button
@@ -257,7 +257,7 @@ function PlayerLyricsView({
                   aria-current={isCurrent ? 'true' : undefined}
                   title={canSeek ? 'Jump to this lyric' : undefined}
                   onClick={() => handleSeekLine(line)}
-                  className={`relative block w-full whitespace-pre-wrap break-words text-left text-[1.5rem] font-extrabold leading-[1.25] tracking-tight transition-colors sm:text-[2rem] disabled:cursor-default disabled:opacity-100 ${colorClass} ${canSeek ? 'cursor-pointer hover:text-[var(--player-text-primary)]' : 'cursor-default'}`}
+                  className={`relative block w-full whitespace-pre-wrap break-words text-left text-[1.5rem] leading-[1.25] tracking-tight transition-colors sm:text-[2rem] disabled:cursor-default disabled:opacity-100 ${colorClass} ${canSeek ? 'cursor-pointer hover:text-[var(--player-text-primary)]' : 'cursor-default'}`}
                 >
                   {text}
                 </button>

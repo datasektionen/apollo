@@ -1133,6 +1133,15 @@ export function PlayerControlsSidebar({
             </div>
           ) : null}
 
+          {speedControlsEnabled && !practiceControlsEnabled && !metronomeControlsEnabled && !fullyMinimized ? (
+            <p
+              className="mx-3 mt-1 border-t border-[var(--player-border-subtle)] pt-3 text-[11px] leading-relaxed text-[var(--player-text-muted)]"
+              style={{ opacity: sliderOpacity }}
+            >
+              Play a rehearsal mix to unlock focus, width, and metronome controls.
+            </p>
+          ) : null}
+
         </div>
       </div>
 

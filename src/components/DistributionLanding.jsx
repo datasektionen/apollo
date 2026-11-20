@@ -378,8 +378,8 @@ export default function DistributionLanding() {
       data-player-theme="dark-gold"
     >
       {/* Header with only Apollo Brand Wordmark */}
-      <header className="relative z-20 border-b border-[var(--player-border-subtle)] bg-transparent px-4 sm:px-6 py-4 flex items-center">
-        <div className="mx-auto w-full max-w-3xl flex items-center">
+      <header className="relative z-20 border-b border-[var(--player-border-subtle)] bg-transparent py-4 flex items-center">
+        <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 flex items-center">
           <BrandWordmark className="h-9" />
         </div>
       </header>

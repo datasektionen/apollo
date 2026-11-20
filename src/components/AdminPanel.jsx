@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInRouterContext, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CircleUserRound, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import '../styles/player-theme.css';
-import { BrandWordmark } from './BrandLogo';
+import { BrandMark, BrandWordmark } from './BrandLogo';
 import AdminShowsPanel from './AdminShowsPanel';
 import AdminStoragePanel from './AdminStoragePanel';
 import { AccessTypeInfoButton, GrantRulesTable } from './GrantRulesTable';
@@ -124,14 +124,14 @@ function ToggleSwitch({
       className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border transition ${
         checked
           ? 'border-[var(--player-accent-border)] bg-[var(--player-accent)]'
-          : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)]'
+          : 'border-[var(--player-border-default)] bg-[var(--player-bg-active-segment)]'
       } ${disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-[var(--player-accent-hover)]'}`}
     >
       <span
         className={`absolute top-0.5 h-5 w-5 rounded-full shadow transition-transform ${
           checked
             ? 'translate-x-5 bg-[var(--player-accent-foreground)]'
-            : 'translate-x-0.5 bg-[var(--player-text-muted)]'
+            : 'translate-x-0.5 bg-[var(--player-text-body)]'
         }`}
       />
     </button>
@@ -1017,7 +1017,8 @@ export default function AdminPanel({
             title="Go to Apollo"
             aria-label="Go to Apollo"
           >
-            <BrandWordmark className="h-8" />
+            <BrandMark className="h-7 w-7 sm:hidden" />
+            <BrandWordmark className="hidden h-8 sm:block" />
           </button>
           <div className="flex items-center gap-3">
             <div className="flex items-center rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-0.5">
@@ -1032,10 +1033,10 @@ export default function AdminPanel({
               <button
                 type="button"
                 disabled
-                className="rounded-full bg-[var(--player-bg-active-segment)] px-3.5 py-1 text-xs font-bold tracking-wider text-[var(--player-accent-text)] cursor-default"
+                className="rounded-full bg-[var(--player-bg-active-segment)] px-3.5 py-1 text-xs font-semibold text-[var(--player-accent-text)] cursor-default"
                 title="Current page"
               >
-                ADMIN
+                Admin
               </button>
             </div>
             <div className="relative" ref={profileMenuRef}>
@@ -1097,7 +1098,7 @@ export default function AdminPanel({
         <div className="min-h-0 flex-1 overflow-hidden px-3 pb-3 pt-2.5">
           <div className="flex h-full flex-col gap-2.5 overflow-hidden md:flex-row">
             <aside className="shrink-0 rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)] p-1.5 md:w-48 md:p-2">
-              <nav className="grid grid-cols-5 gap-0.5 md:block md:space-y-1" aria-label="Admin Navigation">
+              <nav className="grid grid-cols-5 gap-1 px-0.5 md:block md:space-y-1 md:px-0" aria-label="Admin Navigation">
                 {navItems.map((item) => {
                   const active = tab === item.id;
                   return (
@@ -1105,7 +1106,7 @@ export default function AdminPanel({
                       key={item.id}
                       type="button"
                       onClick={() => selectAdminTab(item.id)}
-                      className={`relative flex min-w-0 items-center justify-center rounded-lg border px-1.5 py-1.5 text-center text-xs transition-colors md:w-full md:justify-between md:gap-1.5 md:border-transparent md:px-2.5 md:py-2 md:text-left md:text-sm ${
+                      className={`relative flex min-w-0 items-center justify-center rounded-lg border px-1 py-1.5 text-center text-[11px] sm:text-xs transition-colors md:w-full md:justify-between md:gap-1.5 md:border-transparent md:px-2.5 md:py-2 md:text-left md:text-sm ${
                         active
                           ? 'border-[var(--player-accent-border)] bg-[var(--player-bg-elevated)] text-[var(--player-accent-text)] font-semibold md:border-transparent md:text-[var(--player-text-primary)]'
                           : 'border-transparent text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
