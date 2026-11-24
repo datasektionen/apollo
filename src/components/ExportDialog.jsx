@@ -1133,16 +1133,16 @@ function ExportDialog({
         className={`bg-[var(--player-bg-surface)] border border-[var(--player-border-strong)] text-[var(--player-text-primary)] rounded-2xl w-full overflow-hidden flex flex-col shadow-[var(--player-shadow-popover)] ${
           showProgressWindow
             ? 'max-w-sm'
-            : 'max-w-3xl h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)]'
+            : 'max-w-3xl max-h-[min(86vh,700px)]'
         }`}
       >
         {showProgressWindow ? (
           <div className="px-4 py-3.5 border-b border-[var(--player-border-subtle)] flex items-center justify-center">
-            <h2 className="text-lg font-semibold text-center">{progressTitle}</h2>
+            <h2 className="text-xl font-semibold tracking-tight text-center">{progressTitle}</h2>
           </div>
         ) : (
           <div className="px-4 py-3.5 border-b border-[var(--player-border-subtle)] flex items-center justify-between">
-            <h2 className="text-lg font-semibold">{progressTitle}</h2>
+            <h2 className="text-xl font-semibold tracking-tight">{progressTitle}</h2>
             <button
               onClick={onClose}
               className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
@@ -1154,9 +1154,9 @@ function ExportDialog({
         )}
 
         {!showProgressWindow ? (
-          <div className="flex-1 min-h-0 overflow-hidden px-4 pt-3 pb-4 flex flex-col">
-            <div className="grid grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[1fr_320px] lg:grid-rows-1 gap-4 flex-1 min-h-0">
-              <div className="bg-[var(--player-bg-surface-subtle)] border border-[var(--player-border-subtle)] rounded-xl p-3 h-full overflow-auto min-h-0">
+          <div className="flex-1 min-h-0 overflow-hidden px-4 pt-3.5 pb-4 flex flex-col">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 flex-1 min-h-0 overflow-hidden">
+              <div className="bg-[var(--player-bg-surface-subtle)] border border-[var(--player-border-subtle)] rounded-xl p-3 max-h-[240px] lg:max-h-none overflow-auto min-h-0">
                 {isRenderedMixExport ? (() => {
                   const renderNode = (node, depth = 0) => {
                     const preset = node.presetId ? PRESET_BY_ID[node.presetId] : null;
@@ -1443,7 +1443,7 @@ function ExportDialog({
                     </p>
                   </div>
                 )}
-                <div className="mt-auto">
+                <div className="mt-5 pt-1">
                   <div className="mb-3">
                     <label className="block text-xs text-[var(--player-text-muted)] mb-1">Export name</label>
                     <input

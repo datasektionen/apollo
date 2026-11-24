@@ -4591,13 +4591,17 @@ function Editor({
                     className={`p-1.5 md:p-2 rounded-lg transition-colors ${
                       isRecording
                         ? 'bg-[var(--daw-record-bg)] hover:bg-[var(--daw-record-hover)] text-white shadow-[var(--daw-record-glow)] animate-pulse'
-                        : 'bg-red-500/20 hover:bg-[var(--daw-record-bg)] text-red-400 hover:text-white'
-                    } disabled:bg-white/[0.04] disabled:text-red-500/45 disabled:shadow-none disabled:cursor-not-allowed`}
+                        : 'bg-red-500/[0.22] hover:bg-[var(--daw-record-bg)] ring-1 ring-inset ring-red-500/50 text-[#ef4444] hover:text-white'
+                    } disabled:bg-white/[0.04] disabled:ring-0 disabled:text-red-500/45 disabled:shadow-none disabled:cursor-not-allowed`}
                   >
                     {!isRecording && selectedTrackLockedByOther ? (
                       <Lock size={15} />
                     ) : (
-                      <Circle size={15} fill="currentColor" />
+                      <Circle
+                        size={15}
+                        fill="currentColor"
+                        style={!isRecording && !recordButtonDisabled ? { filter: 'drop-shadow(0 0 4px rgba(239, 68, 68, 0.55))' } : undefined}
+                      />
                     )}
                   </button>
                 </span>
@@ -4939,8 +4943,9 @@ function Editor({
               ? 'grid-cols-[84px_1fr] md:grid-cols-[384px_1fr]'
               : 'grid-cols-[232px_1fr] md:grid-cols-[384px_1fr]';
             return (
+            <div className="flex h-full min-h-0 flex-col">
             <div
-              className={`relative grid h-full min-h-0 min-w-0 ${dawGridColsClass} overscroll-none`}
+              className={`relative grid flex-1 min-h-0 min-w-0 ${dawGridColsClass} overscroll-none`}
               style={{
                 gridTemplateRows: lyricsTrackShown ? `${TIMELINE_RULER_HEIGHT}px 44px minmax(0,1fr)` : `${TIMELINE_RULER_HEIGHT}px minmax(0,1fr)`,
                 overscrollBehavior: 'none',
@@ -4948,15 +4953,6 @@ function Editor({
             >
               <div className="flex min-w-0 items-stretch border-b border-r border-[var(--daw-border-row)] bg-[var(--daw-bg-ruler-top)]">
                 <div className="min-w-0 flex-1 flex items-stretch">{rulerTools}</div>
-                <button
-                  type="button"
-                  onClick={() => setMobileTrackListCompact((c) => !c)}
-                  className="md:hidden flex items-center justify-center px-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] border-l border-[var(--daw-border-row)]"
-                  title={mobileTrackListCompact ? 'Expand track controls' : 'Compact track rail'}
-                  aria-label={mobileTrackListCompact ? 'Expand track controls' : 'Compact track rail'}
-                >
-                  {mobileTrackListCompact ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
-                </button>
               </div>
               <div className="relative z-20 min-w-0 overflow-hidden">{header}</div>
               {lyricsTrackShown ? (
@@ -5029,8 +5025,8 @@ function Editor({
                 </>
               ) : null}
               <div
-                className="pointer-events-auto absolute right-3 z-30 max-md:bottom-3 md:top-[var(--daw-ruler-mid)] md:-translate-y-1/2"
-                style={{ '--daw-ruler-mid': `${TIMELINE_RULER_HEIGHT / 2}px` }}
+                className="hidden md:block pointer-events-auto absolute right-3 z-30 -translate-y-1/2"
+                style={{ top: `${TIMELINE_RULER_HEIGHT / 2}px` }}
               >{zoomOverlay}</div>
               <div
                 ref={timelineRowsScrollAreaRef}
@@ -5057,7 +5053,7 @@ function Editor({
                   }
                 }}
               >
-                <div className={`grid ${dawGridColsClass} min-w-0 min-h-full pb-12 md:pb-0`}>
+                <div className={`grid ${dawGridColsClass} min-w-0 min-h-full`}>
                   <div
                     className={`bg-[var(--daw-bg-sidebar)] border-r border-[var(--daw-border-row)] min-h-full min-w-0 overflow-hidden ${mobileTrackListCompact ? 'daw-tracklist-compact' : ''}`}
                     onContextMenu={(e) => {
@@ -5132,6 +5128,20 @@ function Editor({
                   </div>
                 </div>
               </div>
+            </div>
+            <div className="flex md:hidden items-center justify-between border-t border-[var(--daw-border-row)] bg-[var(--daw-bg-header)] px-3 py-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setMobileTrackListCompact((c) => !c)}
+                className="flex items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2.5 py-1 text-xs font-medium text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
+                title={mobileTrackListCompact ? 'Expand track controls' : 'Compact track rail'}
+                aria-label={mobileTrackListCompact ? 'Expand track controls' : 'Compact track rail'}
+              >
+                {mobileTrackListCompact ? <ChevronsRight size={13} /> : <ChevronsLeft size={13} />}
+                <span>{mobileTrackListCompact ? 'Mixer' : 'Tracks'}</span>
+              </button>
+              {zoomOverlay}
+            </div>
             </div>
             );
           }}
@@ -5212,9 +5222,9 @@ function Editor({
 
       {settingsOpen && !isAdvancedMixSession && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-[var(--player-border-strong)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)] overflow-hidden">
+          <div className="w-full max-w-xl rounded-2xl border border-[var(--player-border-strong)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)] overflow-hidden">
             <div className="flex items-center justify-between border-b border-[var(--player-border-subtle)] px-5 py-3.5">
-              <div className="text-sm font-semibold">Settings</div>
+              <div className="text-xl font-semibold tracking-tight">Settings</div>
               <button
                 className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
                 onClick={() => setSettingsOpen(false)}
@@ -5223,11 +5233,11 @@ function Editor({
               </button>
             </div>
             <div className="px-5 py-4">
-              <div className="mb-4 flex items-center gap-1.5 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-1">
+              <div className={`mb-4 grid ${caps.canEditProjectSettings && !isLocalRecordingSession ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-1`}>
                 <button
                   type="button"
                   onClick={() => setSettingsTab('playback')}
-                  className={`flex-auto whitespace-nowrap rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
+                  className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-center text-xs sm:text-sm font-medium transition-colors ${
                     settingsTab === 'playback'
                       ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
                       : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
@@ -5238,7 +5248,7 @@ function Editor({
                 <button
                   type="button"
                   onClick={() => setSettingsTab('daw')}
-                  className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-center text-xs sm:text-sm font-medium transition-colors ${
                     settingsTab === 'daw'
                       ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
                       : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
@@ -5250,7 +5260,7 @@ function Editor({
                   <button
                     type="button"
                     onClick={() => setSettingsTab('project')}
-                    className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                    className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-center text-xs sm:text-sm font-medium transition-colors ${
                       settingsTab === 'project'
                         ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
                         : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'

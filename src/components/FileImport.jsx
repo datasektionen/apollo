@@ -259,7 +259,7 @@ function FileImport({
         onDrop={handleDrop}
       >
         <div className="px-6 py-4 border-b border-[var(--player-border-subtle)] flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Import Audio Files</h2>
+          <h2 className="text-xl font-semibold tracking-tight">Import Audio Files</h2>
           <button
             onClick={onClose}
             className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
@@ -384,7 +384,7 @@ function FileImport({
               onClick={handleImport}
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                 files.length === 0 || isProcessing || blockedEntries.length > 0
-                  ? 'border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-disabled)] cursor-not-allowed'
+                  ? 'border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-muted)] cursor-not-allowed'
                   : 'player-play-cta'
               }`}
               disabled={files.length === 0 || isProcessing || blockedEntries.length > 0}

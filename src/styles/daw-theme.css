@@ -19,7 +19,7 @@
   --daw-bg-row: #0e0e11;
   --daw-bg-row-group: #111115;
   --daw-bg-row-hover: #15151a;
-  --daw-bg-row-selected: #1b1a20;
+  --daw-bg-row-selected: #1f1e28;
   --daw-bg-row-active-mix: rgba(198, 155, 57, 0.14);
   --daw-bg-lane: #070709;
   --daw-bg-lane-group: #0a0a0d;
@@ -288,6 +288,46 @@
 
 .daw-theme select:not([multiple]):disabled {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2352525b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* Precision Obsidian Checkboxes (sharp unchecked outline, Apollo Gold check & indeterminate states) */
+.daw-theme input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1.5px solid rgba(255, 255, 255, 0.34);
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+  transition: background-color 120ms var(--player-ease), border-color 120ms var(--player-ease);
+}
+
+.daw-theme input[type='checkbox']:hover:not(:disabled):not(:checked):not(:indeterminate) {
+  border-color: rgba(255, 255, 255, 0.56);
+}
+
+.daw-theme input[type='checkbox']:checked {
+  border-color: var(--player-accent, #cb9e37);
+  background-color: var(--player-accent, #cb9e37);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23050506' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5 6.5 11.5 12.5 4.5'/%3E%3C/svg%3E");
+}
+
+.daw-theme input[type='checkbox']:indeterminate {
+  border-color: var(--player-accent, #cb9e37);
+  background-color: var(--player-accent, #cb9e37);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23050506' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
+}
+
+.daw-theme input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--player-accent-border, rgba(217, 183, 109, 0.5));
+  outline-offset: 2px;
+}
+
+.daw-theme input[type='checkbox']:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .daw-theme .daw-compact-mute-badge {

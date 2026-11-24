@@ -65,7 +65,7 @@ function PanKnobDial({ value }) {
         <path
           d={trackPath}
           fill="none"
-          stroke="rgba(255, 255, 255, 0.16)"
+          stroke="rgba(255, 255, 255, 0.24)"
           strokeWidth="2.2"
           strokeLinecap="round"
         />
@@ -83,7 +83,7 @@ function PanKnobDial({ value }) {
         className="absolute left-1/2 top-1/2 w-[21px] h-[21px] rounded-full -translate-x-1/2 -translate-y-1/2"
         style={{
           backgroundColor: '#16161b',
-          border: '1px solid rgba(255, 255, 255, 0.16)',
+          border: '1px solid rgba(255, 255, 255, 0.22)',
           boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.08)',
         }}
       />
@@ -1341,7 +1341,10 @@ function TrackList({
                 height: `${row.height}px`,
                 minHeight: `${row.height}px`,
                 maxHeight: `${row.height}px`,
-                borderLeft: `3px solid ${groupPalette.accent}`,
+                borderLeft: `${isSelectedRow ? 4 : 3}px solid ${row.muted ? `${groupPalette.accent}78` : groupPalette.accent}`,
+                ...(isSelectedRow && !isGroupHighlightedInAdvancedMix
+                  ? { boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(255, 255, 255, 0.04)' }
+                  : {}),
                 ...rowMotionStyle,
               }}
             >
@@ -1362,7 +1365,7 @@ function TrackList({
                       if (hasDirectParentTypeLock(row)) return;
                       cycleGroupRole(row);
                     }}
-                    className={`w-14 h-14 rounded-xl ${getRoleColor(displayGroupRole)} ${groupPalette.badgeClass} flex items-center justify-center overflow-hidden ${hasDirectParentTypeLock(row) || groupLocked ? 'opacity-75 cursor-not-allowed' : ''}`}
+                    className={`w-14 h-14 rounded-xl ${getRoleColor(displayGroupRole)} ${groupPalette.badgeClass} flex items-center justify-center overflow-hidden ${row.muted ? 'opacity-60' : ''} ${hasDirectParentTypeLock(row) || groupLocked ? 'opacity-75 cursor-not-allowed' : ''}`}
                     title={metadataLocked ? 'Group category locked in this session' : (!canManageGroups ? GROUP_NO_ACCESS_TITLE : 'Click to change type')}
                   >
                     <GroupIcon key={groupIconKey} size={28} strokeWidth={1.75} className="shrink-0" />
@@ -1515,7 +1518,7 @@ function TrackList({
                       title={canManageGroups ? undefined : GROUP_NO_ACCESS_TITLE}
                     >
                       <div
-                        className="flex items-center relative"
+                        className={`flex items-center relative ${row.muted ? 'opacity-45' : ''}`}
                         style={{ width: `${getVolumeSliderWidth(true)}px` }}
                         onClick={(e) => e.stopPropagation()}
                         onMouseDown={(e) => e.stopPropagation()}
@@ -1713,7 +1716,10 @@ function TrackList({
               height: `${trackHeight}px`,
               minHeight: `${trackHeight}px`,
               maxHeight: `${trackHeight}px`,
-              borderLeft: `3px solid ${trackPalette.accent}`,
+              borderLeft: `${isSelectedRow ? 4 : 3}px solid ${track.muted ? `${trackPalette.accent}78` : trackPalette.accent}`,
+              ...(isSelectedRow && !isHighlightedInAdvancedMix
+                ? { boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(255, 255, 255, 0.04)' }
+                : {}),
               ...rowMotionStyle,
             }}
           >
@@ -1738,7 +1744,7 @@ function TrackList({
                     if (!canEditTrackType) return;
                     cycleTrackType(track, row);
                   }}
-                  className={`w-14 h-14 rounded-xl ${getRoleColor(displayTrackRole)} ${trackPalette.badgeClass} flex items-center justify-center overflow-hidden ${
+                  className={`w-14 h-14 rounded-xl ${getRoleColor(displayTrackRole)} ${trackPalette.badgeClass} flex items-center justify-center overflow-hidden ${track.muted ? 'opacity-60' : ''} ${
                     (canEditStemIcon || canEditTrackType) ? '' : 'opacity-75 cursor-not-allowed'
                   }`}
                   title={
@@ -1863,7 +1869,7 @@ function TrackList({
                     title={thisTrackEditable ? undefined : trackNoAccessTitle(track.id)}
                   >
                     <div
-                      className="flex items-center relative"
+                      className={`flex items-center relative ${track.muted ? 'opacity-45' : ''}`}
                       style={{ width: `${getVolumeSliderWidth(false)}px` }}
                       onClick={(e) => e.stopPropagation()}
                       onMouseDown={(e) => e.stopPropagation()}
