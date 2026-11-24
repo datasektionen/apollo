@@ -233,7 +233,7 @@ function FileImport({
 
   return (
     <div
-      className="player-theme fixed inset-0 bg-[var(--player-bg-scrim)] backdrop-blur-sm flex items-center justify-center z-[80] p-4"
+      className="player-theme daw-theme fixed inset-0 bg-[var(--player-bg-scrim)] backdrop-blur-sm flex items-center justify-center z-[80] p-4"
       data-player-theme="dark-gold"
       onDragOver={(e) => {
         e.preventDefault();
@@ -382,7 +382,11 @@ function FileImport({
             </button>
             <button
               onClick={handleImport}
-              className="player-play-cta px-4 py-2 rounded-lg text-sm font-semibold disabled:cursor-not-allowed"
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                files.length === 0 || isProcessing || blockedEntries.length > 0
+                  ? 'border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-disabled)] cursor-not-allowed'
+                  : 'player-play-cta'
+              }`}
               disabled={files.length === 0 || isProcessing || blockedEntries.length > 0}
               title={blockedEntries.length ? 'Change the destination of the highlighted files first' : undefined}
             >

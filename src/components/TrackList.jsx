@@ -283,8 +283,9 @@ function TrackList({
   ], []);
 
   const menuItemClass = 'player-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm whitespace-nowrap';
-  const menuDangerClass = 'player-menu-item player-menu-item-danger flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm whitespace-nowrap';
-  const menuDisabledClass = 'w-full px-3 py-1.5 text-left text-xs text-[var(--player-text-muted)] whitespace-nowrap select-none';
+  const menuTopItemClass = 'player-menu-item relative flex w-full items-center gap-2 pl-7 pr-3.5 py-1.5 text-left text-sm whitespace-nowrap';
+  const menuDangerClass = 'player-menu-item player-menu-item-danger relative flex w-full items-center gap-2 pl-7 pr-3.5 py-1.5 text-left text-sm whitespace-nowrap';
+  const menuDisabledClass = 'w-full pl-7 pr-3.5 py-1.5 text-left text-xs text-[var(--player-text-muted)] whitespace-nowrap select-none';
   const trackTypeOptions = [
     { value: TRACK_ROLES.INSTRUMENT, label: 'Instrument', groupRole: GROUP_ROLE_INSTRUMENTS },
     { value: TRACK_ROLES.LEAD, label: 'Lead', groupRole: GROUP_ROLE_LEADS },
@@ -2004,7 +2005,7 @@ function TrackList({
               {!trackLocked(contextMenu.track.id) ? (
                 <>
                   <button
-                    className={menuItemClass}
+                    className={menuTopItemClass}
                     onClick={() => {
                       setEditingName(contextMenu.track.id);
                       setContextMenu(null);
@@ -2014,7 +2015,7 @@ function TrackList({
                   </button>
                   {onEditTrackArtists && !hasSoloArtistAncestor(contextMenu.row) ? (
                     <button
-                      className={menuItemClass}
+                      className={menuTopItemClass}
                       onClick={() => {
                         onEditTrackArtists(contextMenu.track);
                         setContextMenu(null);
@@ -2038,7 +2039,7 @@ function TrackList({
                   ) : (
                     <div className="relative">
                       <div
-                        className={`${menuItemClass} select-none cursor-pointer justify-between ${
+                        className={`${menuTopItemClass} select-none cursor-pointer justify-between ${
                           (isTypeTriggerHover || isTypeMenuHover) ? 'bg-[var(--player-hover)]' : ''
                         }`}
                         onMouseEnter={openTypeMenu}
@@ -2051,13 +2052,16 @@ function TrackList({
                   )}
                   {!hasPartTrackAncestor(contextMenu.row) ? (
                     <button
-                      className={menuItemClass}
+                      className={menuTopItemClass}
                       onClick={() => {
                         toggleTrackPart(contextMenu.row, contextMenu.track);
                         setContextMenu(null);
                       }}
                     >
-                      {Boolean(contextMenu.row?.part || contextMenu.track.part) ? '✓ ' : ''}Is part
+                      {Boolean(contextMenu.row?.part || contextMenu.track.part) ? (
+                        <span className="absolute left-2.5 text-[var(--player-accent-text)] font-semibold" aria-hidden="true">✓</span>
+                      ) : null}
+                      <span>Is part</span>
                     </button>
                   ) : null}
                 </>
@@ -2067,13 +2071,16 @@ function TrackList({
 	                <>
 	                  <div className="my-1 border-t border-[var(--player-border-subtle)]" />
 	                  <button
-	                    className={menuItemClass}
+	                    className={menuTopItemClass}
 	                    onClick={() => {
 	                      onToggleAdvancedTrackFocus(contextMenu.track.id, ADVANCED_MIX_FOCUS_MODES.HIGHLIGHTED);
 	                      setContextMenu(null);
 	                    }}
 	                  >
-	                    {getTrackFocusMode(contextMenu.track.id) === ADVANCED_MIX_FOCUS_MODES.HIGHLIGHTED ? '✓ ' : ''}Highlighted in mix
+	                    {getTrackFocusMode(contextMenu.track.id) === ADVANCED_MIX_FOCUS_MODES.HIGHLIGHTED ? (
+	                      <span className="absolute left-2.5 text-[var(--player-accent-text)] font-semibold" aria-hidden="true">✓</span>
+	                    ) : null}
+	                    <span>Highlighted in mix</span>
 	                  </button>
 	                </>
               ) : null}
@@ -2081,7 +2088,7 @@ function TrackList({
 	              {!metadataLocked && onSetAutoPanStrategy && isChoirRole(contextMenu.track.role) && (
                 <div className="relative">
                   <div
-                    className={`${menuItemClass} select-none cursor-pointer justify-between ${
+                    className={`${menuTopItemClass} select-none cursor-pointer justify-between ${
                       (isAutoPanTriggerHover || isAutoPanMenuHover) ? 'bg-[var(--player-hover)]' : ''
                     }`}
                     onMouseEnter={openAutoPanMenu}
@@ -2113,7 +2120,7 @@ function TrackList({
 
                   {canAddTrackUnder(contextMenu.row?.parentId) ? (
                     <button
-                      className={menuItemClass}
+                      className={menuTopItemClass}
                       onClick={() => {
                         onAddTrack({
                           parentId: contextMenu.row?.parentId || null,
@@ -2127,7 +2134,7 @@ function TrackList({
                   ) : null}
                   {onCreateSubtrack ? (
                     <button
-                      className={menuItemClass}
+                      className={menuTopItemClass}
                       onClick={() => {
                         onCreateSubtrack(contextMenu.track.id);
                         setContextMenu(null);
@@ -2154,7 +2161,7 @@ function TrackList({
               {!groupLocked ? (
                 <>
                   <button
-                    className={menuItemClass}
+                    className={menuTopItemClass}
                     onClick={() => {
                       handleRenameGroup(contextMenu.group);
                       setContextMenu(null);
@@ -2164,7 +2171,7 @@ function TrackList({
                   </button>
                   {onEditGroupArtists && !hasSoloArtistAncestor(contextMenu.group) ? (
                     <button
-                      className={menuItemClass}
+                      className={menuTopItemClass}
                       onClick={() => {
                         onEditGroupArtists(contextMenu.group);
                         setContextMenu(null);
@@ -2180,7 +2187,7 @@ function TrackList({
                   ) : (
                     <div className="relative">
                       <div
-                        className={`${menuItemClass} select-none cursor-pointer justify-between ${
+                        className={`${menuTopItemClass} select-none cursor-pointer justify-between ${
                           (isGroupTypeTriggerHover || isGroupTypeMenuHover) ? 'bg-[var(--player-hover)]' : ''
                         }`}
                         onMouseEnter={openGroupTypeMenu}
@@ -2193,13 +2200,16 @@ function TrackList({
                   )}
                   {!hasPartTrackAncestor(contextMenu.group) ? (
                     <button
-                      className={menuItemClass}
+                      className={menuTopItemClass}
                       onClick={() => {
                         toggleGroupPart(contextMenu.group);
                         setContextMenu(null);
                       }}
                     >
-                      {Boolean(contextMenu.group.part) ? '✓ ' : ''}Is part
+                      {Boolean(contextMenu.group.part) ? (
+                        <span className="absolute left-2.5 text-[var(--player-accent-text)] font-semibold" aria-hidden="true">✓</span>
+                      ) : null}
+                      <span>Is part</span>
                     </button>
                   ) : null}
                 </>
@@ -2208,21 +2218,23 @@ function TrackList({
                 <>
                   <div className="my-1 border-t border-[var(--player-border-subtle)]" />
                   <button
-                    className={menuItemClass}
+                    className={menuTopItemClass}
                     onClick={() => {
                       onToggleAdvancedGroupFocus(contextMenu.group.nodeId);
                       setContextMenu(null);
                     }}
                   >
-                    {getGroupFocusState(contextMenu.group.nodeId) === 'all'
-                      ? '✓ '
-                      : (getGroupFocusState(contextMenu.group.nodeId) === 'partial' ? '- ' : '')}
-                    Highlighted in mix
+                    {getGroupFocusState(contextMenu.group.nodeId) === 'all' ? (
+                      <span className="absolute left-2.5 text-[var(--player-accent-text)] font-semibold" aria-hidden="true">✓</span>
+                    ) : getGroupFocusState(contextMenu.group.nodeId) === 'partial' ? (
+                      <span className="absolute left-2.5 text-[var(--player-accent-text)] font-semibold" aria-hidden="true">-</span>
+                    ) : null}
+                    <span>Highlighted in mix</span>
                   </button>
                 </>
               ) : null}
               <button
-                className={menuItemClass}
+                className={menuTopItemClass}
                 onClick={() => {
                   onToggleGroupCollapse?.(contextMenu.group.nodeId);
                   setContextMenu(null);
@@ -2250,7 +2262,7 @@ function TrackList({
 
                       {canAddTrackUnder(contextMenu.group.parentId) ? (
                         <button
-                          className={menuItemClass}
+                          className={menuTopItemClass}
                           onClick={() => {
                             onAddTrack({
                               parentId: contextMenu.group.parentId || null,
@@ -2264,7 +2276,7 @@ function TrackList({
                       ) : null}
                       {canAddTrackUnder(contextMenu.group.nodeId) ? (
                         <button
-                          className={menuItemClass}
+                          className={menuTopItemClass}
                           onClick={() => {
                             onAddTrack(contextMenu.group.nodeId);
                             setContextMenu(null);

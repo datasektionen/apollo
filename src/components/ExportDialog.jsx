@@ -1126,7 +1126,7 @@ function ExportDialog({
 
   return (
     <div
-      className="player-theme fixed inset-0 bg-[var(--player-bg-scrim)] backdrop-blur-sm flex items-center justify-center z-[80] p-4"
+      className="player-theme daw-theme fixed inset-0 bg-[var(--player-bg-scrim)] backdrop-blur-sm flex items-center justify-center z-[80] p-4"
       data-player-theme="dark-gold"
     >
       <div
@@ -1171,8 +1171,8 @@ function ExportDialog({
                     return (
                       <div key={node.id} className={depth > 0 ? 'mt-0' : ''}>
                         <label
-                          className="flex h-[30px] items-center gap-1.5 rounded-md px-1 py-0 leading-none hover:bg-[var(--player-hover)] cursor-pointer transition-colors"
-                          style={{ marginLeft: `${depth * 20}px` }}
+                          className="flex h-[28px] items-center gap-1.5 rounded-md px-1.5 py-0 leading-none hover:bg-[var(--player-hover)] cursor-pointer transition-colors"
+                          style={{ marginLeft: `${depth * 18}px` }}
                         >
                           {hasChildren ? (
                             <button
@@ -1183,7 +1183,7 @@ function ExportDialog({
                                 e.stopPropagation();
                                 toggleNodeExpanded(node.id);
                               }}
-                              className="w-3.5 h-4 shrink-0 flex items-center justify-center text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]"
+                              className="w-3.5 h-3.5 shrink-0 flex items-center justify-center text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]"
                               disabled={isExporting}
                             >
                               {expanded ? (
@@ -1193,7 +1193,7 @@ function ExportDialog({
                               )}
                             </button>
                           ) : (
-                            <span className="w-3.5 h-4 shrink-0" />
+                            <span className="w-3.5 h-3.5 shrink-0" />
                           )}
                           <TriStateCheckbox
                             checked={state.checked}
@@ -1202,11 +1202,11 @@ function ExportDialog({
                             disabled={isExporting}
                           />
                           <span className="flex min-w-0 items-center gap-2">
-                            <span className="min-w-0 truncate whitespace-nowrap font-medium text-[22.5px] text-[var(--player-text-primary)]">
+                            <span className="min-w-0 truncate whitespace-nowrap font-medium text-sm text-[var(--player-text-primary)]">
                               {label}
                             </span>
                             {fileCountText && (
-                              <span className="relative top-px shrink-0 text-[18px] text-[var(--player-text-muted)] leading-none tabular-nums">{fileCountText}</span>
+                              <span className="shrink-0 text-xs text-[var(--player-text-muted)] leading-none tabular-nums">{fileCountText}</span>
                             )}
                           </span>
                         </label>
@@ -1280,7 +1280,17 @@ function ExportDialog({
                           {practiceFocusDiffDb}
                         </div>
                         <div className="relative h-6">
-                          <div className="absolute z-0 left-0 right-0 top-1/2 -translate-y-1/2 h-2 rounded-full border border-[var(--player-border-default)] bg-[var(--daw-bg-lcd)] pointer-events-none" />
+                          <div className="absolute z-0 left-0 right-0 top-1/2 -translate-y-1/2 h-2 rounded-full border border-[var(--player-border-default)] bg-[var(--daw-bg-lcd)] overflow-hidden pointer-events-none">
+                            <div
+                              className="absolute inset-y-0"
+                              style={{
+                                backgroundColor: 'var(--player-accent)',
+                                opacity: 0.72,
+                                left: `${Math.min(50, practiceFocusDiffRatio * 100)}%`,
+                                width: `${Math.abs(practiceFocusDiffRatio * 100 - 50)}%`,
+                              }}
+                            />
+                          </div>
                           <div
                             className="absolute z-10 left-0 right-0 top-1/2 -translate-y-1/2 flex items-center justify-between pointer-events-none"
                             style={{ paddingLeft: '7px', paddingRight: '7px' }}
@@ -1288,7 +1298,7 @@ function ExportDialog({
                             {Array.from({ length: 13 }, (_, idx) => (
                               <span
                                 key={idx}
-                                className={`block w-px ${idx % 2 === 0 ? 'h-3 bg-white/35' : 'h-2 bg-white/20'}`}
+                                className={`block w-px ${idx === 6 ? 'h-3.5 bg-white/60' : idx % 2 === 0 ? 'h-3 bg-white/45' : 'h-2 bg-white/25'}`}
                               />
                             ))}
                           </div>

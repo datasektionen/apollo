@@ -3268,7 +3268,9 @@ function Timeline({
             ...loopBand,
             height: RULER_LABEL_HEIGHT,
             backgroundColor: loopRange.enabled ? 'var(--daw-loop-active)' : 'var(--daw-loop-inactive)',
-            borderTop: loopRange.enabled ? '2px solid var(--daw-loop-active-edge)' : '2px solid var(--player-border-default)',
+            borderTop: loopRange.enabled ? '2px solid var(--daw-loop-active-edge)' : '2px solid rgba(255, 255, 255, 0.16)',
+            borderLeft: loopRange.enabled ? '1px solid var(--daw-loop-active-edge)' : '1px solid rgba(255, 255, 255, 0.14)',
+            borderRight: loopRange.enabled ? '1px solid var(--daw-loop-active-edge)' : '1px solid rgba(255, 255, 255, 0.14)',
           }}
         />
       ) : null}

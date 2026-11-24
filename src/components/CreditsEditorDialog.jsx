@@ -326,7 +326,7 @@ export default function CreditsEditorDialog({
 
   return (
     <div
-      className="player-theme fixed inset-0 z-[80] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
+      className="player-theme daw-theme fixed inset-0 z-[80] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
       data-player-theme="dark-gold"
     >
       <button type="button" className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close credits editor" />

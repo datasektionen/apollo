@@ -4478,6 +4478,46 @@ function Editor({
                 ) : null}
               </div>
             ) : null}
+            {!isAdvancedMixSession ? (
+              <div className="ml-auto flex items-center gap-1.5 flex-shrink-0 md:hidden">
+                {(caps.canCreateTracks || caps.canEditAnyTrack) ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowFileImport(true)}
+                    className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)] p-1.5 transition-colors"
+                    title={caps.canCreateTracks ? 'Import audio files' : 'Import audio into tracks you can edit'}
+                    aria-label="Import audio files"
+                  >
+                    <Download size={15} />
+                  </button>
+                ) : null}
+                {!isLocalRecordingSession && caps.canExport ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (isHostedSession) {
+                        try {
+                          await forceCheckpoint(remoteSession.serverProjectId, remoteSession.session);
+                        } catch (error) {
+                          reportUserError(
+                            'Failed to create server checkpoint before export.',
+                            error,
+                            { onceKey: 'editor:force-checkpoint-before-export' }
+                          );
+                        }
+                      }
+                      setShowExportDialog(true);
+                    }}
+                    disabled={hasNoTracks}
+                    className="rounded-lg border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:bg-[var(--player-accent)] hover:text-[var(--player-accent-foreground)] disabled:opacity-40 disabled:pointer-events-none p-1.5 transition-colors"
+                    title="Export project"
+                    aria-label="Export project"
+                  >
+                    <Upload size={15} />
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="relative min-w-0">
@@ -4551,8 +4591,8 @@ function Editor({
                     className={`p-1.5 md:p-2 rounded-lg border transition-colors ${
                       isRecording
                         ? 'bg-[var(--daw-record-bg)] hover:bg-[var(--daw-record-hover)] border-[var(--daw-record-border)] text-white shadow-[var(--daw-record-glow)] animate-pulse'
-                        : 'bg-[var(--daw-record-soft)] hover:bg-[var(--daw-record-bg)] border-[var(--daw-record-border)] text-red-400 hover:text-white'
-                    } disabled:bg-[var(--player-bg-elevated)] disabled:border-red-500/20 disabled:text-red-400/45 disabled:shadow-none disabled:cursor-not-allowed`}
+                        : 'bg-red-500/[0.16] hover:bg-[var(--daw-record-bg)] border-red-500/60 text-red-500 hover:text-white'
+                    } disabled:bg-[var(--player-bg-elevated)] disabled:border-red-500/25 disabled:text-red-500/45 disabled:shadow-none disabled:cursor-not-allowed`}
                   >
                     {!isRecording && selectedTrackLockedByOther ? (
                       <Lock size={15} />
@@ -4803,7 +4843,7 @@ function Editor({
                     {(caps.canCreateTracks || caps.canEditAnyTrack) ? (
                       <button
                         onClick={() => setShowFileImport(true)}
-                        className="flex items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)] px-3 py-1.5 text-sm font-medium transition-colors"
+                        className="hidden md:flex items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)] px-3 py-1.5 text-sm font-medium transition-colors"
                         title={caps.canCreateTracks ? 'Import audio files' : 'Import audio into tracks you can edit'}
                       >
                         <Download size={15} />
@@ -4828,7 +4868,7 @@ function Editor({
                           setShowExportDialog(true);
                         }}
                         disabled={hasNoTracks}
-                        className="flex items-center gap-1.5 rounded-lg border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:bg-[var(--player-accent)] hover:text-[var(--player-accent-foreground)] disabled:opacity-40 disabled:pointer-events-none px-3 py-1.5 text-sm font-semibold transition-colors"
+                        className="hidden md:flex items-center gap-1.5 rounded-lg border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:bg-[var(--player-accent)] hover:text-[var(--player-accent-foreground)] disabled:opacity-40 disabled:pointer-events-none px-3 py-1.5 text-sm font-semibold transition-colors"
                       >
                         <Upload size={15} />
                         <span>Export</span>
@@ -4896,7 +4936,7 @@ function Editor({
             pendingGroupCollapseId,
           }) => {
             const dawGridColsClass = mobileTrackListCompact
-              ? 'grid-cols-[76px_1fr] md:grid-cols-[384px_1fr]'
+              ? 'grid-cols-[84px_1fr] md:grid-cols-[384px_1fr]'
               : 'grid-cols-[232px_1fr] md:grid-cols-[384px_1fr]';
             return (
             <div
@@ -5187,7 +5227,7 @@ function Editor({
                 <button
                   type="button"
                   onClick={() => setSettingsTab('playback')}
-                  className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  className={`flex-auto whitespace-nowrap rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
                     settingsTab === 'playback'
                       ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
                       : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
@@ -5198,7 +5238,7 @@ function Editor({
                 <button
                   type="button"
                   onClick={() => setSettingsTab('daw')}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                     settingsTab === 'daw'
                       ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
                       : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
@@ -5210,7 +5250,7 @@ function Editor({
                   <button
                     type="button"
                     onClick={() => setSettingsTab('project')}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                    className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                       settingsTab === 'project'
                         ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
                         : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'

@@ -123,7 +123,7 @@ export function LatencyCorrectionDialog({
 
   return (
     <div
-      className="player-theme fixed inset-0 z-[100] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
+      className="player-theme daw-theme fixed inset-0 z-[100] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
       data-player-theme="dark-gold"
       role="dialog"
       aria-modal="true"
