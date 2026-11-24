@@ -23,6 +23,7 @@ import {
   GROUP_ROLE_CHOIRS,
   GROUP_ROLE_INSTRUMENTS,
   GROUP_ROLE_LEADS,
+  getDawRolePalette,
   getDefaultIconByRole,
   getNextStemIcon,
   getNextTrackType,
@@ -36,6 +37,66 @@ import { ADVANCED_MIX_FOCUS_MODES, getAdvancedMixFocusMode as defaultGetAdvanced
 
 const TRACK_HEIGHT = 100;
 const REMOTE_VALUE_ANIMATION_MS = 800;
+
+function polarPoint(cx, cy, r, clockDeg) {
+  const rad = ((clockDeg - 90) * Math.PI) / 180;
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+
+function PanKnobDial({ value }) {
+  const clamped = Math.max(-100, Math.min(100, Number(value) || 0));
+  const angle = (clamped / 100) * 135;
+  const cx = 16;
+  const cy = 16;
+  const r = 13.5;
+  const [tStartX, tStartY] = polarPoint(cx, cy, r, -135);
+  const [tEndX, tEndY] = polarPoint(cx, cy, r, 135);
+  const trackPath = `M ${tStartX.toFixed(2)} ${tStartY.toFixed(2)} A ${r} ${r} 0 1 1 ${tEndX.toFixed(2)} ${tEndY.toFixed(2)}`;
+  let activePath = null;
+  if (Math.abs(angle) > 0.75) {
+    const [aEndX, aEndY] = polarPoint(cx, cy, r, angle);
+    const sweepFlag = angle > 0 ? 1 : 0;
+    activePath = `M ${cx} ${(cy - r).toFixed(2)} A ${r} ${r} 0 0 ${sweepFlag} ${aEndX.toFixed(2)} ${aEndY.toFixed(2)}`;
+  }
+  const isPanned = Math.abs(clamped) >= 1;
+  return (
+    <div className="absolute inset-0 pointer-events-none">
+      <svg viewBox="0 0 32 32" className="w-8 h-8" aria-hidden="true">
+        <path
+          d={trackPath}
+          fill="none"
+          stroke="rgba(255, 255, 255, 0.16)"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+        />
+        {activePath ? (
+          <path
+            d={activePath}
+            fill="none"
+            stroke="#cb9e37"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+          />
+        ) : null}
+      </svg>
+      <div
+        className="absolute left-1/2 top-1/2 w-[21px] h-[21px] rounded-full -translate-x-1/2 -translate-y-1/2"
+        style={{
+          backgroundColor: '#16161b',
+          border: '1px solid rgba(255, 255, 255, 0.16)',
+          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+        }}
+      />
+      <div
+        className="absolute left-1/2 top-1/2 w-[2px] h-[10px] rounded-full origin-bottom"
+        style={{
+          backgroundColor: isPanned ? '#d9b76d' : '#f5f5f4',
+          transform: `translate(-50%, -100%) rotate(${angle}deg)`,
+        }}
+      />
+    </div>
+  );
+}
 
 function easeInOutQuint(t) {
   if (t < 0.5) {
@@ -221,7 +282,9 @@ function TrackList({
     { key: 'file-music', Icon: FileMusic },
   ], []);
 
-  const menuItemClass = 'w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-200 hover:bg-gray-700 whitespace-nowrap';
+  const menuItemClass = 'player-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm whitespace-nowrap';
+  const menuDangerClass = 'player-menu-item player-menu-item-danger flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm whitespace-nowrap';
+  const menuDisabledClass = 'w-full px-3 py-1.5 text-left text-xs text-[var(--player-text-muted)] whitespace-nowrap select-none';
   const trackTypeOptions = [
     { value: TRACK_ROLES.INSTRUMENT, label: 'Instrument', groupRole: GROUP_ROLE_INSTRUMENTS },
     { value: TRACK_ROLES.LEAD, label: 'Lead', groupRole: GROUP_ROLE_LEADS },
@@ -1175,7 +1238,7 @@ function TrackList({
 
   if (!visibleRows.length) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-500">
+      <div className="flex-1 flex items-center justify-center text-[var(--player-text-muted)] px-4 text-center text-sm">
         <p>No tracks yet. Import audio files to get started.</p>
       </div>
     );
@@ -1228,6 +1291,7 @@ function TrackList({
           const directParentForcedRole = getDirectParentForcedRole(row);
           const pendingGroupState = getPendingIconState(`group:${row.nodeId}`);
           const displayGroupRole = pendingGroupState?.role || directParentForcedRole || row.role;
+          const groupPalette = getDawRolePalette(displayGroupRole);
           const { Icon: GroupIcon, key: groupIconKey } = getIconForRole(displayGroupRole);
           const isSelectedRow = selectedNodeId === row.nodeId;
           const groupFocusState = getGroupFocusState(row.nodeId);
@@ -1235,10 +1299,12 @@ function TrackList({
           const groupRowClass = isGroupHighlightedInAdvancedMix
             ? (
               isSelectedRow
-                ? 'bg-cyan-800/70 ring-1 ring-inset ring-cyan-300/50'
-                : 'bg-cyan-950/45 hover:bg-cyan-900/55 ring-1 ring-inset ring-cyan-700/45'
+                ? 'bg-[var(--daw-bg-row-active-mix)] ring-1 ring-inset ring-[var(--player-accent-border)]'
+                : 'bg-[var(--player-accent-softer)] hover:bg-[var(--daw-bg-row-active-mix)] ring-1 ring-inset ring-[var(--player-accent-border)]'
             )
-            : (isSelectedRow ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-750');
+            : (isSelectedRow
+              ? 'bg-[var(--daw-bg-row-selected)]'
+              : 'bg-[var(--daw-bg-row-group)] hover:bg-[var(--daw-bg-row-hover)]');
           const groupVolumeValue = getDraggedValue(
             row.nodeId,
             'volume',
@@ -1269,17 +1335,18 @@ function TrackList({
                 if (suppressClickRef.current) return;
                 selectRow(row);
               }}
-              className={`border-b border-gray-700 cursor-pointer ${groupRowClass} ${isActivelyDragging ? 'cursor-grabbing' : ''}`}
+              className={`border-b border-[var(--daw-border-row)] cursor-pointer transition-colors ${groupRowClass} ${isActivelyDragging ? 'cursor-grabbing' : ''}`}
               style={{
                 height: `${row.height}px`,
                 minHeight: `${row.height}px`,
                 maxHeight: `${row.height}px`,
+                borderLeft: `3px solid ${groupPalette.accent}`,
                 ...rowMotionStyle,
               }}
             >
               <div
                 className="h-full flex items-center gap-4 pr-4"
-                style={{ paddingLeft: `${16 + previewDepth * 16}px` }}
+                style={{ paddingLeft: `${13 + previewDepth * 16}px` }}
               >
                 <div
                   data-track-interactive="true"
@@ -1294,14 +1361,14 @@ function TrackList({
                       if (hasDirectParentTypeLock(row)) return;
                       cycleGroupRole(row);
                     }}
-                    className={`w-14 h-14 rounded-lg ${getRoleColor(displayGroupRole)} text-white flex items-center justify-center overflow-hidden transition-none ${hasDirectParentTypeLock(row) || groupLocked ? 'opacity-80 cursor-not-allowed' : ''}`}
+                    className={`w-14 h-14 rounded-xl ${getRoleColor(displayGroupRole)} ${groupPalette.badgeClass} flex items-center justify-center overflow-hidden ${hasDirectParentTypeLock(row) || groupLocked ? 'opacity-75 cursor-not-allowed' : ''}`}
                     title={metadataLocked ? 'Group category locked in this session' : (!canManageGroups ? GROUP_NO_ACCESS_TITLE : 'Click to change type')}
                   >
-                    <GroupIcon key={groupIconKey} size={32} className="shrink-0" />
+                    <GroupIcon key={groupIconKey} size={28} strokeWidth={1.75} className="shrink-0" />
                   </button>
                 </div>
 
-                <div className="flex-1 min-w-0 flex flex-col gap-1">
+                <div data-track-details="true" className="flex-1 min-w-0 flex flex-col gap-1">
                   <div
                     className="flex items-center min-w-0"
                     onClick={(e) => {
@@ -1325,7 +1392,7 @@ function TrackList({
                         data-track-interactive="true"
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
-                        className="flex-1 bg-transparent border-b border-blue-500 px-0 py-0 text-lg font-semibold leading-none focus:outline-none min-w-0 h-[28px]"
+                        className="flex-1 bg-transparent border-b border-[var(--player-accent)] px-0 py-0 text-base font-semibold leading-none text-[var(--player-text-primary)] focus:outline-none min-w-0 h-[28px]"
                       />
 	                    ) : (
 	                      <span
@@ -1334,7 +1401,7 @@ function TrackList({
                           e.stopPropagation();
                           setEditingName(`group:${row.nodeId}`);
                         }}
-                        className="flex-1 text-lg font-semibold truncate min-w-0 h-[28px] flex items-center select-none"
+                        className="flex-1 text-base font-semibold text-[var(--player-text-primary)] truncate min-w-0 h-[28px] flex items-center select-none"
                         title={groupLocked ? (canManageGroups ? row.name : GROUP_NO_ACCESS_TITLE) : 'Double-click to edit'}
                       >
                         {row.name}
@@ -1360,12 +1427,14 @@ function TrackList({
                             e.stopPropagation();
                             onToggleAdvancedGroupFocus(row.nodeId);
                           }}
-                          className={`w-7 h-7 flex items-center justify-center rounded-l-md rounded-r-none border border-gray-600 transition-colors ${
-                            row.muted ? 'bg-red-600 text-white' : 'bg-gray-800 hover:bg-gray-600 text-gray-300'
+                          className={`w-7 h-7 flex items-center justify-center rounded-l-md rounded-r-none border transition-colors ${
+                            row.muted
+                              ? 'border-[var(--daw-mute-active-border)] bg-[var(--daw-mute-active-bg)] text-[var(--daw-mute-active-fg)]'
+                              : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
                           }`}
                           title={advancedMixGroupEnabled ? 'Left click mute group, right click toggle mix slider target' : (row.muted ? 'Unmute group' : 'Mute group')}
                         >
-                          {row.muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                          {row.muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
                         </button>
                         <button
                           onClick={(e) => {
@@ -1379,8 +1448,10 @@ function TrackList({
                             e.stopPropagation();
                             onToggleAdvancedGroupFocus(row.nodeId);
                           }}
-                          className={`w-7 h-7 flex items-center justify-center rounded-r-md rounded-l-none border border-l-0 border-gray-600 transition-colors ${
-                            row.soloed ? 'bg-yellow-600 text-white' : 'bg-gray-800 hover:bg-gray-600 text-gray-300'
+                          className={`w-7 h-7 flex items-center justify-center rounded-r-md rounded-l-none border border-l-0 transition-colors ${
+                            row.soloed
+                              ? 'border-[var(--daw-solo-active-border)] bg-[var(--daw-solo-active-bg)] text-[var(--daw-solo-active-fg)]'
+                              : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
                           } ${canSoloTracks ? '' : 'opacity-60 cursor-not-allowed'}`}
                           title={
                             advancedMixGroupEnabled
@@ -1390,7 +1461,7 @@ function TrackList({
                                 : 'Solo requires permission to edit every track in the project'
                           }
                         >
-                          <Headphones size={16} />
+                          <Headphones size={15} />
                         </button>
                       </div>
 
@@ -1416,16 +1487,16 @@ function TrackList({
                             onPreloadGroupCollapse?.(row.nodeId);
                           }
                         }}
-                        className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-600 transition-colors bg-gray-800 hover:bg-gray-600 text-gray-300"
+                        className="w-7 h-7 flex items-center justify-center rounded-md border border-[var(--player-border-default)] transition-colors bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]"
                         title={groupCollapsed ? 'Expand group' : 'Collapse group'}
                         aria-busy={pendingGroupCollapseId === row.nodeId}
                       >
                         {pendingGroupCollapseId === row.nodeId ? (
-                          <Loader2 size={16} className="animate-spin text-blue-400" />
+                          <Loader2 size={15} className="animate-spin text-[var(--player-accent-text)]" />
                         ) : groupCollapsed ? (
-                          <ChevronRight size={16} />
+                          <ChevronRight size={15} />
                         ) : (
-                          <ChevronDown size={16} />
+                          <ChevronDown size={15} />
                         )}
                       </button>
                     </div>
@@ -1447,6 +1518,7 @@ function TrackList({
                         step="0.1"
                         value={groupVolumeValue}
                         readOnly
+                        style={{ '--daw-vol-pct': `${Math.max(0, Math.min(100, groupVolumeValue))}%` }}
                         onMouseDown={(e) => {
                           if (e.detail > 1) return;
                           beginDrag(
@@ -1465,7 +1537,7 @@ function TrackList({
                       />
                       {dragTooltip?.entityId === row.nodeId && dragTooltip.type === 'volume' && (
                         <div
-                          className="fixed w-16 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
+                          className="player-menu fixed w-16 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center z-50"
                           style={{ left: dragTooltip.x, top: dragTooltip.y, transform: 'translate(-50%, -100%)' }}
                         >
                           {dragTooltip.value <= 0 ? '-∞' : volumeToDb(dragTooltip.value).toFixed(1)}
@@ -1491,7 +1563,7 @@ function TrackList({
                               setEditTooltip(null);
                             }
                           }}
-                          className="fixed w-16 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
+                          className="player-menu fixed w-16 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center focus:outline-none z-50"
                           style={{ left: editTooltip.x, top: editTooltip.y, transform: 'translate(-50%, -100%)' }}
                           autoFocus
                         />
@@ -1503,14 +1575,7 @@ function TrackList({
                         onClick={(e) => e.stopPropagation()}
                         onMouseDown={(e) => e.stopPropagation()}
                       >
-                      <div className="absolute inset-0 overflow-hidden">
-                        <div className="absolute inset-0 pan-ring pointer-events-none" />
-                        <div className="absolute left-1/2 top-1/2 w-6 h-6 rounded-full bg-gray-700 border border-gray-600 -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
-                        <div
-                          className="absolute left-1/2 top-1/2 w-[3px] h-3 bg-gray-200 rounded-full origin-bottom pointer-events-none"
-                          style={{ transform: `translate(-50%, -100%) rotate(${(groupPanValue / 100) * 135}deg)` }}
-                        />
-                      </div>
+                      <PanKnobDial value={groupPanValue} />
                       <input
                         type="range"
                         min="-100"
@@ -1537,7 +1602,7 @@ function TrackList({
                       />
                       {dragTooltip?.entityId === row.nodeId && dragTooltip.type === 'pan' && (
                         <div
-                          className="fixed w-12 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
+                          className="player-menu fixed w-12 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center z-50"
                           style={{ left: dragTooltip.x, top: dragTooltip.y, transform: 'translate(-50%, -100%)' }}
                         >
                           {Math.round(dragTooltip.value)}
@@ -1563,7 +1628,7 @@ function TrackList({
                               setEditTooltip(null);
                             }
                           }}
-                          className="fixed w-12 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
+                          className="player-menu fixed w-12 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center focus:outline-none z-50"
                           style={{ left: editTooltip.x, top: editTooltip.y, transform: 'translate(-50%, -100%)' }}
                           autoFocus
                         />
@@ -1581,6 +1646,7 @@ function TrackList({
         if (!track) return null;
         const pendingTrackState = getPendingIconState(`track:${track.id}`);
         const displayTrackRole = pendingTrackState?.role || trackEffectiveRoleById[track.id] || track.role;
+        const trackPalette = getDawRolePalette(displayTrackRole);
         const isSubTrack = isSubTrackRow(row);
         const thisTrackEditable = trackEditable(track.id);
         const canEditTrackType = !isSubTrack && !hasDirectParentTypeLock(row) && !trackRoleLocked(track.id);
@@ -1606,10 +1672,12 @@ function TrackList({
 	        const rowClass = isHighlightedInAdvancedMix
 	          ? (
 	            isSelectedRow
-	              ? 'bg-cyan-800/70 ring-1 ring-inset ring-cyan-300/50'
-	              : 'bg-cyan-950/45 hover:bg-cyan-900/55 ring-1 ring-inset ring-cyan-700/45'
+	              ? 'bg-[var(--daw-bg-row-active-mix)] ring-1 ring-inset ring-[var(--player-accent-border)]'
+	              : 'bg-[var(--player-accent-softer)] hover:bg-[var(--daw-bg-row-active-mix)] ring-1 ring-inset ring-[var(--player-accent-border)]'
 	          )
-	          : (isSelectedRow ? 'bg-gray-700' : 'bg-gray-800 hover:bg-gray-750');
+	          : (isSelectedRow
+	            ? 'bg-[var(--daw-bg-row-selected)]'
+	            : 'bg-[var(--daw-bg-row)] hover:bg-[var(--daw-bg-row-hover)]');
 
 	        return (
           <div
@@ -1631,17 +1699,18 @@ function TrackList({
               if (suppressClickRef.current) return;
               selectRow(row);
             }}
-	            className={`border-b border-gray-700 cursor-pointer ${rowClass} ${isActivelyDragging ? 'cursor-grabbing' : ''}`}
+	            className={`border-b border-[var(--daw-border-row)] cursor-pointer transition-colors ${rowClass} ${isActivelyDragging ? 'cursor-grabbing' : ''}`}
             style={{
               height: `${trackHeight}px`,
               minHeight: `${trackHeight}px`,
               maxHeight: `${trackHeight}px`,
+              borderLeft: `3px solid ${trackPalette.accent}`,
               ...rowMotionStyle,
             }}
           >
             <div
               className="h-full flex items-center gap-4 pr-4"
-              style={{ paddingLeft: `${16 + previewDepth * 16}px` }}
+              style={{ paddingLeft: `${13 + previewDepth * 16}px` }}
             >
                 <div
                   data-track-interactive="true"
@@ -1660,8 +1729,8 @@ function TrackList({
                     if (!canEditTrackType) return;
                     cycleTrackType(track, row);
                   }}
-                  className={`w-14 h-14 rounded-lg ${getRoleColor(displayTrackRole)} text-white flex items-center justify-center overflow-hidden transition-none ${
-                    (canEditStemIcon || canEditTrackType) ? '' : 'opacity-80 cursor-not-allowed'
+                  className={`w-14 h-14 rounded-xl ${getRoleColor(displayTrackRole)} ${trackPalette.badgeClass} flex items-center justify-center overflow-hidden ${
+                    (canEditStemIcon || canEditTrackType) ? '' : 'opacity-75 cursor-not-allowed'
                   }`}
                   title={
                     metadataLocked
@@ -1673,11 +1742,11 @@ function TrackList({
                           : (isSubTrack ? 'Click to switch recording / file' : 'Click to change type')
                   }
                 >
-                  <TrackIcon key={trackIconKey} size={32} className="shrink-0" />
+                  <TrackIcon key={trackIconKey} size={28} strokeWidth={1.75} className="shrink-0" />
                 </button>
               </div>
 
-              <div className="flex-1 min-w-0 flex flex-col gap-1">
+              <div data-track-details="true" className="flex-1 min-w-0 flex flex-col gap-1">
                 <div
                   className="flex items-center min-w-0"
                   onClick={() => selectRow(row)}
@@ -1698,7 +1767,7 @@ function TrackList({
                       data-track-interactive="true"
                       onMouseDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
-                      className="flex-1 bg-transparent border-b border-blue-500 px-0 py-0 text-lg font-semibold leading-none focus:outline-none min-w-0 h-[28px]"
+                      className="flex-1 bg-transparent border-b border-[var(--player-accent)] px-0 py-0 text-base font-semibold leading-none text-[var(--player-text-primary)] focus:outline-none min-w-0 h-[28px]"
                     />
                   ) : (
                     <span
@@ -1707,7 +1776,7 @@ function TrackList({
                         e.stopPropagation();
                         setEditingName(track.id);
                       }}
-                      className="flex-1 text-lg font-semibold truncate min-w-0 h-[28px] flex items-center select-none"
+                      className="flex-1 text-base font-semibold text-[var(--player-text-primary)] truncate min-w-0 h-[28px] flex items-center select-none"
                       title={trackLocked(track.id) ? (thisTrackEditable ? track.name : trackNoAccessTitle(track.id)) : 'Double-click to edit'}
 	                      >
 	                        {track.name}
@@ -1733,12 +1802,14 @@ function TrackList({
 	                          e.stopPropagation();
 	                          onToggleAdvancedTrackFocus(track.id, ADVANCED_MIX_FOCUS_MODES.HIGHLIGHTED);
 	                        }}
-	                        className={`w-7 h-7 flex items-center justify-center rounded-l-md rounded-r-none border border-gray-600 transition-colors ${
-	                          track.muted ? 'bg-red-600 text-white' : 'bg-gray-800 hover:bg-gray-600 text-gray-300'
+	                        className={`w-7 h-7 flex items-center justify-center rounded-l-md rounded-r-none border transition-colors ${
+	                          track.muted
+	                            ? 'border-[var(--daw-mute-active-border)] bg-[var(--daw-mute-active-bg)] text-[var(--daw-mute-active-fg)]'
+	                            : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
 	                        }`}
 	                        title={advancedMixEnabled ? 'Left click mute, right click toggle mix slider target' : (track.muted ? 'Unmute' : 'Mute')}
 	                      >
-	                        {track.muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+	                        {track.muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
 	                      </button>
 	                      <button
 	                        onClick={(e) => {
@@ -1752,8 +1823,10 @@ function TrackList({
 	                          e.stopPropagation();
 	                          onToggleAdvancedTrackFocus(track.id, ADVANCED_MIX_FOCUS_MODES.HIGHLIGHTED);
 	                        }}
-	                        className={`w-7 h-7 flex items-center justify-center rounded-r-md rounded-l-none border border-l-0 border-gray-600 transition-colors ${
-	                          track.soloed ? 'bg-yellow-600 text-white' : 'bg-gray-800 hover:bg-gray-600 text-gray-300'
+	                        className={`w-7 h-7 flex items-center justify-center rounded-r-md rounded-l-none border border-l-0 transition-colors ${
+	                          track.soloed
+	                            ? 'border-[var(--daw-solo-active-border)] bg-[var(--daw-solo-active-bg)] text-[var(--daw-solo-active-fg)]'
+	                            : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
 	                        } ${canSoloTracks ? '' : 'opacity-60 cursor-not-allowed'}`}
 	                        title={
 	                          advancedMixEnabled
@@ -1763,7 +1836,7 @@ function TrackList({
 	                              : 'Solo requires permission to edit every track in the project'
 	                        }
 	                      >
-                        <Headphones size={16} />
+                        <Headphones size={15} />
                       </button>
                     </div>
                   </div>
@@ -1785,6 +1858,7 @@ function TrackList({
                       step="0.1"
                       value={trackVolumeValue}
                       readOnly
+                      style={{ '--daw-vol-pct': `${Math.max(0, Math.min(100, trackVolumeValue))}%` }}
                       onMouseDown={(e) => {
                         if (e.detail > 1) return;
                         beginDrag(
@@ -1803,7 +1877,7 @@ function TrackList({
                     />
                     {dragTooltip?.entityId === track.id && dragTooltip.type === 'volume' && (
                       <div
-                        className="fixed w-16 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
+                        className="player-menu fixed w-16 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center z-50"
                         style={{ left: dragTooltip.x, top: dragTooltip.y, transform: 'translate(-50%, -100%)' }}
                       >
                         {dragTooltip.value <= 0 ? '-∞' : volumeToDb(dragTooltip.value).toFixed(1)}
@@ -1829,7 +1903,7 @@ function TrackList({
                             setEditTooltip(null);
                           }
                         }}
-                        className="fixed w-16 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
+                        className="player-menu fixed w-16 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center focus:outline-none z-50"
                         style={{ left: editTooltip.x, top: editTooltip.y, transform: 'translate(-50%, -100%)' }}
                         autoFocus
                       />
@@ -1841,14 +1915,7 @@ function TrackList({
                       onClick={(e) => e.stopPropagation()}
                       onMouseDown={(e) => e.stopPropagation()}
                     >
-                    <div className="absolute inset-0 overflow-hidden">
-                      <div className="absolute inset-0 pan-ring pointer-events-none" />
-                      <div className="absolute left-1/2 top-1/2 w-6 h-6 rounded-full bg-gray-700 border border-gray-600 -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
-                      <div
-                        className="absolute left-1/2 top-1/2 w-[3px] h-3 bg-gray-200 rounded-full origin-bottom pointer-events-none"
-                        style={{ transform: `translate(-50%, -100%) rotate(${(trackPanValue / 100) * 135}deg)` }}
-                      />
-                    </div>
+                    <PanKnobDial value={trackPanValue} />
                     <input
                       type="range"
                       min="-100"
@@ -1875,7 +1942,7 @@ function TrackList({
                     />
                     {dragTooltip?.entityId === track.id && dragTooltip.type === 'pan' && (
                       <div
-                        className="fixed w-12 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
+                        className="player-menu fixed w-12 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center z-50"
                         style={{ left: dragTooltip.x, top: dragTooltip.y, transform: 'translate(-50%, -100%)' }}
                       >
                         {Math.round(dragTooltip.value)}
@@ -1901,7 +1968,7 @@ function TrackList({
                             setEditTooltip(null);
                           }
                         }}
-                        className="fixed w-12 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
+                        className="player-menu fixed w-12 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center focus:outline-none z-50"
                         style={{ left: editTooltip.x, top: editTooltip.y, transform: 'translate(-50%, -100%)' }}
                         autoFocus
                       />
@@ -1917,7 +1984,7 @@ function TrackList({
 
       {contextMenu && (
         <div
-          className="fixed z-[120] bg-gray-800 border border-gray-700 rounded-md shadow-lg py-0 inline-flex flex-col items-stretch overflow-hidden"
+          className="player-menu fixed z-[120] min-w-[180px] rounded-xl py-1 inline-flex flex-col items-stretch overflow-hidden"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -1928,7 +1995,7 @@ function TrackList({
             <>
               {trackLocked(contextMenu.track.id) && !metadataLocked ? (
                 <div
-                  className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-500 whitespace-nowrap select-none"
+                  className={menuDisabledClass}
                   title={trackNoAccessTitle(contextMenu.track.id)}
                 >
                   No edit access to this track
@@ -1958,12 +2025,12 @@ function TrackList({
                   ) : null}
 
                   {hasDirectParentTypeLock(contextMenu.row) ? (
-                    <div className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-500 whitespace-nowrap select-none">
+                    <div className={menuDisabledClass}>
                       Change type (inherited)
                     </div>
                   ) : !canChangeTrackRoles ? (
                     <div
-                      className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-500 whitespace-nowrap select-none"
+                      className={menuDisabledClass}
                       title="Changing track type requires project manager access"
                     >
                       Change type (manager only)
@@ -1971,19 +2038,14 @@ function TrackList({
                   ) : (
                     <div className="relative">
                       <div
-                        className={`${menuItemClass} select-none cursor-pointer`}
+                        className={`${menuItemClass} select-none cursor-pointer justify-between ${
+                          (isTypeTriggerHover || isTypeMenuHover) ? 'bg-[var(--player-hover)]' : ''
+                        }`}
                         onMouseEnter={openTypeMenu}
                         onMouseLeave={() => setIsTypeTriggerHover(false)}
-                        style={{
-                          backgroundColor: (isTypeTriggerHover || isTypeMenuHover)
-                            ? '#374151'
-                            : undefined,
-                        }}
                       >
-                        <div className="flex items-center justify-between w-full">
-                          <span>Change type</span>
-                          <ChevronRight size={14} className="text-gray-400 ml-0.5" />
-                        </div>
+                        <span>Change type</span>
+                        <ChevronRight size={14} className="text-[var(--player-text-muted)] ml-2" />
                       </div>
                     </div>
                   )}
@@ -2003,7 +2065,7 @@ function TrackList({
 
 	              {advancedMixEnabled ? (
 	                <>
-	                  <div className="my-0.5 border-t border-gray-700" />
+	                  <div className="my-1 border-t border-[var(--player-border-subtle)]" />
 	                  <button
 	                    className={menuItemClass}
 	                    onClick={() => {
@@ -2019,17 +2081,14 @@ function TrackList({
 	              {!metadataLocked && onSetAutoPanStrategy && isChoirRole(contextMenu.track.role) && (
                 <div className="relative">
                   <div
-                    className={`${menuItemClass} select-none cursor-pointer`}
+                    className={`${menuItemClass} select-none cursor-pointer justify-between ${
+                      (isAutoPanTriggerHover || isAutoPanMenuHover) ? 'bg-[var(--player-hover)]' : ''
+                    }`}
                     onMouseEnter={openAutoPanMenu}
                     onMouseLeave={() => setIsAutoPanTriggerHover(false)}
-                    style={{
-                      backgroundColor: (isAutoPanTriggerHover || isAutoPanMenuHover) ? '#374151' : undefined,
-                    }}
                   >
-                    <div className="flex items-center justify-between w-full">
-                      <span>Auto-pan choir</span>
-                      <ChevronRight size={14} className="text-gray-400 ml-0.5" />
-                    </div>
+                    <span>Auto-pan choir</span>
+                    <ChevronRight size={14} className="text-[var(--player-text-muted)] ml-2" />
                   </div>
                 </div>
               )}
@@ -2038,7 +2097,7 @@ function TrackList({
                 <>
                   {onDeleteTrack && trackEditable(contextMenu.track.id) ? (
                     <button
-                      className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-red-300 hover:bg-gray-700 whitespace-nowrap"
+                      className={menuDangerClass}
                       onClick={() => {
                         onDeleteTrack(contextMenu.track.id);
                         setContextMenu(null);
@@ -2049,7 +2108,7 @@ function TrackList({
                   ) : null}
 
                   {(canAddTrackUnder(contextMenu.row?.parentId) || onCreateSubtrack) ? (
-                    <div className="my-0.5 border-t border-gray-700" />
+                    <div className="my-1 border-t border-[var(--player-border-subtle)]" />
                   ) : null}
 
                   {canAddTrackUnder(contextMenu.row?.parentId) ? (
@@ -2086,7 +2145,7 @@ function TrackList({
             <>
               {groupLocked && !metadataLocked ? (
                 <div
-                  className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-500 whitespace-nowrap select-none"
+                  className={menuDisabledClass}
                   title={GROUP_NO_ACCESS_TITLE}
                 >
                   Group is manager only
@@ -2115,28 +2174,20 @@ function TrackList({
                     </button>
                   ) : null}
                   {hasDirectParentTypeLock(contextMenu.group) ? (
-                    <div className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-gray-500 whitespace-nowrap select-none">
+                    <div className={menuDisabledClass}>
                       Change type (inherited)
                     </div>
                   ) : (
                     <div className="relative">
                       <div
-                        className={`${menuItemClass} select-none cursor-pointer`}
+                        className={`${menuItemClass} select-none cursor-pointer justify-between ${
+                          (isGroupTypeTriggerHover || isGroupTypeMenuHover) ? 'bg-[var(--player-hover)]' : ''
+                        }`}
                         onMouseEnter={openGroupTypeMenu}
                         onMouseLeave={() => setIsGroupTypeTriggerHover(false)}
-                        style={{
-                          backgroundColor: (
-                            isGroupTypeTriggerHover
-                            || isGroupTypeMenuHover
-                          )
-                            ? '#374151'
-                            : undefined,
-                        }}
                       >
-                        <div className="flex items-center justify-between w-full">
-                          <span>Change type</span>
-                          <ChevronRight size={14} className="text-gray-400 ml-0.5" />
-                        </div>
+                        <span>Change type</span>
+                        <ChevronRight size={14} className="text-[var(--player-text-muted)] ml-2" />
                       </div>
                     </div>
                   )}
@@ -2155,7 +2206,7 @@ function TrackList({
               ) : null}
               {advancedMixGroupEnabled ? (
                 <>
-                  <div className="my-0.5 border-t border-gray-700" />
+                  <div className="my-1 border-t border-[var(--player-border-subtle)]" />
                   <button
                     className={menuItemClass}
                     onClick={() => {
@@ -2183,7 +2234,7 @@ function TrackList({
                 <>
                   {onDeleteGroup && canManageGroups ? (
                     <button
-                      className="w-full text-left pl-1 pr-0.5 py-0 text-[16px] text-red-300 hover:bg-gray-700 whitespace-nowrap"
+                      className={menuDangerClass}
                       onClick={() => {
                         onDeleteGroup(contextMenu.group.nodeId);
                         setContextMenu(null);
@@ -2195,7 +2246,7 @@ function TrackList({
 
                   {(canAddTrackUnder(contextMenu.group.parentId) || canAddTrackUnder(contextMenu.group.nodeId)) ? (
                     <>
-                      <div className="my-0.5 border-t border-gray-700" />
+                      <div className="my-1 border-t border-[var(--player-border-subtle)]" />
 
                       {canAddTrackUnder(contextMenu.group.parentId) ? (
                         <button
@@ -2247,7 +2298,7 @@ function TrackList({
 
       {contextMenu && contextMenu.type === 'track' && contextMenu.track && typeMenuOpen && !trackRoleLocked(contextMenu.track.id) && !hasDirectParentTypeLock(contextMenu.row) && (
         <div
-          className="fixed z-[120] bg-gray-800 border border-gray-700 rounded-md shadow-lg py-0 inline-flex flex-col items-stretch overflow-hidden min-w-[120px]"
+          className="player-menu fixed z-[120] rounded-xl py-1 inline-flex flex-col items-stretch overflow-hidden min-w-[152px]"
           style={{ left: typeMenuPos.x, top: typeMenuPos.y }}
           onMouseEnter={() => setIsTypeMenuHover(true)}
           onMouseLeave={() => setIsTypeMenuHover(false)}
@@ -2258,6 +2309,7 @@ function TrackList({
         >
           {trackTypeOptions.map((option) => {
             const isCurrent = getRowTypeValue(contextMenu.row, contextMenu.track) === option.value;
+            const optPalette = getDawRolePalette(option.value);
             return (
               <button
                 key={option.value}
@@ -2267,8 +2319,9 @@ function TrackList({
                   setContextMenu(null);
                 }}
               >
-                <span className="inline-block w-4 text-gray-300">{isCurrent ? '✓' : ''}</span>
-                {option.label}
+                <span className="inline-block w-3.5 text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
+                <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: optPalette.accent }} />
+                <span>{option.label}</span>
               </button>
             );
           })}
@@ -2277,7 +2330,7 @@ function TrackList({
 
       {contextMenu && contextMenu.type === 'group' && contextMenu.group && groupTypeMenuOpen && !groupLocked && !hasDirectParentTypeLock(contextMenu.group) && (
         <div
-          className="fixed z-[120] bg-gray-800 border border-gray-700 rounded-md shadow-lg py-0 inline-flex flex-col items-stretch overflow-hidden min-w-[140px]"
+          className="player-menu fixed z-[120] rounded-xl py-1 inline-flex flex-col items-stretch overflow-hidden min-w-[156px]"
           style={{ left: groupTypeMenuPos.x, top: groupTypeMenuPos.y }}
           onMouseEnter={() => setIsGroupTypeMenuHover(true)}
           onMouseLeave={() => setIsGroupTypeMenuHover(false)}
@@ -2288,6 +2341,7 @@ function TrackList({
         >
           {trackTypeOptions.map((option) => {
             const isCurrent = getRowTypeValue(contextMenu.group) === option.value;
+            const optPalette = getDawRolePalette(option.value);
             return (
               <button
                 key={option.value}
@@ -2297,8 +2351,9 @@ function TrackList({
                   setContextMenu(null);
                 }}
               >
-                <span className="inline-block w-4 text-gray-300">{isCurrent ? '✓' : ''}</span>
-                {option.label}
+                <span className="inline-block w-3.5 text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
+                <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: optPalette.accent }} />
+                <span>{option.label}</span>
               </button>
             );
           })}
@@ -2307,7 +2362,7 @@ function TrackList({
 
       {contextMenu && contextMenu.type === 'track' && contextMenu.track && autoPanMenuOpen && !metadataLocked && onSetAutoPanStrategy && (
         <div
-          className="fixed z-[120] bg-gray-800 border border-gray-700 rounded-md shadow-lg py-0 inline-flex flex-col items-stretch overflow-hidden min-w-[140px]"
+          className="player-menu fixed z-[120] rounded-xl py-1 inline-flex flex-col items-stretch overflow-hidden min-w-[168px]"
           style={{ left: autoPanMenuPos.x, top: autoPanMenuPos.y }}
           onMouseEnter={() => setIsAutoPanMenuHover(true)}
           onMouseLeave={() => setIsAutoPanMenuHover(false)}
@@ -2326,7 +2381,7 @@ function TrackList({
             Inverted Auto Pan: {autoPanInverted ? 'On' : 'Off'}
           </button>
 
-          <div className="my-0.5 border-t border-gray-700" />
+          <div className="my-1 border-t border-[var(--player-border-subtle)]" />
 
           <button
             className={menuItemClass}

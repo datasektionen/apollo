@@ -3,7 +3,9 @@ import { flushSync } from 'react-dom';
 import {
   ArrowLeft,
   AudioLines,
+  ChevronsLeft,
   ChevronsLeftRightEllipsis,
+  ChevronsRight,
   Circle,
   Download,
   FileText,
@@ -21,6 +23,8 @@ import {
   Volume2,
   WifiOff,
 } from 'lucide-react';
+import '../styles/player-theme.css';
+import '../styles/daw-theme.css';
 import useStore from '../store/useStore';
 import { audioManager } from '../lib/audioManager';
 import { recordingManager } from '../lib/recordingManager';
@@ -360,6 +364,7 @@ function Editor({
   const pendingRecordAfterLatencyRef = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState('playback');
+  const [mobileTrackListCompact, setMobileTrackListCompact] = useState(true);
   const [dawView, setDawView] = useDawViewSettings();
   const [masterVolume, setMasterVolume] = useState(() => toFiniteNumber(project?.masterVolume, 100));
   const [masterEditTooltip, setMasterEditTooltip] = useState(null);
@@ -4351,12 +4356,19 @@ function Editor({
   });
 
   if (!timelineReady) {
-    return <div className="h-full w-full bg-gray-950" data-editor-preparing="" />;
+    return (
+      <div
+        className="player-theme daw-theme h-full w-full bg-[var(--daw-bg-canvas)] text-[var(--player-text-primary)]"
+        data-player-theme="dark-gold"
+        data-editor-preparing=""
+      />
+    );
   }
 
   return (
     <div
-      className="h-full flex flex-col"
+      className="player-theme daw-theme h-full flex flex-col bg-[var(--daw-bg-canvas)] text-[var(--player-text-primary)]"
+      data-player-theme="dark-gold"
       onDragOver={(e) => {
         if (isAdvancedMixSession) return;
         if (!isFileDragEvent(e)) return;
@@ -4393,15 +4405,15 @@ function Editor({
       }}
     >
       {/* Header */}
-      <div className="bg-gray-800 border-b border-gray-700 px-4 py-3">
-        <div className="grid grid-cols-[384px_minmax(0,1fr)] items-center">
-          <div className="flex items-center gap-3 min-w-0 pr-4">
+      <div className="bg-[var(--daw-bg-header)] border-b border-[var(--player-border-subtle)] px-3 py-2.5 md:px-4 md:py-2.5">
+        <div className="flex flex-col gap-2 md:grid md:grid-cols-[384px_minmax(0,1fr)] md:gap-0 items-stretch md:items-center">
+          <div className="flex items-center gap-2.5 min-w-0 md:pr-4">
             <button
               onClick={onBackToDashboard}
-              className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+              className="rounded-lg p-1.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors flex-shrink-0"
               title="Back to Dashboard"
             >
-              <ArrowLeft size={20} />
+              <ArrowLeft size={19} />
             </button>
             {!isAdvancedMixSession && !isLocalRecordingSession ? (
               <button
@@ -4410,18 +4422,18 @@ function Editor({
                   setSettingsOpen(true);
                   refreshAudioDevices();
                 }}
-                className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+                className="rounded-lg p-1.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors flex-shrink-0"
                 title="Settings"
               >
                 <Settings size={18} />
               </button>
             ) : null}
-            <h1 className="text-lg font-semibold truncate" title={headerProjectTitle}>
+            <h1 className="text-base md:text-lg font-semibold tracking-tight text-[var(--player-text-primary)] truncate" title={headerProjectTitle}>
               {headerProjectTitle}
             </h1>
             {isLocalRecordingSession ? (
               <span
-                className="rounded border border-emerald-400/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold uppercase text-emerald-100"
+                className="rounded-md border border-[var(--player-success-border)] bg-[var(--player-success-soft)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--player-success-text)]"
                 title={LOCAL_RECORDING_BADGE_TOOLTIP}
               >
                 local
@@ -4432,34 +4444,34 @@ function Editor({
                 <button
                   type="button"
                   onClick={() => setAdvancedDeviationsOpen((open) => !open)}
-                  className="rounded border border-blue-500/50 bg-blue-500/15 px-2 py-0.5 text-xs font-semibold uppercase text-blue-100 hover:bg-blue-500/25"
+                  className="rounded-md border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--player-accent-text)] hover:bg-[var(--player-accent)] hover:text-[var(--player-accent-foreground)] transition-colors"
                   title="Show mix deviations"
                 >
                   mix
                 </button>
                 {advancedDeviationsOpen ? (
-                  <div className="absolute left-0 top-full z-[130] mt-2 w-80 overflow-hidden rounded-lg border border-gray-700 bg-gray-900 shadow-2xl">
-                    <div className="border-b border-gray-800 px-3 py-2">
-                      <div className="text-sm font-semibold text-gray-100">Mix deviations</div>
-                      <div className="text-xs text-gray-500">{advancedDeviationItems.length} change{advancedDeviationItems.length === 1 ? '' : 's'}</div>
+                  <div className="player-menu absolute left-0 top-full z-[130] mt-2 w-80 overflow-hidden rounded-xl">
+                    <div className="border-b border-[var(--player-border-subtle)] px-3.5 py-2.5">
+                      <div className="text-sm font-semibold text-[var(--player-text-primary)]">Mix deviations</div>
+                      <div className="text-xs text-[var(--player-text-muted)]">{advancedDeviationItems.length} change{advancedDeviationItems.length === 1 ? '' : 's'}</div>
                     </div>
                     <div className="max-h-80 overflow-auto py-1">
                       {advancedDeviationItems.length ? advancedDeviationItems.map((item) => (
-                        <div key={item.id} className="flex items-start gap-2 px-3 py-2 hover:bg-gray-800">
+                        <div key={item.id} className="flex items-start gap-2 px-3.5 py-2 hover:bg-[var(--player-hover)]">
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm text-gray-100" title={item.title}>{item.title}</div>
-                            <div className="truncate text-xs text-gray-500" title={item.detail}>{item.detail}</div>
+                            <div className="truncate text-sm text-[var(--player-text-primary)]" title={item.title}>{item.title}</div>
+                            <div className="truncate text-xs text-[var(--player-text-muted)]" title={item.detail}>{item.detail}</div>
                           </div>
                           <button
                             type="button"
                             onClick={() => handleRemoveAdvancedDeviation(item)}
-                            className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
+                            className="rounded-md border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2 py-1 text-xs text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]"
                           >
                             Remove
                           </button>
                         </div>
                       )) : (
-                        <div className="px-3 py-6 text-center text-sm text-gray-500">No deviations.</div>
+                        <div className="px-3 py-6 text-center text-sm text-[var(--player-text-muted)]">No deviations.</div>
                       )}
                     </div>
                   </div>
@@ -4469,42 +4481,42 @@ function Editor({
           </div>
 
           <div className="relative min-w-0">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center justify-between gap-2 md:gap-4 overflow-x-auto scrollbar-hidden">
+              <div className="flex items-center gap-0.5 md:gap-1 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--daw-bg-dock)] p-0.5 md:p-1 flex-shrink-0">
                 <button
                   onClick={handleSkipBackward}
                   disabled={hasNoTracks}
-                  className="p-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed text-white rounded transition-colors"
+                  className="p-1.5 md:p-2 rounded-lg text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
                   title="Skip to previous clip boundary"
                 >
-                  <SkipBack size={18} />
+                  <SkipBack size={17} />
                 </button>
 
                 <button
                   onClick={handleSkipForward}
                   disabled={hasNoTracks}
-                  className="p-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed text-white rounded transition-colors"
+                  className="p-1.5 md:p-2 rounded-lg text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
                   title="Skip to next clip boundary"
                 >
-                  <SkipForward size={18} />
+                  <SkipForward size={17} />
                 </button>
 
                 <button
                   onClick={handleStop}
                   disabled={hasNoTracks}
-                  className="p-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed text-white rounded transition-colors"
+                  className="p-1.5 md:p-2 rounded-lg text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
                   title="Stop"
                 >
-                  <Square size={18} />
+                  <Square size={17} />
                 </button>
 
                 <button
                   onClick={handlePlay}
                   disabled={hasNoTracks}
-                  className="p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded transition-colors"
+                  className="player-play-cta p-1.5 md:p-2 rounded-lg transition-colors"
                   title={isPlaying ? 'Pause' : 'Play'}
                 >
-                  {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                  {isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
                 </button>
 
                 {/* Wrapper carries the tooltip so it still shows while the button is disabled. */}
@@ -4536,44 +4548,52 @@ function Editor({
                     }}
                     disabled={recordButtonDisabled}
                     aria-label={recordBlockReason || (isRecording ? 'Stop recording' : 'Record')}
-                    className={`p-2 rounded transition-colors text-white ${
+                    className={`p-1.5 md:p-2 rounded-lg border transition-colors ${
                       isRecording
-                        ? 'bg-red-600 hover:bg-red-700 animate-pulse'
-                        : 'bg-red-600 hover:bg-red-700'
-                    } disabled:bg-gray-700 disabled:cursor-not-allowed`}
+                        ? 'bg-[var(--daw-record-bg)] hover:bg-[var(--daw-record-hover)] border-[var(--daw-record-border)] text-white shadow-[var(--daw-record-glow)] animate-pulse'
+                        : 'bg-[var(--daw-record-soft)] hover:bg-[var(--daw-record-bg)] border-[var(--daw-record-border)] text-red-400 hover:text-white'
+                    } disabled:bg-[var(--player-bg-elevated)] disabled:border-red-500/20 disabled:text-red-400/45 disabled:shadow-none disabled:cursor-not-allowed`}
                   >
                     {!isRecording && selectedTrackLockedByOther ? (
-                      <Lock size={18} />
+                      <Lock size={15} />
                     ) : (
-                      <Circle size={18} fill={isRecording ? 'currentColor' : 'none'} />
+                      <Circle size={15} fill="currentColor" />
                     )}
                   </button>
                 </span>
 
                 {isHostedSession && showDisconnectedIndicator && !syncConnected && (
-                  <div className="p-1 text-red-500" title="Disconnected from server">
-                    <WifiOff size={18} />
+                  <div className="p-1.5 text-[var(--player-danger)]" title="Disconnected from server">
+                    <WifiOff size={17} />
                   </div>
                 )}
 
                 {isHostedSession && syncError && (
-                  <div className="text-xs text-red-300 max-w-56 truncate" title={syncError}>
+                  <div className="text-xs text-[var(--player-danger-text)] max-w-56 truncate px-1.5" title={syncError}>
                     Sync error: {syncError}
                   </div>
                 )}
               </div>
 
               <div className="flex-shrink-0 flex flex-col items-center">
-                <div className="text-xl font-mono bg-gray-900 px-3 py-1 rounded">
+                <div
+                  className={`text-sm md:text-lg font-mono tabular-nums tracking-tight bg-[var(--daw-bg-lcd)] border px-2 py-1 md:px-3 md:py-1 rounded-lg transition-colors ${
+                    isRecording
+                      ? 'border-[var(--daw-record-border)] text-red-300'
+                      : isPlaying
+                        ? 'border-[var(--player-accent-border)] text-[var(--player-accent-text)]'
+                        : 'border-[var(--player-border-default)] text-[var(--player-text-primary)]'
+                  }`}
+                >
                   {formatTime(currentTimeMs)}
                 </div>
               </div>
 
-              <div className="flex items-center gap-4 flex-shrink-0">
+              <div className="flex items-center gap-2.5 md:gap-3.5 flex-shrink-0">
                 {isAdvancedMixSession ? (
                   <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-400" title="Practice focus">
+                      <span className="text-[var(--player-text-secondary)]" title="Practice focus">
                         <AdvancedFocusIcon size={18} />
                       </span>
                       <div
@@ -4600,23 +4620,23 @@ function Editor({
                         onDoubleClick={() => openAdvancedMixSliderEdit('focus', advancedMixControls.practiceFocusControl, false)}
                         title="Practice focus"
                       >
-                        <div className="absolute left-[13px] right-[13px] top-1/2 -translate-y-1/2 h-[26px] rounded-full bg-gray-800 border border-gray-600 pointer-events-none z-0" />
-                        <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-[26px] w-[26px] rounded-full bg-gray-800 border pointer-events-none z-10 ${
-                          advancedFocusStep === 'omitted' ? 'border-blue-400' : 'border-gray-600'
+                        <div className="absolute left-[13px] right-[13px] top-1/2 -translate-y-1/2 h-[22px] rounded-full bg-[var(--player-bg-elevated)] border border-[var(--player-border-default)] pointer-events-none z-0" />
+                        <div className={`absolute left-0 top-1/2 -translate-y-1/2 h-[22px] w-[22px] rounded-full bg-[var(--player-bg-elevated)] border pointer-events-none z-10 ${
+                          advancedFocusStep === 'omitted' ? 'border-[var(--player-accent)]' : 'border-[var(--player-border-default)]'
                         }`} />
-                        <div className={`absolute right-0 top-1/2 -translate-y-1/2 h-[26px] w-[26px] rounded-full bg-gray-800 border pointer-events-none z-10 ${
-                          advancedFocusStep === 'solo' ? 'border-blue-400' : 'border-gray-600'
+                        <div className={`absolute right-0 top-1/2 -translate-y-1/2 h-[22px] w-[22px] rounded-full bg-[var(--player-bg-elevated)] border pointer-events-none z-10 ${
+                          advancedFocusStep === 'solo' ? 'border-[var(--player-accent)]' : 'border-[var(--player-border-default)]'
                         }`} />
-                        <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none z-20">
+                        <div className="absolute top-0 bottom-0 left-[11px] right-[11px] pointer-events-none z-20">
                           <div
-                            className="absolute top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-gray-600"
+                            className="absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-slider-thumb)] shadow"
                             style={{ left: `${advancedFocusSliderPosition}%` }}
                           />
                         </div>
                         {advancedSliderDragTooltip?.kind === 'focus' ? (
                           <div
-                            className="absolute top-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
-                            style={{ marginTop: '1px' }}
+                            className="player-menu absolute top-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs rounded-md text-center z-50"
+                            style={{ marginTop: '2px' }}
                           >
                             {formatAdvancedMixSliderValue('focus', Number(advancedSliderDragTooltip.value))}
                           </div>
@@ -4639,8 +4659,8 @@ function Editor({
                                 setAdvancedSliderEditTooltip(null);
                               }
                             }}
-                            className="absolute top-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
-                            style={{ marginTop: '1px' }}
+                            className="player-menu absolute top-full left-1/2 -translate-x-1/2 w-14 px-1 py-0.5 text-xs rounded-md text-center focus:outline-none z-50"
+                            style={{ marginTop: '2px' }}
                             autoFocus
                           />
                         ) : null}
@@ -4648,7 +4668,7 @@ function Editor({
                     </div>
 
                     <div className={`flex items-center gap-2 ${advancedPanControlDisabled ? 'opacity-40' : ''}`}>
-                      <span className="text-gray-400" title="Transformed pan range">
+                      <span className="text-[var(--player-text-secondary)]" title="Transformed pan range">
                         <ChevronsLeftRightEllipsis size={18} />
                       </span>
                       <div
@@ -4667,21 +4687,21 @@ function Editor({
                         onDoubleClick={() => openAdvancedMixSliderEdit('pan', advancedMixControls.practicePanRange, advancedPanControlDisabled)}
                         title={advancedPanControlDisabled ? 'Transformed pan range disabled for Omitted/Solo focus' : 'Transformed pan range'}
                       >
-                        <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[26px] rounded-full bg-gray-800 border border-gray-600 overflow-hidden pointer-events-none" />
-                        <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[26px] rounded-full overflow-hidden pointer-events-none">
+                        <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[22px] rounded-full bg-[var(--player-bg-elevated)] border border-[var(--player-border-default)] overflow-hidden pointer-events-none" />
+                        <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[22px] rounded-full overflow-hidden pointer-events-none">
                           <div
-                            className={`absolute left-0 top-0 bottom-0 bg-gray-600 ${advancedSliderDragTooltip?.kind === 'pan' && !advancedPanControlDisabled ? 'opacity-70' : 'opacity-0'}`}
+                            className={`absolute left-0 top-0 bottom-0 bg-[var(--player-accent)] ${advancedSliderDragTooltip?.kind === 'pan' && !advancedPanControlDisabled ? 'opacity-50' : 'opacity-0'}`}
                             style={{ width: `${advancedPanHighlightPixel}px` }}
                           />
                         </div>
-                        <div className="absolute top-0 bottom-0 left-[13px] right-[13px] pointer-events-none">
+                        <div className="absolute top-0 bottom-0 left-[11px] right-[11px] pointer-events-none">
                           <div
-                            className="absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-gray-600 z-20"
-                            style={{ left: `${advancedPanKnobPixel - 12}px` }}
+                            className="absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-[var(--player-slider-thumb)] z-20 shadow"
+                            style={{ left: `${advancedPanKnobPixel - 10}px` }}
                           />
                           {advancedSliderDragTooltip?.kind === 'pan' && !advancedPanControlDisabled ? (
                             <div
-                              className="absolute h-[10px] w-[10px] rounded-full bg-gray-200 z-30 pointer-events-none"
+                              className="absolute h-[10px] w-[10px] rounded-full bg-[var(--player-accent-text)] z-30 pointer-events-none"
                               style={{
                                 left: `${advancedPanFocusAxisPixel}px`,
                                 top: '50%',
@@ -4694,8 +4714,8 @@ function Editor({
                         </div>
                         {advancedSliderDragTooltip?.kind === 'pan' ? (
                           <div
-                            className="absolute top-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
-                            style={{ marginTop: '1px' }}
+                            className="player-menu absolute top-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs tabular-nums rounded-md text-center z-50"
+                            style={{ marginTop: '2px' }}
                           >
                             {formatAdvancedMixSliderValue('pan', Number(advancedSliderDragTooltip.value))}
                           </div>
@@ -4718,8 +4738,8 @@ function Editor({
                                 setAdvancedSliderEditTooltip(null);
                               }
                             }}
-                            className="absolute top-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
-                            style={{ marginTop: '1px' }}
+                            className="player-menu absolute top-full left-1/2 -translate-x-1/2 w-10 px-1 py-0.5 text-xs tabular-nums rounded-md text-center focus:outline-none z-50"
+                            style={{ marginTop: '2px' }}
                             autoFocus
                           />
                         ) : null}
@@ -4728,7 +4748,7 @@ function Editor({
                   </div>
                 ) : null}
                 <div className="flex items-center gap-2">
-                  <Volume2 size={18} className="text-gray-400" />
+                  <Volume2 size={17} className="text-[var(--player-text-secondary)]" />
                   <div className="relative">
                     <input
                       type="range"
@@ -4737,18 +4757,19 @@ function Editor({
                       step="1"
                       value={masterVolume}
                       readOnly
+                      style={{ '--daw-vol-pct': `${Math.max(0, Math.min(100, masterVolume))}%` }}
                       onMouseDown={handleMasterVolumeMouseDown}
                       onDoubleClick={handleMasterVolumeDoubleClick}
                       onContextMenu={handleMasterVolumeContextMenu}
-                      className={`w-28 volume-slider block ${caps.canEditProjectSettings ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                      className={`w-16 md:w-28 volume-slider block ${caps.canEditProjectSettings ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
                       title={caps.canEditProjectSettings
                         ? 'Master Volume (double-click for numeric input)'
                         : 'Master volume is a project setting (project manager access required)'}
                     />
                     {masterDragTooltip !== null && (
                       <div
-                        className="absolute top-full left-1/2 -translate-x-1/2 w-16 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center z-50"
-                        style={{ marginTop: '1px' }}
+                        className="player-menu fixed md:absolute top-full left-1/2 -translate-x-1/2 w-16 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center z-50"
+                        style={{ marginTop: '2px' }}
                       >
                         {masterDragTooltip <= 0 ? '-∞' : volumeToDb(masterDragTooltip).toFixed(1)}
                       </div>
@@ -4769,8 +4790,8 @@ function Editor({
                             setMasterEditTooltip(null);
                           }
                         }}
-                        className="absolute top-full left-1/2 -translate-x-1/2 w-16 px-1 py-0.5 text-xs rounded bg-gray-900 text-gray-200 border border-gray-600 text-center focus:outline-none z-50"
-                        style={{ marginTop: '1px' }}
+                        className="player-menu absolute top-full left-1/2 -translate-x-1/2 w-16 px-1.5 py-0.5 text-xs tabular-nums rounded-md text-center focus:outline-none z-50"
+                        style={{ marginTop: '2px' }}
                         autoFocus
                       />
                     )}
@@ -4782,11 +4803,11 @@ function Editor({
                     {(caps.canCreateTracks || caps.canEditAnyTrack) ? (
                       <button
                         onClick={() => setShowFileImport(true)}
-                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded transition-colors"
+                        className="flex items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)] px-3 py-1.5 text-sm font-medium transition-colors"
                         title={caps.canCreateTracks ? 'Import audio files' : 'Import audio into tracks you can edit'}
                       >
-                        <Download size={16} />
-                        <span className="text-sm">Import</span>
+                        <Download size={15} />
+                        <span>Import</span>
                       </button>
                     ) : null}
 
@@ -4807,10 +4828,10 @@ function Editor({
                           setShowExportDialog(true);
                         }}
                         disabled={hasNoTracks}
-                        className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-3 py-2 rounded transition-colors"
+                        className="flex items-center gap-1.5 rounded-lg border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:bg-[var(--player-accent)] hover:text-[var(--player-accent-foreground)] disabled:opacity-40 disabled:pointer-events-none px-3 py-1.5 text-sm font-semibold transition-colors"
                       >
-                        <Upload size={16} />
-                        <span className="text-sm">Export</span>
+                        <Upload size={15} />
+                        <span>Export</span>
                       </button>
                     ) : null}
                   </>
@@ -4860,6 +4881,7 @@ function Editor({
           showRms={dawView.showRms}
           stereo={dawView.stereo}
           scaleWaveformsByGain={dawView.scaleWaveformsByGain}
+          trackEffectiveRoleById={trackEffectiveRoleById}
           onAddTrack={structuralEditsAllowed && caps.canCreateTracks ? handleAddEmptyTrack : null}
           onToggleGroupCollapse={handleToggleGroupCollapse}
         >
@@ -4872,46 +4894,65 @@ function Editor({
             onToggleGroupCollapse: boundToggleGroup,
             onPreloadGroupCollapse,
             pendingGroupCollapseId,
-          }) => (
+          }) => {
+            const dawGridColsClass = mobileTrackListCompact
+              ? 'grid-cols-[76px_1fr] md:grid-cols-[384px_1fr]'
+              : 'grid-cols-[232px_1fr] md:grid-cols-[384px_1fr]';
+            return (
             <div
-              className="relative grid h-full min-h-0 min-w-0 grid-cols-[384px_1fr] overscroll-none"
+              className={`relative grid h-full min-h-0 min-w-0 ${dawGridColsClass} overscroll-none`}
               style={{
                 gridTemplateRows: lyricsTrackShown ? `${TIMELINE_RULER_HEIGHT}px 44px minmax(0,1fr)` : `${TIMELINE_RULER_HEIGHT}px minmax(0,1fr)`,
                 overscrollBehavior: 'none',
               }}
             >
-              <div className="flex min-w-0 items-stretch border-b border-r border-gray-700 bg-gray-800">{rulerTools}</div>
-              <div className="relative z-50 min-w-0 overflow-hidden">{header}</div>
+              <div className="flex min-w-0 items-stretch border-b border-r border-[var(--daw-border-row)] bg-[var(--daw-bg-ruler-top)]">
+                <div className="min-w-0 flex-1 flex items-stretch">{rulerTools}</div>
+                <button
+                  type="button"
+                  onClick={() => setMobileTrackListCompact((c) => !c)}
+                  className="md:hidden flex items-center justify-center px-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] border-l border-[var(--daw-border-row)]"
+                  title={mobileTrackListCompact ? 'Expand track controls' : 'Compact track rail'}
+                  aria-label={mobileTrackListCompact ? 'Expand track controls' : 'Compact track rail'}
+                >
+                  {mobileTrackListCompact ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
+                </button>
+              </div>
+              <div className="relative z-20 min-w-0 overflow-hidden">{header}</div>
               {lyricsTrackShown ? (
                 <>
                   <div
-                    className="flex h-11 items-center justify-between border-b border-r border-gray-700 bg-gray-850 px-3"
+                    className="flex h-11 items-center justify-between border-b border-r border-[var(--daw-border-row)] bg-[var(--daw-bg-sidebar)] px-2 md:px-3"
                     onContextMenu={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
                       setLyricsTrackContextMenu({ x: event.clientX, y: event.clientY });
                     }}
                   >
-                    <span className="truncate text-xs font-semibold uppercase tracking-wide text-gray-300">Lyrics</span>
-                    <div className="ml-2 flex shrink-0 items-center gap-1">
+                    <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-[var(--player-text-secondary)]">Lyrics</span>
+                    <div className="ml-1 flex shrink-0 items-center gap-1">
                       <button
                         type="button"
-                        className={`rounded p-1.5 ${lyricsSyncActive ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-40`}
+                        className={`rounded-md p-1.5 transition-colors ${
+                          lyricsSyncActive
+                            ? 'bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] border border-[var(--player-accent-border)]'
+                            : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
+                        } disabled:cursor-not-allowed disabled:opacity-40`}
                         onClick={handleToggleLyricsSync}
                         disabled={!caps.canEditLyrics}
                         title="Use synced lyrics"
                         aria-label="Use synced lyrics"
                         aria-pressed={lyricsSyncActive}
                       >
-                        <AudioLines size={16} />
+                        <AudioLines size={15} />
                       </button>
                       <button
                         type="button"
-                        className="rounded p-1.5 text-gray-300 hover:bg-gray-700 hover:text-white"
+                        className="rounded-md p-1.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
                         onClick={() => setShowLyricsDialog(true)}
                         title="Edit lyrics"
                         aria-label="Edit lyrics"
-                      ><FileText size={16} /></button>
+                      ><FileText size={15} /></button>
                     </div>
                   </div>
                   <div className="h-11 min-w-0 overflow-hidden">{lyricsLane}</div>
@@ -4929,14 +4970,14 @@ function Editor({
                       <div
                         role="menu"
                         aria-label="Lyrics track options"
-                        className="fixed z-[120] min-w-[160px] overflow-hidden rounded-md border border-gray-700 bg-gray-800 py-1 shadow-lg"
+                        className="player-menu fixed z-[120] min-w-[168px] overflow-hidden rounded-xl py-1"
                         style={{ left: lyricsTrackContextMenu.x, top: lyricsTrackContextMenu.y }}
                         onMouseDown={(event) => event.stopPropagation()}
                       >
                         <button
                           type="button"
                           role="menuitem"
-                          className="w-full px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-gray-700"
+                          className="player-menu-item w-full px-3.5 py-1.5 text-left text-sm"
                           onClick={() => {
                             setLyricsLaneVisible(false);
                             setLyricsTrackContextMenu(null);
@@ -4948,8 +4989,8 @@ function Editor({
                 </>
               ) : null}
               <div
-                className="pointer-events-auto absolute right-3 z-[60] -translate-y-1/2"
-                style={{ top: `${TIMELINE_RULER_HEIGHT / 2}px` }}
+                className="pointer-events-auto absolute right-3 z-30 max-md:bottom-3 md:top-[var(--daw-ruler-mid)] md:-translate-y-1/2"
+                style={{ '--daw-ruler-mid': `${TIMELINE_RULER_HEIGHT / 2}px` }}
               >{zoomOverlay}</div>
               <div
                 ref={timelineRowsScrollAreaRef}
@@ -4976,9 +5017,9 @@ function Editor({
                   }
                 }}
               >
-                <div className="grid grid-cols-[384px_1fr] min-w-0 min-h-full">
+                <div className={`grid ${dawGridColsClass} min-w-0 min-h-full`}>
                   <div
-                    className="bg-gray-850 border-r border-gray-700 min-h-full"
+                    className={`bg-[var(--daw-bg-sidebar)] border-r border-[var(--daw-border-row)] min-h-full min-w-0 overflow-hidden ${mobileTrackListCompact ? 'daw-tracklist-compact' : ''}`}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       setTrackListContextMenu({
@@ -5033,14 +5074,14 @@ function Editor({
                       onClearEmptyContextMenu={() => setTrackListContextMenu(null)}
                     />
                   </div>
-                  <div className="min-w-0 bg-gray-900 relative overflow-hidden min-h-full">
+                  <div className="min-w-0 bg-[var(--daw-bg-lane)] relative overflow-hidden min-h-full">
                     {tracks}
                     {hasNoTracks && !isAdvancedMixSession && (
                       <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="text-center text-gray-500">
-                          <Download size={48} className="mx-auto mb-4 opacity-50" />
-                          <p className="text-lg mb-2">No tracks yet</p>
-                          <p className="text-sm">
+                        <div className="text-center text-[var(--player-text-muted)] px-4">
+                          <Download size={44} className="mx-auto mb-3 opacity-45" />
+                          <p className="text-base font-medium text-[var(--player-text-secondary)] mb-1">No tracks yet</p>
+                          <p className="text-xs">
                             {caps.canCreateTracks
                               ? 'Click Import to add audio files'
                               : 'You do not have permission to add tracks to this project'}
@@ -5052,7 +5093,8 @@ function Editor({
                 </div>
               </div>
             </div>
-          )}
+            );
+          }}
         </Timeline>
       </div>
 
@@ -5129,26 +5171,26 @@ function Editor({
       />
 
       {settingsOpen && !isAdvancedMixSession && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-lg rounded-lg border border-gray-700 bg-gray-800 shadow-xl">
-            <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-[var(--player-border-strong)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)] overflow-hidden">
+            <div className="flex items-center justify-between border-b border-[var(--player-border-subtle)] px-5 py-3.5">
               <div className="text-sm font-semibold">Settings</div>
               <button
-                className="text-gray-400 hover:text-gray-200"
+                className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
                 onClick={() => setSettingsOpen(false)}
               >
                 ✕
               </button>
             </div>
-            <div className="px-4 py-3">
-              <div className="mb-4 flex items-center gap-2 rounded-lg bg-gray-900 p-1">
+            <div className="px-5 py-4">
+              <div className="mb-4 flex items-center gap-1.5 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-1">
                 <button
                   type="button"
                   onClick={() => setSettingsTab('playback')}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                     settingsTab === 'playback'
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                      ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
+                      : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                   }`}
                 >
                   Playback and Devices
@@ -5156,10 +5198,10 @@ function Editor({
                 <button
                   type="button"
                   onClick={() => setSettingsTab('daw')}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                     settingsTab === 'daw'
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                      ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
+                      : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                   }`}
                 >
                   DAW
@@ -5168,10 +5210,10 @@ function Editor({
                   <button
                     type="button"
                     onClick={() => setSettingsTab('project')}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                       settingsTab === 'project'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                        ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
+                        : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
                     }`}
                   >
                     Project
@@ -5208,9 +5250,9 @@ function Editor({
                 />
               )}
             </div>
-            <div className="border-t border-gray-700 px-4 py-3 flex justify-end">
+            <div className="border-t border-[var(--player-border-subtle)] px-5 py-3 flex justify-end">
               <button
-                className="bg-gray-700 hover:bg-gray-600 text-white rounded px-3 py-2 text-sm"
+                className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)] px-3.5 py-1.5 text-sm font-medium transition-colors"
                 onClick={() => setSettingsOpen(false)}
               >
                 Close

@@ -68,6 +68,64 @@ const TRACK_TYPE_COLOR_CLASSES = {
   [TRACK_ROLE_OTHER]: 'bg-gray-600',
 };
 
+const DAW_ROLE_PALETTES = {
+  [TRACK_ROLE_INSTRUMENT]: {
+    category: TRACK_ROLE_INSTRUMENT,
+    badgeClass: 'daw-role-badge daw-role-instrument',
+    accent: '#c084fc',
+    clipBg: 'rgba(168, 85, 247, 0.14)',
+    clipBorder: 'rgba(168, 85, 247, 0.45)',
+    waveform: 'rgba(192, 132, 252, 0.90)',
+    groupBg: 'rgba(168, 85, 247, 0.16)',
+    groupWaveform: 'rgba(192, 132, 252, 0.78)',
+  },
+  [TRACK_ROLE_LEAD]: {
+    category: TRACK_ROLE_LEAD,
+    badgeClass: 'daw-role-badge daw-role-lead',
+    accent: '#38bdf8',
+    clipBg: 'rgba(56, 189, 248, 0.14)',
+    clipBorder: 'rgba(56, 189, 248, 0.45)',
+    waveform: 'rgba(103, 212, 252, 0.90)',
+    groupBg: 'rgba(56, 189, 248, 0.16)',
+    groupWaveform: 'rgba(103, 212, 252, 0.78)',
+  },
+  [TRACK_ROLE_CHOIR]: {
+    category: TRACK_ROLE_CHOIR,
+    badgeClass: 'daw-role-badge daw-role-choir',
+    accent: '#34d399',
+    clipBg: 'rgba(16, 185, 129, 0.14)',
+    clipBorder: 'rgba(16, 185, 129, 0.45)',
+    waveform: 'rgba(52, 211, 153, 0.88)',
+    groupBg: 'rgba(16, 185, 129, 0.16)',
+    groupWaveform: 'rgba(52, 211, 153, 0.78)',
+  },
+  [TRACK_ROLE_METRONOME]: {
+    category: TRACK_ROLE_METRONOME,
+    badgeClass: 'daw-role-badge daw-role-metronome',
+    accent: '#fb923c',
+    clipBg: 'rgba(249, 115, 22, 0.14)',
+    clipBorder: 'rgba(249, 115, 22, 0.45)',
+    waveform: 'rgba(251, 146, 60, 0.90)',
+    groupBg: 'rgba(249, 115, 22, 0.16)',
+    groupWaveform: 'rgba(251, 146, 60, 0.78)',
+  },
+  [TRACK_ROLE_OTHER]: {
+    category: TRACK_ROLE_OTHER,
+    badgeClass: 'daw-role-badge daw-role-other',
+    accent: '#a1a1aa',
+    clipBg: 'rgba(161, 161, 170, 0.12)',
+    clipBorder: 'rgba(161, 161, 170, 0.36)',
+    waveform: 'rgba(212, 212, 216, 0.84)',
+    groupBg: 'rgba(161, 161, 170, 0.14)',
+    groupWaveform: 'rgba(212, 212, 216, 0.72)',
+  },
+};
+
+export function getDawRolePalette(role) {
+  const category = getTrackTypeCategory(role);
+  return DAW_ROLE_PALETTES[category] || DAW_ROLE_PALETTES[TRACK_ROLE_OTHER];
+}
+
 export function isChoirPartRole(role) {
   return typeof role === 'string' && role.startsWith('choir-part-');
 }

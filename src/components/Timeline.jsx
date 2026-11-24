@@ -33,6 +33,7 @@ import { isPrimaryModifierPressed } from '../utils/keyboard';
 import { reportUserError } from '../utils/errorReporter';
 import { createId } from '../utils/id';
 import { isClipMediaMissing } from '../utils/mediaErrors';
+import { getDawRolePalette } from '../utils/trackRoles';
 import {
   calculateLyricStartMovePreview,
   getLyricLineEndMs,
@@ -48,9 +49,13 @@ const MIN_VISIBLE_DURATION_MS = 8000; // Minimum duration to show when zoomed ou
 const MIN_CLIP_DURATION_MS = 100;
 const MIN_CLIP_GAIN_DB = -24;
 const MAX_CLIP_GAIN_DB = 24;
-const CLIP_BACKGROUND_COLOR = 'rgba(79, 142, 247, 0.3)';
-const CLIP_WAVEFORM_COLOR = 'rgba(79, 142, 247, 0.8)';
-const MISSING_CLIP_BACKGROUND_COLOR = 'rgba(220, 38, 38, 0.55)';
+const CLIP_BACKGROUND_COLOR = 'rgba(161, 161, 170, 0.12)';
+const CLIP_WAVEFORM_COLOR = 'rgba(212, 212, 216, 0.84)';
+const MUTED_CLIP_BACKGROUND_COLOR = 'rgba(161, 161, 170, 0.07)';
+const MUTED_CLIP_BORDER_COLOR = 'rgba(161, 161, 170, 0.22)';
+const MUTED_CLIP_WAVEFORM_COLOR = 'rgba(161, 161, 170, 0.42)';
+const MISSING_CLIP_BACKGROUND_COLOR = 'rgba(220, 38, 38, 0.26)';
+const MISSING_CLIP_BORDER_COLOR = 'rgba(248, 113, 113, 0.65)';
 const MISSING_CLIP_WAVEFORM_COLOR = 'rgba(248, 113, 113, 0.9)';
 
 const REMOTE_CLIP_ANIMATION_MS = 800;
@@ -107,6 +112,7 @@ function Timeline({
   showRms = false,
   stereo = false,
   scaleWaveformsByGain = true,
+  trackEffectiveRoleById = null,
   onAddTrack = null,
   onToggleGroupCollapse = null,
   children,
@@ -3045,7 +3051,7 @@ function Timeline({
 
   const lyricsLane = showLyricsLane ? (
     <div
-      className="relative h-11 w-full overflow-hidden border-b border-gray-700 bg-gray-900"
+      className="relative h-11 w-full overflow-hidden border-b border-[var(--daw-border-row)] bg-[var(--daw-bg-lyrics-lane)]"
       aria-label="Lyrics timeline lane"
       onDoubleClick={(event) => {
         if (!event.shiftKey || !canEditLyrics) return;
@@ -3057,7 +3063,7 @@ function Timeline({
         className="absolute inset-y-0"
         style={{ left: `${originPx - scrollLeft}px`, width: `${segmentWidthPx}px` }}
       >
-        <div className="absolute inset-0 bg-gray-800/40" />
+        <div className="absolute inset-0 bg-white/[0.02]" />
         {(() => {
           const lyricLines = project.lyrics?.lines || [];
           const placedLines = getPlacedLyricLines(lyricLines);
@@ -3087,7 +3093,7 @@ function Timeline({
                   <div
                     key={line.id}
                     data-lyric-line="true"
-                    className={`absolute top-[5px] box-border h-[34px] overflow-hidden rounded border border-indigo-400 bg-indigo-900/80 text-xs shadow-sm ${selected ? 'ring-1 ring-white/80' : ''} ${canEditLyrics ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
+                    className={`absolute top-[5px] box-border h-[34px] overflow-hidden rounded-md border border-[var(--daw-lyric-clip-border)] bg-[var(--daw-lyric-clip-bg)] text-xs text-[var(--daw-lyric-clip-fg)] shadow-sm ${selected ? 'ring-1 ring-[var(--player-accent-hover)]' : ''} ${canEditLyrics ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
                     style={{ left: `${leftPx}px`, width: `${widthPx}px`, visibility: widthPx > 0 ? undefined : 'hidden' }}
                     title={line.text || '(empty lyric line)'}
                     onPointerDown={(event) => beginLyricDrag(event, line)}
@@ -3101,7 +3107,7 @@ function Timeline({
                           type="text"
                           value={editingLyricText}
                           aria-label={`Lyrics for ${line.text || 'lyric line'}`}
-                          className="h-full w-full min-w-0 bg-transparent text-xs text-white outline-none"
+                          className="h-full w-full min-w-0 bg-transparent text-xs text-[var(--player-text-primary)] outline-none"
                           onPointerDown={(event) => event.stopPropagation()}
                           onDoubleClick={(event) => event.stopPropagation()}
                           onChange={(event) => setEditingLyricText(event.target.value)}
@@ -3144,7 +3150,7 @@ function Timeline({
                 return (
                   <div
                     key="lyrics-placement-preview"
-                    className="absolute top-[5px] box-border h-[34px] overflow-hidden rounded border border-dashed border-indigo-200 bg-indigo-950 text-xs text-indigo-100"
+                    className="absolute top-[5px] box-border h-[34px] overflow-hidden rounded-md border border-dashed border-[var(--player-accent-border)] bg-[var(--player-accent-softer)] text-xs text-[var(--player-accent-text)]"
                     style={{ left: segmentRange(pendingStartMs * pixelsPerMs, (endMs - pendingStartMs) * pixelsPerMs).left,
                       width: segmentRange(pendingStartMs * pixelsPerMs, (endMs - pendingStartMs) * pixelsPerMs).width }}
                     title={'press "P" to place this line at playhead'}
@@ -3168,8 +3174,11 @@ function Timeline({
         <div
           ref={lyricsPlayheadRef}
           data-playhead="lyrics"
-          className="pointer-events-none absolute top-0 z-20 h-full w-px bg-gray-200"
-          style={{ left: shownPlayheadLeft }}
+          className="pointer-events-none absolute top-0 z-20 h-full w-px"
+          style={{
+            left: shownPlayheadLeft,
+            backgroundColor: isRecording ? 'var(--daw-playhead-recording)' : 'var(--daw-playhead)',
+          }}
         />
     </div>
   ) : null;
@@ -3200,13 +3209,13 @@ function Timeline({
   const loopBand = loopRange ? loopBandStyle(loopRange.startMs, loopRange.endMs) : null;
 
   const rulerTools = (
-    <div className="flex h-full w-full items-center justify-between px-1.5">
+    <div className="flex h-full w-full items-center justify-between px-1 md:px-2">
       <button
         type="button"
         aria-label="Add track"
         title="Add track"
         disabled={!onAddTrack}
-        className="flex h-6 w-6 items-center justify-center rounded text-gray-200 hover:bg-gray-700 disabled:invisible"
+        className="flex h-5 w-5 md:h-6 md:w-6 items-center justify-center rounded-md text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:invisible transition-colors"
         onClick={() => onAddTrack?.()}
       >
         <Plus size={16} strokeWidth={2.25} />
@@ -3216,7 +3225,11 @@ function Timeline({
         aria-label="Follow playhead"
         title="Follow playhead"
         aria-pressed={followEnabled}
-        className={`flex h-6 w-6 items-center justify-center rounded ${followEnabled ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+        className={`flex h-5 w-5 md:h-6 md:w-6 items-center justify-center rounded-md border transition-colors ${
+          followEnabled
+            ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+            : 'border-transparent text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
+        }`}
         onClick={() => setFollowEnabled((enabled) => {
           followEnabledRef.current = !enabled;
           return !enabled;
@@ -3233,7 +3246,7 @@ function Timeline({
   const header = (
     <div
       ref={rulerViewportRef}
-      className="relative w-full min-w-0 overflow-hidden bg-gray-800 overscroll-none"
+      className="relative w-full min-w-0 overflow-hidden bg-[var(--daw-bg-ruler-top)] border-b border-[var(--daw-border-row)] overscroll-none"
       style={{ height: TIMELINE_RULER_HEIGHT, overscrollBehavior: 'none' }}
     >
       <div
@@ -3243,25 +3256,30 @@ function Timeline({
       >
         <div style={{ width: `${segmentWidthPx}px`, height: 1 }} />
       </div>
-      <div className="pointer-events-none absolute inset-x-0 top-0 bg-gray-800" style={{ height: RULER_LABEL_HEIGHT }} />
+      <div className="pointer-events-none absolute inset-x-0 top-0 bg-[var(--daw-bg-ruler-top)]" style={{ height: RULER_LABEL_HEIGHT }} />
       <div
-        className="pointer-events-none absolute inset-x-0 bg-gray-900/80"
+        className="pointer-events-none absolute inset-x-0 bg-[var(--daw-bg-ruler-seek)] border-t border-white/[0.04]"
         style={{ top: RULER_LABEL_HEIGHT, height: RULER_SEEK_HEIGHT }}
       />
       {loopBand ? (
         <div
-          className={`pointer-events-none absolute top-0 ${loopRange.enabled ? 'bg-yellow-600' : 'bg-[#121a28]'}`}
-          style={{ ...loopBand, height: RULER_LABEL_HEIGHT }}
+          className="pointer-events-none absolute top-0"
+          style={{
+            ...loopBand,
+            height: RULER_LABEL_HEIGHT,
+            backgroundColor: loopRange.enabled ? 'var(--daw-loop-active)' : 'var(--daw-loop-inactive)',
+            borderTop: loopRange.enabled ? '2px solid var(--daw-loop-active-edge)' : '2px solid var(--player-border-default)',
+          }}
         />
       ) : null}
       {rulerTicks.map((timeMs) => (
         <div
           key={timeMs}
           data-ruler-tick={timeMs}
-          className="pointer-events-none absolute top-0 z-[1] w-px bg-gray-500"
+          className="pointer-events-none absolute top-0 z-[1] w-px bg-[var(--daw-ruler-tick-major)]"
           style={{ left: `${viewportX(timeMs)}px`, height: RULER_LABEL_HEIGHT + 14 }}
         >
-          <span className="absolute left-1 top-2 select-none whitespace-nowrap text-[11px] leading-none text-gray-200" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.9)' }}>
+          <span className="absolute left-1.5 top-2 select-none whitespace-nowrap text-[11px] font-medium tabular-nums leading-none text-[var(--daw-ruler-text)]" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.9)' }}>
             {formatRulerLabel(timeMs, ruler.majorMs, ruler.unit, sampleRate)}
           </span>
         </div>
@@ -3271,12 +3289,12 @@ function Timeline({
           <div
             key={timeMs}
             data-ruler-fraction={timeMs}
-            className="pointer-events-none absolute z-[1] w-px bg-gray-500"
+            className="pointer-events-none absolute z-[1] w-px bg-[var(--daw-ruler-tick-minor)]"
             style={{
               left: `${viewportX(timeMs)}px`,
               top: RULER_LABEL_HEIGHT,
               height: onRulerStep(timeMs, ruler.minorMs) ? 8 : 4,
-              opacity: 0.7,
+              opacity: 0.75,
             }}
           />
         )
@@ -3299,18 +3317,21 @@ function Timeline({
             width="15"
             height="16"
             viewBox="0 0 15 16"
-            style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))' }}
+            style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.75))' }}
           >
             <polygon
               points="0.5,0.5 14.5,0.5 14.5,8.5 7.5,15.5 0.5,8.5"
-              fill="#e5e7eb"
-              stroke="#374151"
+              fill={isRecording ? '#ef4444' : '#d9b76d'}
+              stroke="#0a0a0c"
               strokeWidth="1"
               strokeLinejoin="round"
             />
           </svg>
         </div>
-        <div className="h-full w-px bg-gray-200" />
+        <div
+          className="h-full w-px"
+          style={{ backgroundColor: isRecording ? 'var(--daw-playhead-recording)' : 'var(--daw-playhead)' }}
+        />
       </div>
       <div
         data-ruler-labels
@@ -3365,7 +3386,7 @@ function Timeline({
   const tracks = (
     <div
       ref={timelineRef}
-      className={`${sharedVerticalScroll ? 'relative' : 'flex-1 overflow-hidden relative'} h-full bg-gray-900 w-full min-w-0`}
+      className={`${sharedVerticalScroll ? 'relative' : 'flex-1 overflow-hidden relative'} h-full bg-[var(--daw-bg-lane)] w-full min-w-0`}
       onMouseDown={handleTimelineMouseDown}
       onDragStart={handleNativeDragStart}
       onContextMenu={handleContextMenu}
@@ -3394,7 +3415,7 @@ function Timeline({
                 const selectionRect = getSelectionRect(timelineSelectionState);
                 return (
                   <div
-                    className="absolute pointer-events-none z-40 border border-blue-400 bg-blue-500/20"
+                    className="absolute pointer-events-none z-40 border border-[var(--daw-marquee-border)] bg-[var(--daw-marquee-bg)] rounded-sm"
                     style={{
                       left: segmentRange(selectionRect.left, selectionRect.width).left,
                       top: `${selectionRect.top}px`,
@@ -3417,12 +3438,13 @@ function Timeline({
                 const returnNear = (left, width) => intersectsViewport(left, width, returnScrollLeft, containerWidth, containerWidth);
                 if (row.kind === 'group') {
                   const groupPreview = groupTimelinePreviewByNodeId.get(row.nodeId);
+                  const groupPalette = getDawRolePalette(row.role);
                   const rowPadding = 8;
                   const rowInternalHeight = Math.max(0, row.height - (rowPadding * 2));
                   return (
                     <div
                       key={row.nodeId}
-                      className="border-b border-gray-700 relative bg-gray-900/80 overflow-hidden"
+                      className="border-b border-[var(--daw-border-row)] relative bg-[var(--daw-bg-lane-group)] overflow-hidden"
                       onClick={(e) => {
                         e.stopPropagation();
                         if (timelineSelectionSuppressClickRef.current) return;
@@ -3451,7 +3473,8 @@ function Timeline({
                               top: `${rowPadding}px`,
                               width: `${widthPx}px`,
                               height: `${rowInternalHeight}px`,
-                              backgroundColor: 'rgba(79, 142, 247, 0.18)',
+                              backgroundColor: groupPalette.groupBg,
+                              border: `1px solid ${groupPalette.clipBorder}`,
                             }}
                           />
                         );
@@ -3464,7 +3487,8 @@ function Timeline({
                             viewportLeftPx={scrollLeft - originPx} viewportWidthPx={containerWidth} height={rowInternalHeight}
                             returnViewportLeftPx={startViewportLeftPx} scheduleTier={rowOnScreen ? 0 : 2}
                             globalPeakAmplitude={globalPeakAmplitude} displayMode={displayMode}
-                            showRms={showRms} stereo={stereo} missingMediaBlobIds={missingMediaBlobIds} />
+                            showRms={showRms} stereo={stereo} missingMediaBlobIds={missingMediaBlobIds}
+                            activityColor={groupPalette.groupWaveform} />
                         </div>
                       )}
 
@@ -3480,11 +3504,13 @@ function Timeline({
                 const trackInactive = Boolean(
                   !trackState?.audible || (trackClips.length > 0 && !hasAnyAudibleClip)
                 );
+                const trackRole = (trackEffectiveRoleById && trackEffectiveRoleById[track.id]) || track.role;
+                const rolePalette = getDawRolePalette(trackRole);
 
                 return (
                   <div
                     key={track.id}
-                    className={`border-b border-gray-700 relative ${trackInactive ? 'bg-gray-850' : ''}`}
+                    className={`border-b border-[var(--daw-border-row)] relative ${trackInactive ? 'bg-[var(--daw-bg-lane-inactive)]' : ''}`}
                     style={{
                       height: `${trackHeight}px`,
                       top: `${trackY}px`,
@@ -3510,6 +3536,22 @@ function Timeline({
                       const drawCropStartMs = clip.cropStartMs + shell.skipped / drawScale;
                       const audioBuffer = audioManager.mediaCache.get(clip.blobId);
                       const missingMedia = isClipMediaMissing(clip, missingMediaBlobIds, audioManager.mediaCache);
+                      const clipAttenuated = trackInactive || Boolean(clip.muted);
+                      const clipBgColor = missingMedia
+                        ? MISSING_CLIP_BACKGROUND_COLOR
+                        : clipAttenuated
+                          ? MUTED_CLIP_BACKGROUND_COLOR
+                          : rolePalette.clipBg;
+                      const clipBorderColor = missingMedia
+                        ? MISSING_CLIP_BORDER_COLOR
+                        : clipAttenuated
+                          ? MUTED_CLIP_BORDER_COLOR
+                          : rolePalette.clipBorder;
+                      const clipWaveformColor = missingMedia
+                        ? MISSING_CLIP_WAVEFORM_COLOR
+                        : clipAttenuated
+                          ? MUTED_CLIP_WAVEFORM_COLOR
+                          : rolePalette.waveform;
                       const clipPadding = 8;
                       const clipInternalHeight = trackHeight - (clipPadding * 2);
                       const labelPadding = 8;
@@ -3546,10 +3588,10 @@ function Timeline({
                               ? 'Missing media — click to reload'
                               : (!advancedMixLocked && !isTrackEditable(track.id) ? trackAccessTitle(track.id) : undefined)
                           }
-                          className={`absolute rounded overflow-clip ${
+                          className={`absolute rounded-md overflow-clip transition-shadow ${
                             selectedClipIds.includes(clip.id)
-                              ? (missingMedia ? 'ring-2 ring-red-500' : 'ring-2 ring-blue-500')
-                              : (missingMedia ? 'hover:ring-2 hover:ring-red-400' : 'hover:ring-2 hover:ring-gray-500')
+                              ? (missingMedia ? 'ring-2 ring-[var(--player-danger)]' : 'ring-2 ring-[var(--player-accent)]')
+                              : (missingMedia ? 'hover:ring-1 hover:ring-[var(--player-danger)]' : 'hover:ring-1 hover:ring-white/30')
                           }`}
                           style={{
                             display: shell.width > 0 ? undefined : 'none',
@@ -3557,7 +3599,11 @@ function Timeline({
                             top: `${clipPadding}px`,
                             width: `${shell.width}px`,
                             height: `${clipInternalHeight}px`,
-                            backgroundColor: missingMedia ? MISSING_CLIP_BACKGROUND_COLOR : CLIP_BACKGROUND_COLOR,
+                            backgroundColor: clipBgColor,
+                            border: `1px solid ${clipBorderColor}`,
+                            boxShadow: clipAttenuated || missingMedia
+                              ? undefined
+                              : `inset 0 2px 0 ${rolePalette.accent}`,
                           }}
                           onClick={(e) => handleClipClick(e, clip, track.id)}
                           onMouseDown={(e) => handleClipMouseDown(e, clip, track)}
@@ -3595,7 +3641,7 @@ function Timeline({
                               cropEndMs={drawCropStartMs + shell.width / drawScale}
                               sourceDurationMs={clip.sourceDurationMs}
                               height={clipInternalHeight}
-                              color={missingMedia ? MISSING_CLIP_WAVEFORM_COLOR : CLIP_WAVEFORM_COLOR}
+                              color={clipWaveformColor}
                               globalPeakAmplitude={globalPeakAmplitude}
                             />
                           )}
@@ -3613,7 +3659,7 @@ function Timeline({
                             <div className="absolute top-1 left-0 right-0 text-xs font-medium pointer-events-none"
                               style={{ paddingLeft: labelPadding, paddingRight: labelPadding }}>
                               <span
-                                className="sticky text-yellow-400 whitespace-nowrap overflow-hidden text-ellipsis inline-flex items-center max-w-full"
+                                className="sticky text-[var(--player-accent-text)] whitespace-nowrap overflow-hidden text-ellipsis inline-flex items-center max-w-full drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)]"
                                 style={{ left: labelPadding }}
                               >
                                 {clip.muted ? <VolumeX size={12} /> : Math.abs(clip.gainDb) >= 0.1 ? gainLabelText : null}
@@ -3631,7 +3677,7 @@ function Timeline({
                                 zIndex: 10,
                               }}
                             >
-                              <div className={`absolute left-0 top-0 bottom-0 w-1 ${missingMedia ? 'bg-red-400' : 'bg-blue-400'} opacity-0 group-hover:opacity-70 transition-opacity`}></div>
+                              <div className={`absolute left-0 top-0 bottom-0 w-1 ${missingMedia ? 'bg-[var(--player-danger)]' : 'bg-[var(--player-accent-hover)]'} opacity-0 group-hover:opacity-85 transition-opacity`}></div>
                             </div>
                             <div
                               className="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize group"
@@ -3641,7 +3687,7 @@ function Timeline({
                                 zIndex: 10,
                               }}
                             >
-                              <div className={`absolute right-0 top-0 bottom-0 w-1 ${missingMedia ? 'bg-red-400' : 'bg-blue-400'} opacity-0 group-hover:opacity-70 transition-opacity`}></div>
+                              <div className={`absolute right-0 top-0 bottom-0 w-1 ${missingMedia ? 'bg-[var(--player-danger)]' : 'bg-[var(--player-accent-hover)]'} opacity-0 group-hover:opacity-85 transition-opacity`}></div>
                             </div>
                           </>
                           )}
@@ -3663,14 +3709,14 @@ function Timeline({
                       return (
                         <div
                           key="recording-clip"
-                          className="absolute rounded overflow-hidden pointer-events-none"
+                          className="absolute rounded-md overflow-hidden pointer-events-none"
                           data-recording-overlay="true"
                           style={{
                             left: `${recordingRange.left}px`,
                             top: `${clipPadding}px`,
                             width: `${recordingRange.width}px`,
                             height: `${clipInternalHeight}px`,
-                            backgroundColor: 'rgba(239, 68, 68, 0.3)',
+                            backgroundColor: 'rgba(220, 38, 38, 0.28)',
                             boxShadow: 'inset 0 0 0 2px rgb(239, 68, 68)',
                         }}
                       >
@@ -3693,7 +3739,7 @@ function Timeline({
                               />
                             </div>
                           )}
-                          <div className="absolute top-1 left-2 text-xs text-red-500 font-bold pointer-events-none flex items-center gap-1">
+                          <div className="absolute top-1 left-2 text-xs text-red-400 font-bold pointer-events-none flex items-center gap-1">
                             <span className="inline-block w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                             REC {recordingSegments.length > 1 && `(${recordingSegments.length})`}
                           </div>
@@ -3709,8 +3755,11 @@ function Timeline({
         <div
           ref={tracksPlayheadRef}
           data-playhead="tracks"
-          className="absolute top-0 bottom-0 w-px bg-gray-200"
-          style={{ left: shownPlayheadLeft }}
+          className="absolute top-0 bottom-0 w-px"
+          style={{
+            left: shownPlayheadLeft,
+            backgroundColor: isRecording ? 'var(--daw-playhead-recording)' : 'var(--daw-playhead)',
+          }}
         />
       </div>
     </div>
@@ -3731,10 +3780,10 @@ function Timeline({
 
   return (
     <div
-      className={`${sharedVerticalScroll ? '' : 'flex-1'} flex flex-col bg-gray-900 ${sharedVerticalScroll ? '' : 'overflow-hidden'} relative overscroll-none`}
+      className={`${sharedVerticalScroll ? '' : 'flex-1'} flex flex-col bg-[var(--daw-bg-lane)] ${sharedVerticalScroll ? '' : 'overflow-hidden'} relative overscroll-none`}
       style={{ minWidth: 0, overscrollBehavior: 'none' }}
     >
-      <div className="absolute right-3 z-50 -translate-y-1/2" style={{ top: `${TIMELINE_RULER_HEIGHT / 2}px` }}>{zoomOverlay}</div>
+      <div className="absolute right-3 z-30 -translate-y-1/2" style={{ top: `${TIMELINE_RULER_HEIGHT / 2}px` }}>{zoomOverlay}</div>
       {header}
       {lyricsLane}
       {tracks}

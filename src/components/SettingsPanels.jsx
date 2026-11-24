@@ -71,8 +71,8 @@ function RecordingDelaySection({
   return (
     <div className="space-y-2">
       <div>
-        <div className="text-xs font-medium text-gray-300">Recording offset</div>
-        <p className="mt-1 text-xs text-gray-400">
+        <div className="text-xs font-medium text-[var(--player-text-secondary)]">Recording offset</div>
+        <p className="mt-1 text-xs text-[var(--player-text-muted)]">
           Milliseconds trimmed from each take so it lines up with the project.
         </p>
       </div>
@@ -85,7 +85,7 @@ function RecordingDelaySection({
           autoComplete="off"
           aria-label="Recording offset (ms)"
           disabled={measuringRecordingDelay}
-          className="w-20 rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-sm focus:outline-none disabled:cursor-not-allowed disabled:text-gray-500"
+          className="w-20 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-2.5 py-1.5 text-sm font-mono text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none disabled:cursor-not-allowed disabled:text-[var(--player-text-disabled)]"
           value={shownOffset}
           onFocus={() => setDraft(formatOffsetMs(storedOffset))}
           onChange={(event) => {
@@ -95,11 +95,11 @@ function RecordingDelaySection({
           }}
           onBlur={() => setDraft(null)}
         />
-        <span className="text-xs text-gray-500">ms</span>
+        <span className="text-xs text-[var(--player-text-muted)]">ms</span>
         {canMeasure ? (
           <button
             type="button"
-            className="ml-auto rounded bg-gray-700 px-2.5 py-1.5 text-xs text-white hover:bg-gray-600 disabled:cursor-wait disabled:opacity-60"
+            className="ml-auto rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2.5 py-1.5 text-xs font-medium text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] disabled:cursor-wait disabled:opacity-60 transition-colors"
             onClick={() => onMeasureRecordingDelay()}
             disabled={measuringRecordingDelay}
             aria-busy={measuringRecordingDelay}
@@ -110,10 +110,10 @@ function RecordingDelaySection({
       </div>
 
       {recordingDelayError ? (
-        <p className="text-xs text-amber-200" role="alert">{recordingDelayError}</p>
+        <p className="text-xs text-[var(--player-warning-text)]" role="alert">{recordingDelayError}</p>
       ) : null}
       {warnings.length > 0 ? (
-        <ul className="space-y-1 text-xs text-amber-200">
+        <ul className="space-y-1 text-xs text-[var(--player-warning-text)]">
           {warnings.map((warning) => (
             <li key={warning}>{warning}</li>
           ))}
@@ -130,18 +130,18 @@ function SettingInfoTooltip({ title, description, tuning }) {
         tabIndex={0}
         role="button"
         aria-label={`${title} info`}
-        className="text-gray-400 hover:text-blue-400 transition-colors p-0.5 rounded cursor-help focus:outline-none focus:text-blue-400"
+        className="text-[var(--player-text-muted)] hover:text-[var(--player-accent-text)] transition-colors p-0.5 rounded cursor-help focus:outline-none focus:text-[var(--player-accent-text)]"
       >
         <Info size={14} className="shrink-0" />
       </span>
       <div
         role="tooltip"
-        className="pointer-events-none invisible group-hover:visible group-focus-within:visible opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150 absolute left-full ml-2 top-1/2 -translate-y-1/2 z-50 w-72 rounded-lg border border-gray-700 bg-gray-950/95 backdrop-blur-md p-3 text-xs shadow-2xl text-left"
+        className="player-menu pointer-events-none invisible group-hover:visible group-focus-within:visible opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150 absolute left-full ml-2 top-1/2 -translate-y-1/2 z-50 w-72 rounded-xl p-3 text-xs text-left"
       >
-        <div className="font-semibold text-blue-400 mb-1">{title}</div>
-        <p className="text-gray-300 leading-relaxed mb-2">{description}</p>
-        <div className="text-[11px] text-gray-400 border-t border-gray-800 pt-1.5 leading-snug">
-          <span className="font-medium text-gray-200">How to tune: </span>
+        <div className="font-semibold text-[var(--player-accent-text)] mb-1">{title}</div>
+        <p className="text-[var(--player-text-body)] leading-relaxed mb-2">{description}</p>
+        <div className="text-[11px] text-[var(--player-text-muted)] border-t border-[var(--player-border-subtle)] pt-1.5 leading-snug">
+          <span className="font-medium text-[var(--player-text-primary)]">How to tune: </span>
           {tuning}
         </div>
       </div>
@@ -182,7 +182,7 @@ function SettingSliderRow({
     <div className={`grid grid-cols-[130px_1fr_76px] sm:grid-cols-[150px_1fr_80px] items-center gap-3 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
       <div className="flex items-center gap-1 min-w-0">
         {extraControl}
-        <span className="text-xs text-gray-300 truncate" title={label}>{label}</span>
+        <span className="text-xs text-[var(--player-text-secondary)] truncate" title={label}>{label}</span>
         <SettingInfoTooltip {...info} />
       </div>
       {usePlayerSliders ? (
@@ -206,7 +206,7 @@ function SettingSliderRow({
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full h-2 rounded bg-gray-800 cursor-pointer accent-blue-500"
+          className="w-full h-1.5 rounded-full bg-[var(--player-slider-track)] cursor-pointer accent-[var(--player-accent)]"
         />
       )}
       <input
@@ -232,7 +232,7 @@ function SettingSliderRow({
             e.currentTarget.blur();
           }
         }}
-        className="w-full rounded bg-gray-950 border border-gray-700 px-2 py-1 text-xs text-right font-mono text-gray-200 focus:outline-none focus:border-blue-500"
+        className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-2 py-1 text-xs text-right font-mono text-[var(--player-text-primary)] focus:outline-none focus:border-[var(--player-accent-border)]"
       />
     </div>
   );
@@ -274,13 +274,13 @@ export function PlaybackDevicesSettingsPanel({
 
   return (
     <div className="space-y-6">
-      <section className="rounded-lg border border-gray-700 bg-gray-900/60 p-4">
-        <div className="mb-3 text-sm font-semibold text-gray-100">Input</div>
+      <section className="rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-4">
+        <div className="mb-3 text-sm font-semibold text-[var(--player-text-primary)]">Input</div>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Input device</label>
+            <label className="block text-xs text-[var(--player-text-muted)] mb-1">Input device</label>
             <select
-              className="w-full rounded bg-gray-950 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+              className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
               value={audioSettings.inputDeviceId}
               onChange={(e) =>
                 setAudioSettings((prev) => ({ ...prev, inputDeviceId: e.target.value }))
@@ -305,13 +305,13 @@ export function PlaybackDevicesSettingsPanel({
         </div>
       </section>
 
-      <section className="rounded-lg border border-gray-700 bg-gray-900/60 p-4">
-        <div className="mb-3 text-sm font-semibold text-gray-100">Output</div>
+      <section className="rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-4">
+        <div className="mb-3 text-sm font-semibold text-[var(--player-text-primary)]">Output</div>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Output device</label>
+            <label className="block text-xs text-[var(--player-text-muted)] mb-1">Output device</label>
             <select
-              className="w-full rounded bg-gray-950 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+              className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
               value={audioSettings.outputDeviceId}
               onChange={(e) =>
                 setAudioSettings((prev) => ({ ...prev, outputDeviceId: e.target.value }))
@@ -326,10 +326,10 @@ export function PlaybackDevicesSettingsPanel({
             </select>
           </div>
           {detectedStereoOutput ? (
-            <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+            <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
               <input
                 type="checkbox"
-                className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+                className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
                 checked={audioSettings.forceMonoOutput === true}
                 onChange={(e) =>
                   setAudioSettings((prev) => ({ ...prev, forceMonoOutput: e.target.checked }))
@@ -339,12 +339,12 @@ export function PlaybackDevicesSettingsPanel({
             </label>
           ) : null}
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Panning law</label>
+            <label className="block text-xs text-[var(--player-text-muted)] mb-1">Panning law</label>
             <select
-              className={`w-full rounded border px-3 py-2 text-sm focus:outline-none ${
+              className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none ${
                 monoOutputActive
-                  ? 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
-                  : 'bg-gray-950 border-gray-700'
+                  ? 'bg-[var(--player-bg-elevated)] border-[var(--player-border-subtle)] text-[var(--player-text-disabled)] cursor-not-allowed'
+                  : 'bg-[var(--player-bg-canvas)] border-[var(--player-border-default)] text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)]'
               }`}
               value={String(monoOutputActive ? 0 : audioSettings.stereoPanLawDb)}
               onChange={(e) =>
@@ -367,15 +367,15 @@ export function PlaybackDevicesSettingsPanel({
       </section>
 
       {showPlaybackSpeedSettings ? (
-        <section className="rounded-lg border border-gray-700 bg-gray-900/60 p-4">
+        <section className="rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-4">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <div className="text-sm font-semibold text-gray-100">Pitch Preservation Engine (SignalsmithStretch)</div>
+              <div className="text-sm font-semibold text-[var(--player-text-primary)]">Pitch Preservation Engine (SignalsmithStretch)</div>
             </div>
             <button
               type="button"
               onClick={handleResetSpeedSettings}
-              className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800 transition-colors shrink-0"
+              className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2.5 py-1 text-xs font-medium text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors shrink-0"
               title="Reset to recommended defaults"
             >
               Reset defaults
@@ -385,15 +385,15 @@ export function PlaybackDevicesSettingsPanel({
           <div className="space-y-4">
             {/* 1. Processing Target Checkbox */}
             <div>
-              <label className="flex items-center gap-2 text-sm text-gray-300 select-none cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
                 <input
                   type="checkbox"
                   aria-label="Process per track stem"
-                  className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+                  className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
                   checked={speedSettings.stretchPerTrack}
                   onChange={(e) => updateSpeedSettings({ stretchPerTrack: e.target.checked })}
                 />
-                <span className="font-medium text-gray-200">Process per track stem</span>
+                <span className="font-medium text-[var(--player-text-primary)]">Process per track stem</span>
                 <SettingInfoTooltip
                   title="Process per track stem"
                   description="Runs SignalsmithStretch on each audio stem separately instead of through the master output mix."
@@ -404,15 +404,15 @@ export function PlaybackDevicesSettingsPanel({
 
             {/* 2. Show Pitch Transpose in Player Controls Toggle */}
             <div>
-              <label className="flex items-center gap-2 text-sm text-gray-300 select-none cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
                 <input
                   type="checkbox"
                   aria-label="Show pitch transpose"
-                  className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+                  className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
                   checked={speedSettings.showTransposeControl}
                   onChange={(e) => updateSpeedSettings({ showTransposeControl: e.target.checked })}
                 />
-                <span className="font-medium text-gray-200">Show pitch transpose</span>
+                <span className="font-medium text-[var(--player-text-primary)]">Show pitch transpose</span>
                 <SettingInfoTooltip
                   title="Show pitch transpose"
                   description="Displays a pitch transposition sliderin the player controls sidebar."
@@ -421,7 +421,7 @@ export function PlaybackDevicesSettingsPanel({
               </label>
             </div>
 
-            <div className="border-t border-gray-800 pt-3 space-y-3">
+            <div className="border-t border-[var(--player-border-subtle)] pt-3 space-y-3">
               {/* 3. Tonality Limit */}
               <SettingSliderRow
                 label="tonality limit"
@@ -456,7 +456,7 @@ export function PlaybackDevicesSettingsPanel({
                   <input
                     type="checkbox"
                     aria-label="Enable vocal formant compensation"
-                    className="h-4 w-4 rounded border-gray-600 bg-gray-900 shrink-0 mr-1"
+                    className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)] shrink-0 mr-1"
                     checked={speedSettings.formantCompensation}
                     onChange={(e) => updateSpeedSettings({ formantCompensation: e.target.checked })}
                   />
@@ -507,13 +507,13 @@ export function DawSettingsPanel({ settings, setSettings }) {
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-xs text-gray-400 mb-1" htmlFor="daw-amplitude-scale">
+        <label className="block text-xs text-[var(--player-text-muted)] mb-1" htmlFor="daw-amplitude-scale">
           Amplitude scale
         </label>
         <select
           id="daw-amplitude-scale"
           aria-label="Waveform amplitude scale"
-          className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+          className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
           value={settings.displayMode}
           onChange={(event) => update({ displayMode: event.target.value })}
         >
@@ -522,28 +522,28 @@ export function DawSettingsPanel({ settings, setSettings }) {
           <option value="db">Decibels (-60 dB floor)</option>
         </select>
       </div>
-      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
         <input
           type="checkbox"
-          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
           checked={Boolean(settings.stereo)}
           onChange={(event) => update({ stereo: event.target.checked })}
         />
         <span>Stereo waveforms</span>
       </label>
-      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
         <input
           type="checkbox"
-          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
           checked={settings.showRms}
           onChange={(event) => update({ showRms: event.target.checked })}
         />
         <span>RMS energy</span>
       </label>
-      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
         <input
           type="checkbox"
-          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
           checked={settings.scaleWaveformsByGain !== false}
           onChange={(event) => update({ scaleWaveformsByGain: event.target.checked })}
         />
@@ -562,10 +562,10 @@ export function ProjectSettingsPanel({
 }) {
   return (
     <div className="space-y-4">
-      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
         <input
           type="checkbox"
-          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
           checked={Boolean(project?.published)}
           onChange={(e) => onSetPublished(e.target.checked)}
         />
@@ -573,11 +573,11 @@ export function ProjectSettingsPanel({
       </label>
 
       <div>
-        <label className="block text-xs text-gray-400 mb-1">
+        <label className="block text-xs text-[var(--player-text-muted)] mb-1">
           Choir auto-pan
         </label>
         <select
-          className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+          className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
           value={project?.autoPan?.enabled ? project.autoPan?.strategy : 'off'}
           onChange={(e) => onSetAutoPanStrategy(e.target.value)}
         >
@@ -590,20 +590,20 @@ export function ProjectSettingsPanel({
         </select>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
         <input
           type="checkbox"
-          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
           checked={Boolean(project?.autoPan?.inverted)}
           onChange={(e) => onToggleAutoPanInverted(e.target.checked)}
         />
         <span>Inverted Auto Pan</span>
       </label>
 
-      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
         <input
           type="checkbox"
-          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
           checked={Boolean(project?.autoPan?.manualChoirParts)}
           onChange={(e) => onSetAutoPanManualChoirParts(e.target.checked)}
         />

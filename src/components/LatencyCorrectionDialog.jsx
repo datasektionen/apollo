@@ -123,25 +123,26 @@ export function LatencyCorrectionDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm px-4"
+      className="player-theme fixed inset-0 z-[100] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
+      data-player-theme="dark-gold"
       role="dialog"
       aria-modal="true"
       aria-labelledby="latency-correction-title"
     >
       <div
-        className="relative w-full max-w-md rounded-2xl border border-gray-800 bg-[#16181A] p-6 text-white shadow-2xl"
+        className="relative w-full max-w-md rounded-2xl border border-[var(--player-border-strong)] bg-[var(--player-bg-surface)] p-6 text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between pb-4">
           <div className="w-6" /> {/* spacer to balance close button */}
-          <h2 id="latency-correction-title" className="text-sm font-semibold tracking-wide text-white">
+          <h2 id="latency-correction-title" className="text-sm font-semibold tracking-wide text-[var(--player-text-primary)]">
             Round-trip Latency Correction
           </h2>
           <button
             type="button"
             onClick={handleClose}
-            className="rounded p-1 text-gray-400 hover:text-white transition-colors focus:outline-none"
+            className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors focus:outline-none"
             aria-label="Close"
           >
             <X size={18} />
@@ -157,7 +158,7 @@ export function LatencyCorrectionDialog({
               <div className="flex items-center justify-center gap-3 py-2">
                 <Volume2
                   size={24}
-                  className={status === 'measuring' ? 'text-orange-500 transition-colors' : 'text-gray-300'}
+                  className={status === 'measuring' ? 'text-red-400 transition-colors' : 'text-[var(--player-text-secondary)]'}
                 />
                 <div className="flex items-center gap-1 h-10 px-1">
                   {WAVEFORM_HEIGHTS.map((height, i) => {
@@ -168,8 +169,8 @@ export function LatencyCorrectionDialog({
                         style={{ height: `${height}px` }}
                         className={`w-1 rounded-full transition-all duration-75 ${
                           isLit
-                            ? 'bg-[#FF4400] shadow-[0_0_8px_rgba(255,68,0,0.8)]'
-                            : 'bg-gray-600'
+                            ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.85)]'
+                            : 'bg-[var(--player-slider-track)]'
                         }`}
                       />
                     );
@@ -177,12 +178,12 @@ export function LatencyCorrectionDialog({
                 </div>
                 <Mic
                   size={24}
-                  className={status === 'measuring' ? 'text-orange-500 transition-colors' : 'text-gray-300'}
+                  className={status === 'measuring' ? 'text-red-400 transition-colors' : 'text-[var(--player-text-secondary)]'}
                 />
               </div>
 
               {/* Explanatory text */}
-              <div className="space-y-3 px-2 text-xs text-gray-300 leading-relaxed">
+              <div className="space-y-3 px-2 text-xs text-[var(--player-text-secondary)] leading-relaxed">
                 <p>
                   Feeling like you’re slightly behind the beat?
                 </p>
@@ -198,7 +199,7 @@ export function LatencyCorrectionDialog({
                   <button
                     type="button"
                     onClick={handleStartTest}
-                    className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-2.5 text-sm font-semibold text-black shadow-lg transition-colors hover:bg-gray-100 active:scale-95"
+                    className="player-play-cta inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold active:scale-95"
                   >
                     <Gauge size={16} />
                     <span>Start Test</span>
@@ -207,9 +208,9 @@ export function LatencyCorrectionDialog({
                   <button
                     type="button"
                     disabled
-                    className="inline-flex items-center gap-2 rounded-full bg-gray-800 px-6 py-2.5 text-sm font-medium text-gray-400 cursor-wait"
+                    className="inline-flex items-center gap-2 rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-6 py-2.5 text-sm font-medium text-[var(--player-text-muted)] cursor-wait"
                   >
-                    <Loader2 size={16} className="animate-spin text-orange-500" />
+                    <Loader2 size={16} className="animate-spin text-red-400" />
                     <span>Running...</span>
                   </button>
                 )}
@@ -221,13 +222,13 @@ export function LatencyCorrectionDialog({
           {status === 'success' && (
             <div className="space-y-4 text-center">
               <div className="flex items-center justify-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--player-success-surface)] border border-[var(--player-success-border)] text-[var(--player-success)]">
                   <Check size={24} strokeWidth={2.5} />
                 </div>
               </div>
 
-              <div className="text-sm font-medium text-gray-200">
-                Your Latency <span className="text-xs text-gray-400 font-normal">(ms)</span>
+              <div className="text-sm font-medium text-[var(--player-text-primary)]">
+                Your Latency <span className="text-xs text-[var(--player-text-muted)] font-normal">(ms)</span>
               </div>
 
               <div className="flex justify-center">
@@ -236,12 +237,12 @@ export function LatencyCorrectionDialog({
                   inputMode="numeric"
                   value={latencyDraft}
                   onChange={(e) => setLatencyDraft(e.target.value.replace(/[^0-9]/g, ''))}
-                  className="w-44 rounded-xl border border-gray-800 bg-gray-950 px-4 py-2 text-center text-lg font-bold text-white focus:border-gray-600 focus:outline-none"
+                  className="w-44 rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-4 py-2 text-center text-lg font-bold font-mono text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
                   aria-label="Measured latency in milliseconds"
                 />
               </div>
 
-              <div className="space-y-1.5 px-3 text-xs text-gray-400 leading-relaxed">
+              <div className="space-y-1.5 px-3 text-xs text-[var(--player-text-muted)] leading-relaxed">
                 <p>This correction will be applied the next time you press record for your current session.</p>
                 <p>If you switch to another microphone you should perform this test again. You can find it in settings.</p>
               </div>
@@ -250,7 +251,7 @@ export function LatencyCorrectionDialog({
                 <button
                   type="button"
                   onClick={handleStartTest}
-                  className="inline-flex items-center gap-2 rounded-full bg-gray-800 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700 active:scale-95"
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-5 py-2.5 text-sm font-medium text-[var(--player-text-primary)] transition-colors hover:bg-[var(--player-hover)] active:scale-95"
                 >
                   <RotateCcw size={15} />
                   <span>Try again</span>
@@ -258,7 +259,7 @@ export function LatencyCorrectionDialog({
                 <button
                   type="button"
                   onClick={handleConfirm}
-                  className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-2.5 text-sm font-semibold text-black shadow-lg transition-colors hover:bg-gray-100 active:scale-95"
+                  className="player-play-cta inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold active:scale-95"
                 >
                   <Check size={16} strokeWidth={2.5} />
                   <span>Confirm</span>
@@ -271,16 +272,16 @@ export function LatencyCorrectionDialog({
           {status === 'error' && (
             <div className="space-y-4 text-center">
               <div className="flex items-center justify-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-950/60 border border-red-500/40 text-red-400 shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--player-danger-surface)] border border-[var(--player-danger-border)] text-[var(--player-danger)]">
                   <X size={24} strokeWidth={2.5} />
                 </div>
               </div>
 
-              <div className="text-base font-bold text-white">
+              <div className="text-base font-bold text-[var(--player-text-primary)]">
                 Test is unsuccessful
               </div>
 
-              <div className="px-3 text-xs text-gray-400 leading-relaxed">
+              <div className="px-3 text-xs text-[var(--player-text-muted)] leading-relaxed">
                 Test sounds weren’t detected. Check your microphone and ensure that your headphones
                 aren’t plugged in. You may also manually enter your latency (in milliseconds) below.
               </div>
@@ -291,7 +292,7 @@ export function LatencyCorrectionDialog({
                   inputMode="numeric"
                   value={latencyDraft}
                   onChange={(e) => setLatencyDraft(e.target.value.replace(/[^0-9]/g, ''))}
-                  className="w-44 rounded-xl border border-gray-800 bg-gray-950 px-4 py-2 text-center text-base font-semibold text-white focus:border-gray-600 focus:outline-none"
+                  className="w-44 rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-4 py-2 text-center text-base font-semibold font-mono text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
                   aria-label="Manual latency in milliseconds"
                 />
               </div>
@@ -300,7 +301,7 @@ export function LatencyCorrectionDialog({
                 <button
                   type="button"
                   onClick={handleStartTest}
-                  className="inline-flex items-center gap-2 rounded-full bg-gray-800 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700 active:scale-95"
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-5 py-2.5 text-sm font-medium text-[var(--player-text-primary)] transition-colors hover:bg-[var(--player-hover)] active:scale-95"
                 >
                   <RotateCcw size={15} />
                   <span>Try again</span>
@@ -308,7 +309,7 @@ export function LatencyCorrectionDialog({
                 <button
                   type="button"
                   onClick={handleConfirm}
-                  className="inline-flex items-center gap-2 rounded-full bg-gray-800 px-6 py-2.5 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-700 active:scale-95"
+                  className="player-play-cta inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold active:scale-95"
                 >
                   <Check size={16} strokeWidth={2.5} />
                   <span>Confirm</span>

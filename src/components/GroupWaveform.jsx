@@ -8,7 +8,7 @@ import { hasZoomBitmap, takeZoomBitmap } from '../lib/visibleZoom';
 import { useSurfacePlacement, useWaveformSources, useWaveformViewport } from './Waveform';
 
 const EMPTY_CLIPS = [];
-const ACTIVITY_COLOR = 'rgba(123, 173, 255, 0.75)';
+const ACTIVITY_COLOR = 'rgba(217, 183, 109, 0.72)';
 const MISSING_COLOR = 'rgba(248, 113, 113, 0.55)';
 const flaggedMissing = (ids, id) => Boolean(ids?.has?.(id) || (Array.isArray(ids) && ids.includes(id)));
 const CLIP_FIELDS = ['key', 'blobId', 'startMs', 'durationMs', 'cropStartMs', 'cropEndMs', 'sourceDurationMs', 'gainScale'];
@@ -78,7 +78,7 @@ function changedClipRanges(previous, next, pixelsPerMs) {
 export default function GroupWaveform({
   clips: clipsProp = EMPTY_CLIPS, pixelsPerMs, viewportLeftPx = 0, viewportWidthPx = 0, returnViewportLeftPx, height = 80,
   globalPeakAmplitude = 1, displayMode = 'linear', showRms = false,
-  missingMediaBlobIds, scheduleTier = 0, bitmapKey, stereo = false,
+  missingMediaBlobIds, scheduleTier = 0, bitmapKey, stereo = false, activityColor = ACTIVITY_COLOR,
 }) {
   // Parents rebuild clip lists on unrelated project changes (loop toggles, track tree normalization);
   // equal content keeps the retained surface instead of repainting the lane.
@@ -128,7 +128,7 @@ export default function GroupWaveform({
   const viewportPx = viewportRef.current;
   const drawRef = useRef(null);
   drawRef.current = {
-    pixelsPerMs, height, globalPeakAmplitude, displayMode, showRms, missingMediaBlobIds, extentPx, stereo,
+    pixelsPerMs, height, globalPeakAmplitude, displayMode, showRms, missingMediaBlobIds, extentPx, stereo, activityColor,
   };
   const localReturn = Number.isFinite(returnViewportLeftPx) ? returnViewportLeftPx : null;
   // Sources are pinned for every clip on the retained canvas, margins included.
@@ -152,7 +152,7 @@ export default function GroupWaveform({
   const viewRef = useRef(view);
   viewRef.current = view;
   const missingKey = missingMediaBlobIds ? [...missingMediaBlobIds].sort().join(',') : '';
-  const picture = `${zoom}|${height}|${globalPeakAmplitude}|${displayMode}|${showRms}|${view.dpr}|${missingKey}|${stereo}`;
+  const picture = `${zoom}|${height}|${globalPeakAmplitude}|${displayMode}|${showRms}|${view.dpr}|${missingKey}|${stereo}|${activityColor}`;
   const pictureRef = useRef(picture);
   const prepareRef = useRef(() => false);
   prepareRef.current = () => {
@@ -249,7 +249,7 @@ export default function GroupWaveform({
         }
         const detail = audioBuffer.sampleRate / (1000 * drawState.pixelsPerMs * dpr) <= 1;
         if (!source?.pyramid && !detail) {
-          context.fillStyle = isMissing ? MISSING_COLOR : 'rgba(148, 163, 184, 0.35)';
+          context.fillStyle = isMissing ? MISSING_COLOR : (drawState.activityColor || ACTIVITY_COLOR);
           context.fillRect(left, drawState.height / 2, width, 1);
           continue;
         }
@@ -281,7 +281,7 @@ export default function GroupWaveform({
             clipWidthPx: Math.max(...readyClips.map((c) => c.clipLeftPx + c.clipWidthPx)) - Math.min(...readyClips.map((c) => c.clipLeftPx)),
             ...strip,
             height: drawState.height,
-            color: drawState.missingMediaBlobIds?.size ? MISSING_COLOR : ACTIVITY_COLOR,
+            color: drawState.missingMediaBlobIds?.size ? MISSING_COLOR : (drawState.activityColor || ACTIVITY_COLOR),
             displayMode: drawState.displayMode,
             globalPeakAmplitude: drawState.globalPeakAmplitude,
             showRms: drawState.showRms,

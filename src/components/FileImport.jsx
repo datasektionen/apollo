@@ -233,7 +233,8 @@ function FileImport({
 
   return (
     <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      className="player-theme fixed inset-0 bg-[var(--player-bg-scrim)] backdrop-blur-sm flex items-center justify-center z-[80] p-4"
+      data-player-theme="dark-gold"
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -250,20 +251,20 @@ function FileImport({
       }}
     >
       <div
-        className={`bg-gray-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col ${
-          isDragging ? 'ring-2 ring-blue-500 ring-inset' : ''
+        className={`bg-[var(--player-bg-surface)] border border-[var(--player-border-strong)] rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)] ${
+          isDragging ? 'ring-2 ring-[var(--player-accent)] ring-inset' : ''
         }`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Import Audio Files</h2>
+        <div className="px-6 py-4 border-b border-[var(--player-border-subtle)] flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Import Audio Files</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
           >
-            <X size={24} />
+            <X size={20} />
           </button>
         </div>
 
@@ -279,33 +280,33 @@ function FileImport({
 
           {files.length === 0 ? (
             <div
-              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+              className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
                 isDragging
-                  ? 'border-blue-500 bg-blue-500 bg-opacity-10'
-                  : 'border-gray-600 hover:border-gray-500'
+                  ? 'border-[var(--player-accent)] bg-[var(--player-accent-soft)]'
+                  : 'border-[var(--player-border-default)] hover:border-[var(--player-border-strong)] bg-[var(--player-bg-surface-subtle)]'
               }`}
             >
-              <Download size={48} className="mx-auto mb-4 text-gray-500" />
-              <p className="text-lg mb-2">Drag and drop audio files here</p>
-              <p className="text-sm text-gray-400 mb-4">or</p>
+              <Download size={44} className="mx-auto mb-4 text-[var(--player-accent-text)] opacity-80" />
+              <p className="text-lg font-medium mb-1.5 text-[var(--player-text-primary)]">Drag and drop audio files here</p>
+              <p className="text-sm text-[var(--player-text-muted)] mb-4">or</p>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded cursor-pointer transition-colors"
+                className="player-play-cta inline-block px-6 py-2 rounded-lg text-sm font-semibold cursor-pointer"
               >
                 Choose Files
               </button>
-              <p className="text-xs text-gray-500 mt-4">Supported: WAV, FLAC, MP3, OGG/Vorbis</p>
+              <p className="text-xs text-[var(--player-text-muted)] mt-4">Supported: WAV, FLAC, MP3, OGG/Vorbis</p>
             </div>
           ) : (
             <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className="text-sm font-semibold text-gray-400">
+              <h3 className="text-sm font-semibold text-[var(--player-text-secondary)]">
                 Files to Import ({files.length})
               </h3>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-sm px-3 py-1.5 rounded transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)] text-sm px-3 py-1.5 transition-colors"
                 title="Add more audio files"
               >
                 <Plus size={14} />
@@ -363,8 +364,8 @@ function FileImport({
           )}
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-700 flex items-center justify-between">
-          <p className={`text-sm ${blockedEntries.length ? 'text-amber-300' : 'text-gray-400'}`}>
+        <div className="px-6 py-4 border-t border-[var(--player-border-subtle)] flex items-center justify-between">
+          <p className={`text-sm ${blockedEntries.length ? 'text-[var(--player-warning-text)]' : 'text-[var(--player-text-muted)]'}`}>
             {blockedEntries.length
               ? `${blockedEntries.length} file${blockedEntries.length > 1 ? 's' : ''} target${blockedEntries.length > 1 ? '' : 's'} a track you cannot ${canCreateTracks ? 'edit' : 'create or edit'}`
               : files.length > 0
@@ -374,14 +375,14 @@ function FileImport({
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+              className="px-4 py-2 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-sm text-[var(--player-text-primary)] transition-colors"
               disabled={isProcessing}
             >
               Cancel
             </button>
             <button
               onClick={handleImport}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="player-play-cta px-4 py-2 rounded-lg text-sm font-semibold disabled:cursor-not-allowed"
               disabled={files.length === 0 || isProcessing || blockedEntries.length > 0}
               title={blockedEntries.length ? 'Change the destination of the highlighted files first' : undefined}
             >
@@ -393,36 +394,36 @@ function FileImport({
 
       {showReplaceConfirm && replaceEntries.length > 0 ? (
         <div
-          className="absolute inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
+          className="absolute inset-0 z-[60] bg-[var(--player-bg-scrim)] backdrop-blur-sm flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="overwrite-confirm-title"
           onMouseDown={(event) => event.stopPropagation()}
         >
-          <div className="bg-gray-800 rounded-lg max-w-md w-full border border-gray-700 shadow-xl">
-            <div className="px-5 py-4 border-b border-gray-700 flex items-start gap-3">
-              <AlertTriangle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="bg-[var(--player-bg-surface)] rounded-2xl max-w-md w-full border border-[var(--player-border-strong)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)]">
+            <div className="px-5 py-4 border-b border-[var(--player-border-subtle)] flex items-start gap-3">
+              <AlertTriangle size={20} className="text-[var(--player-warning-text)] flex-shrink-0 mt-0.5" />
               <div>
                 <h3 id="overwrite-confirm-title" className="text-lg font-semibold">
                   Overwrite existing audio?
                 </h3>
-                <p className="text-sm text-gray-300 mt-1">
+                <p className="text-sm text-[var(--player-text-secondary)] mt-1">
                   {replaceEntries.length} file{replaceEntries.length > 1 ? 's' : ''} will overwrite existing track audio. This cannot be undone from this dialog.
                 </p>
               </div>
             </div>
-            <ul className="px-5 py-3 space-y-1 text-sm text-gray-200 max-h-40 overflow-auto">
+            <ul className="px-5 py-3 space-y-1 text-sm text-[var(--player-text-body)] max-h-40 overflow-auto">
               {replaceEntries.map((entry) => (
                 <li key={entry.id} className="truncate">
                   {entry.file.name} → {destinationLabel(entry)}
                 </li>
               ))}
             </ul>
-            <div className="px-5 py-4 border-t border-gray-700 flex justify-end gap-2">
+            <div className="px-5 py-4 border-t border-[var(--player-border-subtle)] flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowReplaceConfirm(false)}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+                className="px-4 py-2 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-sm text-[var(--player-text-primary)] transition-colors"
                 disabled={isProcessing}
               >
                 Cancel
@@ -430,7 +431,7 @@ function FileImport({
               <button
                 type="button"
                 onClick={runImport}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded transition-colors disabled:opacity-50"
+                className="px-4 py-2 rounded-lg bg-[var(--player-warning-solid)] hover:bg-[var(--player-warning-solid-hover)] text-[var(--player-accent-foreground)] text-sm font-semibold transition-colors disabled:opacity-50"
                 disabled={isProcessing}
               >
                 {isProcessing ? 'Importing...' : 'Overwrite and import'}

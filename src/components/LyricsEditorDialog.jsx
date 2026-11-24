@@ -67,14 +67,15 @@ function LyricsEditorDialog({ open, project, updateProject, canEditLyrics = fals
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+      className="player-theme fixed inset-0 z-[90] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm p-4"
+      data-player-theme="dark-gold"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) closeAndSave();
       }}
     >
       <section
-        className="flex max-h-[92vh] max-w-full flex-col overflow-hidden rounded-lg border border-gray-700 bg-gray-800 text-white shadow-2xl"
+        className="flex max-h-[92vh] max-w-full flex-col overflow-hidden rounded-2xl border border-[var(--player-border-strong)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)]"
         style={{ width: `${dialogWidth}px`, maxWidth: 'calc(100vw - 2rem)' }}
         role="dialog"
         aria-modal="true"
@@ -86,9 +87,9 @@ function LyricsEditorDialog({ open, project, updateProject, canEditLyrics = fals
           }
         }}
       >
-        <header className="flex items-center justify-between border-b border-gray-700 px-5 py-3">
+        <header className="flex items-center justify-between border-b border-[var(--player-border-subtle)] px-5 py-3.5">
           <h2 id="lyrics-dialog-title" className="text-base font-semibold">Lyrics</h2>
-          <button className="rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-white" onClick={closeAndSave} aria-label="Close lyrics editor">
+          <button className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors" onClick={closeAndSave} aria-label="Close lyrics editor">
             <X size={19} />
           </button>
         </header>
@@ -101,7 +102,7 @@ function LyricsEditorDialog({ open, project, updateProject, canEditLyrics = fals
             onChange={(event) => setText(event.target.value)}
             rows={textareaRows}
             placeholder={'One lyric line per row'}
-            className="w-full resize-y rounded border border-gray-600 bg-gray-900 p-3 font-mono text-sm leading-6 text-white placeholder:text-gray-500 focus:border-gray-600 focus:outline-none focus:ring-0 disabled:opacity-50"
+            className="w-full resize-y rounded-xl border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] p-3 font-mono text-sm leading-6 text-[var(--player-text-primary)] placeholder:text-[var(--player-text-muted)] focus:border-[var(--player-accent-border)] focus:outline-none focus:ring-0 disabled:opacity-50"
             aria-label="Lyrics, one line per row"
           />
         </div>

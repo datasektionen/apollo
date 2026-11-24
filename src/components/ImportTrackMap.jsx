@@ -15,7 +15,7 @@ import {
   isLastImportNodeInParent,
   resolveImportDropPlacement,
 } from '../utils/importTrackMatch';
-import { getDefaultIconByRole, getRoleColorClass } from '../utils/trackRoles';
+import { getDawRolePalette, getDefaultIconByRole, getRoleColorClass } from '../utils/trackRoles';
 
 const ROLE_ICONS = {
   guitar: Guitar,
@@ -60,8 +60,8 @@ function FileChip({
       onDragEnd={() => onFileDragEnd()}
       className={`max-w-[11rem] inline-flex items-center gap-0.5 rounded px-1.5 py-px text-[11px] border cursor-grab active:cursor-grabbing select-none ${
         dragging
-          ? 'opacity-50 bg-gray-700 text-gray-200 border-gray-600'
-          : 'bg-gray-700 text-gray-100 border-gray-600'
+          ? 'opacity-50 bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)] border-[var(--player-border-default)]'
+          : 'bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)] border-[var(--player-border-default)]'
       }`}
       title={`${entry.file.name} · Drag to place`}
     >
@@ -70,7 +70,7 @@ function FileChip({
       <button
         type="button"
         draggable={false}
-        className="flex-shrink-0 text-current/80 hover:text-red-300"
+        className="flex-shrink-0 text-current/80 hover:text-[var(--player-danger)]"
         title="Remove file"
         onClick={(event) => {
           event.stopPropagation();
@@ -188,7 +188,7 @@ function ImportTrackMap({
 
   return (
     <div
-      className="rounded-lg border border-gray-700 overflow-hidden bg-gray-900"
+      className="rounded-xl border border-[var(--player-border-subtle)] overflow-hidden bg-[var(--player-bg-surface-subtle)]"
       onDragOver={(event) => {
         if (!isDraggingFile) return;
         event.preventDefault();
@@ -211,14 +211,14 @@ function ImportTrackMap({
             activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT
               && activeDrop?.edge === 'before'
               && !activeDrop?.anchor
-              ? 'min-h-[28px] bg-blue-700/30 border-blue-500'
-              : 'min-h-[10px] border-gray-700'
+              ? 'min-h-[28px] bg-[var(--player-accent-soft)] border-[var(--player-accent)]'
+              : 'min-h-[10px] border-[var(--player-border-subtle)]'
           }`}
         >
           {activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT
             && activeDrop?.edge === 'before'
             && !activeDrop?.anchor ? (
-              <p className="text-[11px] text-blue-100 px-2 py-1">New Track</p>
+              <p className="text-[11px] text-[var(--player-accent-text)] px-2 py-1">New Track</p>
             ) : null}
         </div>
       ) : null}
@@ -255,18 +255,18 @@ function ImportTrackMap({
               key={row.key}
               data-import-row={row.key}
               data-import-drop={`join:${row.key}`}
-              className={`relative flex items-center gap-1.5 border-b border-dashed border-gray-700 px-2 py-0.5 ${
-                joining ? 'bg-blue-900/50' : 'bg-gray-900/80'
+              className={`relative flex items-center gap-1.5 border-b border-dashed border-[var(--player-border-subtle)] px-2 py-1 ${
+                joining ? 'bg-[var(--player-accent-soft)]' : 'bg-[var(--player-bg-surface-subtle)]'
               }`}
               style={{ paddingLeft: `${8 + row.depth * 12}px` }}
               onDragOver={(event) => handleDragOver(event, joinDrop)}
               onDrop={(event) => handleDrop(event, joinDrop)}
             >
               {splitBefore ? (
-                <div className="absolute left-1 right-1 top-0 h-0.5 bg-blue-400 z-20 pointer-events-none" />
+                <div className="absolute left-1 right-1 top-0 h-0.5 bg-[var(--player-accent)] z-20 pointer-events-none" />
               ) : null}
               {splitAfter ? (
-                <div className="absolute left-1 right-1 bottom-0 h-0.5 bg-blue-400 z-20 pointer-events-none" />
+                <div className="absolute left-1 right-1 bottom-0 h-0.5 bg-[var(--player-accent)] z-20 pointer-events-none" />
               ) : null}
               {isNewRootGhost && isDraggingFile ? (
                 <>
@@ -308,13 +308,13 @@ function ImportTrackMap({
               ) : null}
               <div className={`w-5 h-5 rounded border border-dashed flex items-center justify-center flex-shrink-0 ${
                 lockType
-                  ? `${getRoleColorClass(role)} text-white border-transparent`
-                  : 'border-blue-400/70 text-blue-300'
+                  ? `${getRoleColorClass(role)} ${getDawRolePalette(role).badgeClass} border-transparent`
+                  : 'border-[var(--player-accent-border)] text-[var(--player-accent-text)]'
               }`}>
                 <RoleIcon role={role} size={11} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs truncate text-blue-100">{ghostHint(row)}</p>
+                <p className="text-xs truncate text-[var(--player-accent-text)]">{ghostHint(row)}</p>
               </div>
               {lockType ? null : (
                 <select
@@ -323,7 +323,7 @@ function ImportTrackMap({
                   value={role}
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) => onChangeRole(destination, event.target.value)}
-                  className={`bg-gray-800 border border-gray-700 rounded px-1 py-0 text-[10px] relative ${isDraggingFile ? 'z-0' : 'z-20'} focus:outline-none focus:border-blue-500`}
+                  className={`bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] rounded px-1 py-0 text-[10px] text-[var(--player-text-primary)] relative ${isDraggingFile ? 'z-0' : 'z-20'} focus:outline-none focus:border-[var(--player-accent-border)]`}
                 >
                   {roleOptions.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -372,8 +372,8 @@ function ImportTrackMap({
           <div
             key={row.key}
             data-import-row={row.key}
-            className={`relative flex items-center gap-1.5 border-b border-gray-800 px-2 py-0.5 ${
-              highlightOn ? 'bg-blue-900/50' : 'hover:bg-gray-800/70'
+            className={`relative flex items-center gap-1.5 border-b border-[var(--player-border-subtle)] px-2 py-1 ${
+              highlightOn ? 'bg-[var(--player-accent-soft)]' : 'hover:bg-[var(--player-hover)]'
             }`}
             style={{ paddingLeft: `${8 + row.depth * 12}px` }}
             onDragOver={(event) => {
@@ -398,16 +398,16 @@ function ImportTrackMap({
             }}
           >
             {lineBefore ? (
-              <div className="absolute left-1 right-1 top-0 h-0.5 bg-blue-400 z-20 pointer-events-none" />
+              <div className="absolute left-1 right-1 top-0 h-0.5 bg-[var(--player-accent)] z-20 pointer-events-none" />
             ) : null}
             {lineAfter ? (
               <div
-                className="absolute left-1 right-1 bottom-0 h-0.5 bg-blue-400 z-20 pointer-events-none"
+                className="absolute left-1 right-1 bottom-0 h-0.5 bg-[var(--player-accent)] z-20 pointer-events-none"
                 style={activeType === IMPORT_DROP_TYPES.AFTER_PARENT ? { left: `${Math.max(4, 8 + ((row.node.depth || 1) - 1) * 12)}px` } : undefined}
               />
             ) : null}
             {renderDropZones(row.node)}
-            <div className={`w-5 h-5 rounded ${getRoleColorClass(role)} text-white flex items-center justify-center flex-shrink-0 relative z-0`}>
+            <div className={`w-5 h-5 rounded ${getRoleColorClass(role)} ${getDawRolePalette(role).badgeClass} flex items-center justify-center flex-shrink-0 relative z-0`}>
               <RoleIcon role={role} size={11} />
             </div>
             <p className={`flex-1 min-w-0 text-xs truncate relative z-0 ${isGroup ? 'font-semibold' : 'font-medium'}`}>
@@ -419,8 +419,8 @@ function ImportTrackMap({
                 data-import-replace-toggle={row.node.id}
                 className={`flex-shrink-0 px-1.5 py-px rounded text-[10px] font-medium border relative z-20 ${
                   overwrite
-                    ? 'bg-amber-900/70 text-amber-100 border-amber-500/50'
-                    : 'bg-gray-800 text-gray-300 border-gray-600'
+                    ? 'bg-[var(--player-warning-soft)] text-[var(--player-warning-text)] border-[var(--player-warning-border)]'
+                    : 'bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] border-[var(--player-border-default)]'
                 }`}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -452,12 +452,12 @@ function ImportTrackMap({
           onDrop={(event) => handleDrop(event, { type: IMPORT_DROP_TYPES.NEW_ROOT })}
           className={`w-full border-t border-dashed ${
             activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT && !activeDrop?.anchor
-              ? 'min-h-[28px] bg-blue-700/30 border-blue-500'
-              : 'min-h-[10px] border-gray-700'
+              ? 'min-h-[28px] bg-[var(--player-accent-soft)] border-[var(--player-accent)]'
+              : 'min-h-[10px] border-[var(--player-border-subtle)]'
           }`}
         >
           {activeDrop?.type === IMPORT_DROP_TYPES.NEW_ROOT && !activeDrop?.anchor ? (
-            <p className="text-[11px] text-blue-100 px-2 py-1">New Track</p>
+            <p className="text-[11px] text-[var(--player-accent-text)] px-2 py-1">New Track</p>
           ) : null}
         </div>
       ) : null}

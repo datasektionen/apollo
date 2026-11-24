@@ -1,0 +1,292 @@
+/*
+ * Apollo Scoped DAW Multi-Theme Token Contract & Studio Primitives
+ *
+ * Layered alongside `.player-theme` (`[data-player-theme="dark-gold"]`) so
+ * the DAW shares Apollo's obsidian + champagne-gold design system while
+ * adding studio surface, transport LCD, playhead, track-role, and rotary/fader tokens.
+ */
+
+.daw-theme,
+.daw-theme[data-player-theme='dark-gold'] {
+  /* Studio Surfaces */
+  --daw-bg-canvas: var(--player-bg-canvas, #050506);
+  --daw-bg-header: #0a0a0c;
+  --daw-bg-dock: #111114;
+  --daw-bg-lcd: #050507;
+  --daw-bg-ruler-top: #0c0c0f;
+  --daw-bg-ruler-seek: #08080a;
+  --daw-bg-sidebar: #0b0b0d;
+  --daw-bg-row: #0e0e11;
+  --daw-bg-row-group: #111115;
+  --daw-bg-row-hover: #15151a;
+  --daw-bg-row-selected: #1b1a20;
+  --daw-bg-row-active-mix: rgba(198, 155, 57, 0.14);
+  --daw-bg-lane: #070709;
+  --daw-bg-lane-group: #0a0a0d;
+  --daw-bg-lane-inactive: rgba(255, 255, 255, 0.015);
+  --daw-bg-lyrics-lane: #08080b;
+
+  /* Studio Borders & Ticks */
+  --daw-border-row: rgba(255, 255, 255, 0.075);
+  --daw-border-divider: rgba(255, 255, 255, 0.12);
+  --daw-ruler-tick-major: rgba(255, 255, 255, 0.24);
+  --daw-ruler-tick-minor: rgba(255, 255, 255, 0.14);
+  --daw-ruler-text: #c2c2cc;
+
+  /* Playhead, Loop & Marquee */
+  --daw-playhead: #d9b76d;
+  --daw-playhead-recording: #ef4444;
+  --daw-loop-active: rgba(198, 155, 57, 0.3);
+  --daw-loop-active-edge: #d9b76d;
+  --daw-loop-inactive: #16161b;
+  --daw-marquee-border: rgba(217, 183, 109, 0.85);
+  --daw-marquee-bg: rgba(198, 155, 57, 0.14);
+
+  /* Recording Red & Mute / Solo / Lyric Pills */
+  --daw-record-bg: #dc2626;
+  --daw-record-hover: #ef4444;
+  --daw-record-soft: rgba(220, 38, 38, 0.16);
+  --daw-record-border: rgba(239, 68, 68, 0.65);
+  --daw-record-glow: 0 0 16px rgba(239, 68, 68, 0.42);
+  --daw-mute-active-bg: rgba(220, 38, 38, 0.24);
+  --daw-mute-active-border: rgba(248, 113, 113, 0.62);
+  --daw-mute-active-fg: #fecaca;
+  --daw-solo-active-bg: rgba(198, 155, 57, 0.24);
+  --daw-solo-active-border: rgba(217, 183, 109, 0.68);
+  --daw-solo-active-fg: #f3d796;
+  --daw-lyric-clip-bg: rgba(217, 183, 109, 0.16);
+  --daw-lyric-clip-border: rgba(217, 183, 109, 0.56);
+  --daw-lyric-clip-fg: #f5f5f4;
+
+  /* Studio Track-Role Jewel Tokens (obsidian-tinted badges + crisp borders) */
+  --daw-role-instrument-accent: #c084fc;
+  --daw-role-instrument-bg: rgba(168, 85, 247, 0.15);
+  --daw-role-instrument-border: rgba(168, 85, 247, 0.48);
+  --daw-role-instrument-fg: #e9d5ff;
+
+  --daw-role-lead-accent: #38bdf8;
+  --daw-role-lead-bg: rgba(56, 189, 248, 0.15);
+  --daw-role-lead-border: rgba(56, 189, 248, 0.48);
+  --daw-role-lead-fg: #bae6fd;
+
+  --daw-role-choir-accent: #34d399;
+  --daw-role-choir-bg: rgba(16, 185, 129, 0.15);
+  --daw-role-choir-border: rgba(16, 185, 129, 0.48);
+  --daw-role-choir-fg: #a7f3d0;
+
+  --daw-role-metronome-accent: #fb923c;
+  --daw-role-metronome-bg: rgba(249, 115, 22, 0.15);
+  --daw-role-metronome-border: rgba(249, 115, 22, 0.48);
+  --daw-role-metronome-fg: #fed7aa;
+
+  --daw-role-other-accent: #a1a1aa;
+  --daw-role-other-bg: rgba(161, 161, 170, 0.14);
+  --daw-role-other-border: rgba(161, 161, 170, 0.36);
+  --daw-role-other-fg: #e4e4e7;
+}
+
+/* Precision Role Icon Badges (overrides legacy solid utilities visually without breaking existing utility selectors) */
+.daw-theme .daw-role-badge {
+  border-width: 1px;
+  border-style: solid;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.42);
+  transition: filter 140ms var(--player-ease), transform 140ms var(--player-ease);
+}
+
+.daw-theme .daw-role-badge:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.daw-theme .daw-role-badge.daw-role-instrument {
+  background-color: var(--daw-role-instrument-bg);
+  border-color: var(--daw-role-instrument-border);
+  color: var(--daw-role-instrument-fg);
+}
+
+.daw-theme .daw-role-badge.daw-role-lead {
+  background-color: var(--daw-role-lead-bg);
+  border-color: var(--daw-role-lead-border);
+  color: var(--daw-role-lead-fg);
+}
+
+.daw-theme .daw-role-badge.daw-role-choir {
+  background-color: var(--daw-role-choir-bg);
+  border-color: var(--daw-role-choir-border);
+  color: var(--daw-role-choir-fg);
+}
+
+.daw-theme .daw-role-badge.daw-role-metronome {
+  background-color: var(--daw-role-metronome-bg);
+  border-color: var(--daw-role-metronome-border);
+  color: var(--daw-role-metronome-fg);
+}
+
+.daw-theme .daw-role-badge.daw-role-other {
+  background-color: var(--daw-role-other-bg);
+  border-color: var(--daw-role-other-border);
+  color: var(--daw-role-other-fg);
+}
+
+/* Precision Mixer & Master Volume Sliders (Apollo Player parity: white fill at rest, gold + white knob on hover/drag) */
+.daw-theme input[type='range'].volume-slider {
+  --daw-vol-fill: var(--player-slider-fill-rest, #f4f4f2);
+  height: 24px;
+  background: transparent;
+  border: none;
+}
+
+.daw-theme input[type='range'].volume-slider:hover:not(:disabled),
+.daw-theme input[type='range'].volume-slider:active:not(:disabled),
+.daw-theme input[type='range'].volume-slider:focus-visible:not(:disabled) {
+  --daw-vol-fill: var(--player-slider-fill-hover, #cb9e37);
+}
+
+.daw-theme input[type='range'].volume-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  border: none;
+  box-sizing: border-box;
+  background: linear-gradient(
+    to right,
+    var(--daw-vol-fill) 0%,
+    var(--daw-vol-fill) var(--daw-vol-pct, 0%),
+    var(--player-slider-track, #34373e) var(--daw-vol-pct, 0%),
+    var(--player-slider-track, #34373e) 100%
+  );
+  transition: background 140ms var(--player-ease);
+}
+
+.daw-theme input[type='range'].volume-slider.volume-slider-lg::-webkit-slider-runnable-track {
+  height: 4px;
+  box-sizing: border-box;
+}
+
+.daw-theme input[type='range'].volume-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  border: none;
+  box-sizing: border-box;
+  background: linear-gradient(
+    to right,
+    var(--daw-vol-fill) 0%,
+    var(--daw-vol-fill) var(--daw-vol-pct, 0%),
+    var(--player-slider-track, #34373e) var(--daw-vol-pct, 0%),
+    var(--player-slider-track, #34373e) 100%
+  );
+}
+
+.daw-theme input[type='range'].volume-slider.volume-slider-lg::-moz-range-track {
+  height: 4px;
+  box-sizing: border-box;
+}
+
+.daw-theme input[type='range'].volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--player-slider-thumb, #f4f4f2);
+  border: none;
+  margin-top: -4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.72);
+  opacity: 0;
+  transition: opacity 140ms var(--player-ease), transform 140ms var(--player-ease);
+}
+
+.daw-theme input[type='range'].volume-slider.volume-slider-lg::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+}
+
+.daw-theme input[type='range'].volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--player-slider-thumb, #f4f4f2);
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.72);
+  opacity: 0;
+  transition: opacity 140ms var(--player-ease), transform 140ms var(--player-ease);
+}
+
+.daw-theme input[type='range'].volume-slider.volume-slider-lg::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+}
+
+.daw-theme input[type='range'].volume-slider:hover:not(:disabled)::-webkit-slider-thumb,
+.daw-theme input[type='range'].volume-slider:active:not(:disabled)::-webkit-slider-thumb,
+.daw-theme input[type='range'].volume-slider:focus-visible:not(:disabled)::-webkit-slider-thumb {
+  opacity: 1;
+}
+
+.daw-theme input[type='range'].volume-slider:hover:not(:disabled)::-moz-range-thumb,
+.daw-theme input[type='range'].volume-slider:active:not(:disabled)::-moz-range-thumb,
+.daw-theme input[type='range'].volume-slider:focus-visible:not(:disabled)::-moz-range-thumb {
+  opacity: 1;
+}
+
+/* Studio Zoom Floating Pill */
+.daw-theme .zoom-minimal-overlay {
+  display: flex;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 9999px;
+  background: rgba(16, 16, 20, 0.92);
+  border: 1px solid var(--player-border-default, rgba(255, 255, 255, 0.14));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.56);
+  backdrop-filter: blur(8px);
+}
+
+.daw-theme .zoom-minimal-stick {
+  height: 3px;
+  background: var(--player-slider-track, #34373e);
+}
+
+.daw-theme input[type='range'].zoom-minimal-slider::-webkit-slider-thumb {
+  width: 11px;
+  height: 11px;
+  margin-top: -3.5px;
+  background: var(--player-slider-thumb, #f4f4f2);
+  border: 1.5px solid #0c0c0e;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+.daw-theme input[type='range'].zoom-minimal-slider:hover::-webkit-slider-thumb,
+.daw-theme input[type='range'].zoom-minimal-slider:active::-webkit-slider-thumb {
+  background: var(--player-slider-fill-hover, #cb9e37);
+}
+
+.daw-theme input[type='range'].zoom-minimal-slider::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  transform: translateY(-2.5px);
+  background: var(--player-slider-thumb, #f4f4f2);
+  border: 1.5px solid #0c0c0e;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+.daw-theme input[type='range'].zoom-minimal-slider:hover::-moz-range-thumb,
+.daw-theme input[type='range'].zoom-minimal-slider:active::-moz-range-thumb {
+  background: var(--player-slider-fill-hover, #cb9e37);
+}
+
+/* Mobile / narrow viewport track rail mode (zero effect at md+ / desktop) */
+@media (max-width: 767px) {
+  .daw-theme .daw-tracklist-compact [data-tree-row-id] > div {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    gap: 0 !important;
+    justify-content: center;
+  }
+  .daw-theme .daw-tracklist-compact [data-track-details='true'] {
+    display: none !important;
+  }
+  .daw-theme .daw-tracklist-compact .daw-role-badge {
+    width: 44px;
+    height: 44px;
+  }
+}

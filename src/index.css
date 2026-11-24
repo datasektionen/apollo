@@ -6,7 +6,7 @@ html,
 body,
 #root {
   height: 100%;
-  background-color: #111827;
+  background-color: #050506;
   overscroll-behavior-y: none;
   overscroll-behavior-x: auto;
 }
@@ -97,33 +97,33 @@ input[type="range"] {
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: #4F8EF7;
+  background: #f4f4f2;
   cursor: pointer;
-  border: 2px solid #1F2937;
-  box-shadow: 0 0 0 1px rgba(79, 142, 247, 0.5);
+  border: 2px solid #0c0c0e;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.24);
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: #4F8EF7;
+  background: #f4f4f2;
   cursor: pointer;
-  border: 2px solid #1F2937;
-  box-shadow: 0 0 0 1px rgba(79, 142, 247, 0.5);
+  border: 2px solid #0c0c0e;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.24);
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {
-  background: #6BA3F9;
-  box-shadow: 0 0 0 2px rgba(79, 142, 247, 0.7);
+  background: #cb9e37;
+  box-shadow: 0 0 0 2px rgba(217, 183, 109, 0.5);
 }
 
 input[type="range"]::-moz-range-thumb:hover {
-  background: #6BA3F9;
-  box-shadow: 0 0 0 2px rgba(79, 142, 247, 0.7);
+  background: #cb9e37;
+  box-shadow: 0 0 0 2px rgba(217, 183, 109, 0.5);
 }
 
 input[type="range"]:disabled {
@@ -283,27 +283,27 @@ input[type="range"].practice-diff-slider::-moz-range-track {
 input[type="range"].practice-diff-slider::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
-  margin-top: -4px;
-  background: #2563eb;
-  border: 2px solid #1f2937;
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.45);
+  margin-top: -3px;
+  background: #f4f4f2;
+  border: 2px solid #0c0c0e;
+  box-shadow: 0 0 0 1px rgba(217, 183, 109, 0.65);
 }
 
 input[type="range"].practice-diff-slider::-moz-range-thumb {
   width: 14px;
   height: 14px;
   transform: translateY(0);
-  background: #2563eb;
-  border: 2px solid #1f2937;
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.45);
+  background: #f4f4f2;
+  border: 2px solid #0c0c0e;
+  box-shadow: 0 0 0 1px rgba(217, 183, 109, 0.65);
 }
 
 input[type="range"].practice-diff-slider::-webkit-slider-thumb:hover {
-  background: #3b82f6;
+  background: #d9b76d;
 }
 
 input[type="range"].practice-diff-slider::-moz-range-thumb:hover {
-  background: #3b82f6;
+  background: #d9b76d;
 }
 
 /* Timeline zoom overlay (minimal, 3-color style) */

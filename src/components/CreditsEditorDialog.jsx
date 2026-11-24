@@ -35,33 +35,33 @@ function ArtistRefsInput({ label, refs, catalog, onChange }) {
 
   return (
     <div className="space-y-2">
-      <div className="text-sm font-medium text-gray-200">{label}</div>
+      <div className="text-sm font-medium text-[var(--player-text-primary)]">{label}</div>
       <div className="flex flex-wrap gap-1.5">
         {normalizeRefs(refs).map((ref) => {
           const artist = byKey.get(artistKey(ref));
           return (
             <span
               key={artistKey(ref)}
-              className="inline-flex items-center gap-1 rounded-full bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-100"
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2.5 py-1 text-xs font-medium text-[var(--player-text-primary)]"
             >
               {artist?.name || artistKey(ref)}
               <button
                 type="button"
                 onClick={() => onChange(normalizeRefs(refs).filter((candidate) => artistKey(candidate) !== artistKey(ref)))}
-                className="text-gray-400 hover:text-white"
+                className="text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]"
               >
                 x
               </button>
             </span>
           );
         })}
-        {!normalizeRefs(refs).length ? <span className="text-sm text-gray-500">No artists selected.</span> : null}
+        {!normalizeRefs(refs).length ? <span className="text-sm text-[var(--player-text-muted)]">No artists selected.</span> : null}
       </div>
       <div className="flex gap-2">
         <select
           value={selectedKey}
           onChange={(event) => setSelectedKey(event.target.value)}
-          className="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white"
+          className="min-w-0 flex-1 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
         >
           <option value="">Add artist...</option>
           {artistOptions.map((artist) => (
@@ -74,7 +74,7 @@ function ArtistRefsInput({ label, refs, catalog, onChange }) {
           type="button"
           onClick={addSelected}
           disabled={!selectedKey}
-          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:bg-gray-700"
+          className="rounded-lg bg-[var(--player-accent)] px-3.5 py-2 text-sm font-semibold text-[var(--player-accent-foreground)] hover:bg-[var(--player-accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           Add
         </button>
@@ -264,17 +264,17 @@ export default function CreditsEditorDialog({
   const renderCreditCategory = (category, label) => {
     const options = effectiveRoleOptions[category] || [];
     return (
-      <section className="space-y-3 rounded-xl border border-gray-800 bg-gray-950/40 p-3">
-        <div className="text-sm font-semibold text-gray-100">{label}</div>
+      <section className="space-y-3 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-3.5">
+        <div className="text-sm font-semibold text-[var(--player-text-primary)]">{label}</div>
         <div className="space-y-2">
           {(creditRows[category] || []).map((row) => {
             const artist = artistByKey.get(artistKey(row.artist));
             const role = options.find((option) => option.key === row.roleKey);
             return (
-              <div key={row.id} className="flex items-center justify-between gap-3 rounded-lg bg-gray-900 px-3 py-2 text-sm">
-                <span className="min-w-0 truncate text-gray-200">
+              <div key={row.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-3 py-2 text-sm">
+                <span className="min-w-0 truncate text-[var(--player-text-primary)]">
                   <span className="font-medium">{role?.label || row.roleKey}</span>
-                  <span className="text-gray-500"> · </span>
+                  <span className="text-[var(--player-text-muted)]"> · </span>
                   {artist?.name || artistKey(row.artist)}
                 </span>
                 <button
@@ -283,7 +283,7 @@ export default function CreditsEditorDialog({
                     ...current,
                     [category]: current[category].filter((candidate) => candidate.id !== row.id),
                   }))}
-                  className="text-xs text-gray-400 hover:text-white"
+                  className="text-xs text-[var(--player-text-muted)] hover:text-[var(--player-danger)]"
                 >
                   Remove
                 </button>
@@ -295,7 +295,7 @@ export default function CreditsEditorDialog({
           <select
             value={pendingRoleByCategory[category] || ''}
             onChange={(event) => setPendingRoleByCategory((current) => ({ ...current, [category]: event.target.value }))}
-            className="rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white"
+            className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
           >
             <option value="">Role...</option>
             {options.map((option) => (
@@ -305,7 +305,7 @@ export default function CreditsEditorDialog({
           <select
             value={pendingArtistByCategory[category] || ''}
             onChange={(event) => setPendingArtistByCategory((current) => ({ ...current, [category]: event.target.value }))}
-            className="rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white"
+            className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
           >
             <option value="">Artist...</option>
             {(catalog.artistOptions || []).map((artist) => (
@@ -315,7 +315,7 @@ export default function CreditsEditorDialog({
           <button
             type="button"
             onClick={() => addCreditRow(category)}
-            className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+            className="rounded-lg bg-[var(--player-accent)] px-3.5 py-2 text-sm font-semibold text-[var(--player-accent-foreground)] hover:bg-[var(--player-accent-hover)] transition-colors"
           >
             Add
           </button>
@@ -325,23 +325,26 @@ export default function CreditsEditorDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-4">
+    <div
+      className="player-theme fixed inset-0 z-[80] flex items-center justify-center bg-[var(--player-bg-scrim)] backdrop-blur-sm px-4"
+      data-player-theme="dark-gold"
+    >
       <button type="button" className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Close credits editor" />
-      <div className="relative max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-gray-700 bg-gray-900 text-white shadow-2xl">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-800 px-5 py-4">
+      <div className="relative max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-[var(--player-border-strong)] bg-[var(--player-bg-surface)] text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)]">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--player-border-subtle)] px-5 py-4">
           <div className="text-lg font-semibold">{title}</div>
-          <button type="button" onClick={onClose} className="rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800">
+          <button type="button" onClick={onClose} className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3 py-1.5 text-sm text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors">
             Close
           </button>
         </div>
         <div className="max-h-[calc(88vh-132px)] overflow-auto space-y-4 px-5 py-4">
-          {loading ? <div className="py-8 text-center text-sm text-gray-400">Loading artists...</div> : null}
-          {error ? <div className="rounded-lg border border-red-700/50 bg-red-950/40 px-3 py-2 text-sm text-red-200">{error}</div> : null}
+          {loading ? <div className="py-8 text-center text-sm text-[var(--player-text-muted)]">Loading artists...</div> : null}
+          {error ? <div className="rounded-lg border border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] px-3 py-2 text-sm text-[var(--player-danger-text)]">{error}</div> : null}
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => handleCreateArtist('group')} className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-gray-800">
+            <button type="button" onClick={() => handleCreateArtist('group')} className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors">
               New music group
             </button>
-            <button type="button" onClick={() => handleCreateArtist('guest')} className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-gray-800">
+            <button type="button" onClick={() => handleCreateArtist('guest')} className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] transition-colors">
               New guest artist
             </button>
           </div>
@@ -349,12 +352,12 @@ export default function CreditsEditorDialog({
           {mode === 'show' ? (
             <>
               <label className="block space-y-2">
-                <span className="text-sm font-medium text-gray-200">Show description</span>
+                <span className="text-sm font-medium text-[var(--player-text-primary)]">Show description</span>
                 <textarea
                   value={description}
                   rows={4}
                   onChange={(event) => setDescription(event.target.value)}
-                  className="w-full resize-none rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white"
+                  className="w-full resize-none rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
                 />
               </label>
               <ArtistRefsInput label="Producer" refs={producerRefs} catalog={catalog} onChange={setProducerRefs} />
@@ -373,11 +376,11 @@ export default function CreditsEditorDialog({
             </>
           ) : null}
         </div>
-        <div className="flex justify-end gap-2 border-t border-gray-800 px-5 py-4">
-          <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-50">
+        <div className="flex justify-end gap-2 border-t border-[var(--player-border-subtle)] px-5 py-4">
+          <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-4 py-2 text-sm text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:opacity-50 transition-colors">
             Cancel
           </button>
-          <button type="button" onClick={handleSubmit} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:bg-gray-700">
+          <button type="button" onClick={handleSubmit} disabled={saving} className="player-play-cta rounded-lg px-4 py-2 text-sm font-semibold">
             {saving ? 'Saving...' : 'Save'}
           </button>
         </div>

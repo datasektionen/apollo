@@ -1125,35 +1125,38 @@ function ExportDialog({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div
+      className="player-theme fixed inset-0 bg-[var(--player-bg-scrim)] backdrop-blur-sm flex items-center justify-center z-[80] p-4"
+      data-player-theme="dark-gold"
+    >
       <div
-        className={`bg-gray-800 rounded-lg w-full overflow-hidden flex flex-col ${
+        className={`bg-[var(--player-bg-surface)] border border-[var(--player-border-strong)] text-[var(--player-text-primary)] rounded-2xl w-full overflow-hidden flex flex-col shadow-[var(--player-shadow-popover)] ${
           showProgressWindow
             ? 'max-w-sm'
             : 'max-w-3xl h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)]'
         }`}
       >
         {showProgressWindow ? (
-          <div className="px-3 py-3 flex items-center justify-center">
-            <h2 className="text-xl font-semibold text-center">{progressTitle}</h2>
+          <div className="px-4 py-3.5 border-b border-[var(--player-border-subtle)] flex items-center justify-center">
+            <h2 className="text-lg font-semibold text-center">{progressTitle}</h2>
           </div>
         ) : (
-          <div className="px-3 py-3 flex items-center justify-between">
-            <h2 className="text-xl font-semibold">{progressTitle}</h2>
+          <div className="px-4 py-3.5 border-b border-[var(--player-border-subtle)] flex items-center justify-between">
+            <h2 className="text-lg font-semibold">{progressTitle}</h2>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-white transition-colors"
+              className="rounded-lg p-1 text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
               disabled={isExporting}
             >
-              <X size={24} />
+              <X size={20} />
             </button>
           </div>
         )}
 
         {!showProgressWindow ? (
-          <div className="flex-1 min-h-0 overflow-hidden px-3 pt-0 pb-3 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden px-4 pt-3 pb-4 flex flex-col">
             <div className="grid grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[1fr_320px] lg:grid-rows-1 gap-4 flex-1 min-h-0">
-              <div className="bg-gray-900 rounded-lg p-3 h-full overflow-auto min-h-0">
+              <div className="bg-[var(--player-bg-surface-subtle)] border border-[var(--player-border-subtle)] rounded-xl p-3 h-full overflow-auto min-h-0">
                 {isRenderedMixExport ? (() => {
                   const renderNode = (node, depth = 0) => {
                     const preset = node.presetId ? PRESET_BY_ID[node.presetId] : null;
@@ -1168,7 +1171,7 @@ function ExportDialog({
                     return (
                       <div key={node.id} className={depth > 0 ? 'mt-0' : ''}>
                         <label
-                          className="flex h-[30px] items-center gap-1.5 rounded px-0 py-0 leading-none hover:bg-gray-800/60"
+                          className="flex h-[30px] items-center gap-1.5 rounded-md px-1 py-0 leading-none hover:bg-[var(--player-hover)] cursor-pointer transition-colors"
                           style={{ marginLeft: `${depth * 20}px` }}
                         >
                           {hasChildren ? (
@@ -1180,7 +1183,7 @@ function ExportDialog({
                                 e.stopPropagation();
                                 toggleNodeExpanded(node.id);
                               }}
-                              className="w-3 h-4 shrink-0 flex items-center justify-center text-gray-400 hover:text-gray-200"
+                              className="w-3.5 h-4 shrink-0 flex items-center justify-center text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)]"
                               disabled={isExporting}
                             >
                               {expanded ? (
@@ -1190,7 +1193,7 @@ function ExportDialog({
                               )}
                             </button>
                           ) : (
-                            <span className="w-3 h-4 shrink-0" />
+                            <span className="w-3.5 h-4 shrink-0" />
                           )}
                           <TriStateCheckbox
                             checked={state.checked}
@@ -1199,11 +1202,11 @@ function ExportDialog({
                             disabled={isExporting}
                           />
                           <span className="flex min-w-0 items-center gap-2">
-                            <span className="min-w-0 truncate whitespace-nowrap font-medium text-[22.5px] text-gray-200">
+                            <span className="min-w-0 truncate whitespace-nowrap font-medium text-[22.5px] text-[var(--player-text-primary)]">
                               {label}
                             </span>
                             {fileCountText && (
-                              <span className="relative top-px shrink-0 text-[18px] text-gray-400 leading-none">{fileCountText}</span>
+                              <span className="relative top-px shrink-0 text-[18px] text-[var(--player-text-muted)] leading-none tabular-nums">{fileCountText}</span>
                             )}
                           </span>
                         </label>
@@ -1217,7 +1220,7 @@ function ExportDialog({
                   };
                   return renderNode(audioExportTree, 0);
                 })() : (
-                  <div className="h-full flex items-center justify-center text-center text-sm text-gray-400 px-6">
+                  <div className="h-full flex items-center justify-center text-center text-sm text-[var(--player-text-muted)] px-6">
                     {isExternalDawExport
                       ? 'Exports one time-aligned stem per Apollo track. Group names are included in non-root track filenames.'
                       : 'Exports the Apollo project as an internal Apollo Project ZIP, including its project data and media.'}
@@ -1226,11 +1229,11 @@ function ExportDialog({
               </div>
               <div className="p-0 h-auto lg:h-full min-h-0 overflow-y-auto pr-1 flex flex-col">
                 <div className="mb-3">
-                  <label className="block text-xs text-gray-400 mb-1">Export type</label>
+                  <label className="block text-xs text-[var(--player-text-muted)] mb-1">Export type</label>
                   <select
                     value={exportType}
                     onChange={(e) => setExportType(e.target.value)}
-                    className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+                    className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
                     disabled={isExporting}
                   >
                     <option value={EXPORT_TYPES.RENDERED_MIXES}>Rendered Apollo Mixes</option>
@@ -1241,11 +1244,11 @@ function ExportDialog({
                 {isRenderedMixExport && (
                   <>
                     <div className="mb-3">
-                      <label className="block text-xs text-gray-400 mb-1">File format</label>
+                      <label className="block text-xs text-[var(--player-text-muted)] mb-1">File format</label>
                       <select
                         value={fileFormat}
                         onChange={(e) => setFileFormat(e.target.value)}
-                        className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+                        className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
                         disabled={isExporting}
                       >
                         <option value="mp3">MP3</option>
@@ -1253,22 +1256,22 @@ function ExportDialog({
                       </select>
                     </div>
                     <div className="mb-3">
-                      <label className="block text-xs text-gray-400 mb-1">Transformed pan range</label>
+                      <label className="block text-xs text-[var(--player-text-muted)] mb-1">Transformed pan range</label>
                       <input
                         type="number"
-                        className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+                        className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm font-mono text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
                         value={transformedPanRange}
                         onChange={(e) => handleUpdateExportSetting({ transformedPanRange: Number(e.target.value) })}
                         disabled={isExporting}
                       />
                     </div>
                     <div className="mb-3">
-                      <label className="block text-xs text-gray-400">
+                      <label className="block text-xs text-[var(--player-text-muted)]">
                         Practice focus difference (dB)
                       </label>
                       <div className="relative px-2 pt-5">
                         <div
-                          className="absolute top-1.5 text-[11px] tabular-nums whitespace-nowrap text-white font-medium leading-none pointer-events-none"
+                          className="absolute top-1.5 text-[11px] tabular-nums whitespace-nowrap text-[var(--player-accent-text)] font-semibold leading-none pointer-events-none"
                           style={{
                             left: practiceFocusDiffLabelLeft,
                             transform: 'translateX(-50%)',
@@ -1277,7 +1280,7 @@ function ExportDialog({
                           {practiceFocusDiffDb}
                         </div>
                         <div className="relative h-6">
-                          <div className="absolute z-0 left-0 right-0 top-1/2 -translate-y-1/2 h-2 rounded-full border border-slate-700 bg-[#0b1528] pointer-events-none" />
+                          <div className="absolute z-0 left-0 right-0 top-1/2 -translate-y-1/2 h-2 rounded-full border border-[var(--player-border-default)] bg-[var(--daw-bg-lcd)] pointer-events-none" />
                           <div
                             className="absolute z-10 left-0 right-0 top-1/2 -translate-y-1/2 flex items-center justify-between pointer-events-none"
                             style={{ paddingLeft: '7px', paddingRight: '7px' }}
@@ -1285,7 +1288,7 @@ function ExportDialog({
                             {Array.from({ length: 13 }, (_, idx) => (
                               <span
                                 key={idx}
-                                className={`block w-px ${idx % 2 === 0 ? 'h-3 bg-slate-400/90' : 'h-2 bg-slate-500/90'}`}
+                                className={`block w-px ${idx % 2 === 0 ? 'h-3 bg-white/35' : 'h-2 bg-white/20'}`}
                               />
                             ))}
                           </div>
@@ -1303,10 +1306,10 @@ function ExportDialog({
                       </div>
                     </div>
                     <div className="mb-3">
-                      <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+                      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
                         <input
                           type="checkbox"
-                          className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+                          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
                           checked={exportForceMonoOutput}
                           onChange={(e) => handleUpdateExportSetting({ forceMonoOutput: e.target.checked })}
                           disabled={isExporting}
@@ -1315,14 +1318,14 @@ function ExportDialog({
                       </label>
                     </div>
                     <div className="mb-3">
-                      <label className="block text-xs text-gray-400 mb-1">Panning law</label>
+                      <label className="block text-xs text-[var(--player-text-muted)] mb-1">Panning law</label>
                       <select
                         value={String(exportForceMonoOutput ? 0 : exportPanLawDb)}
                         onChange={(e) => handleUpdateExportSetting({ panLawDb: Number(e.target.value) })}
-                        className={`w-full rounded border px-3 py-2 text-sm focus:outline-none ${
+                        className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none ${
                           exportForceMonoOutput
-                            ? 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed'
-                            : 'bg-gray-900 border-gray-700'
+                            ? 'bg-[var(--player-bg-elevated)] border-[var(--player-border-subtle)] text-[var(--player-text-disabled)] cursor-not-allowed'
+                            : 'bg-[var(--player-bg-canvas)] border-[var(--player-border-default)] text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)]'
                         }`}
                         disabled={isExporting || exportForceMonoOutput}
                       >
@@ -1336,7 +1339,7 @@ function ExportDialog({
                           ))
                         )}
                       </select>
-                      <p className="mt-1 text-xs text-gray-500">
+                      <p className="mt-1 text-xs text-[var(--player-text-muted)]">
                         {exportForceMonoOutput
                           ? 'Panning law is disabled while exporting mono.'
                           : 'Stereo export pan law'}
@@ -1345,13 +1348,13 @@ function ExportDialog({
                   </>
                 )}
                 {isExternalDawExport && (
-                  <div className="mb-3 rounded bg-gray-900 px-3 py-3 text-sm text-gray-300 space-y-3">
+                  <div className="mb-3 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3 py-3 text-sm text-[var(--player-text-secondary)] space-y-3">
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">Tracks</label>
+                      <label className="block text-xs text-[var(--player-text-muted)] mb-1">Tracks</label>
                       <select
                         value={externalDawTrackScope}
                         onChange={(e) => setExternalDawTrackScope(e.target.value)}
-                        className="w-full rounded bg-gray-800 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+                        className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
                         disabled={isExporting}
                       >
                         <option value={EXTERNAL_DAW_TRACK_SCOPES.AUDIBLE}>All audible tracks</option>
@@ -1362,39 +1365,39 @@ function ExportDialog({
 
                     {externalDawTrackScope === EXTERNAL_DAW_TRACK_SCOPES.SELECTED && (
                       <div>
-                        <div className="mb-1 text-xs text-gray-500">
+                        <div className="mb-1 text-xs text-[var(--player-text-muted)]">
                           {externalDawSelectedTrackCount} selected
                         </div>
-                        <div className="max-h-40 overflow-auto rounded border border-gray-700 bg-gray-800 px-2 py-1">
+                        <div className="max-h-40 overflow-auto rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-2 py-1">
                           {externalDawSelectableTrackDescriptors.map((descriptor) => (
                               <label
                                 key={descriptor.trackId}
-                                className="flex items-center gap-2 py-1 text-xs text-gray-300"
+                                className="flex items-center gap-2 py-1 text-xs text-[var(--player-text-secondary)]"
                               >
                                 <input
                                   type="checkbox"
-                                  className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900"
+                                  className="h-3.5 w-3.5 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
                                   checked={externalDawSelectedTrackIds.has(descriptor.trackId)}
                                   onChange={() => toggleExternalDawTrack(descriptor.trackId)}
                                   disabled={isExporting}
                                 />
                                 <span className="truncate">{descriptor.pathLabel}</span>
                                 {!descriptor.audible && (
-                                  <span className="shrink-0 text-gray-500">(muted)</span>
+                                  <span className="shrink-0 text-[var(--player-text-muted)]">(muted)</span>
                                 )}
                               </label>
                             ))}
                           {externalDawSelectableTrackDescriptors.length === 0 && (
-                            <div className="py-2 text-xs text-gray-500">No audio tracks available.</div>
+                            <div className="py-2 text-xs text-[var(--player-text-muted)]">No audio tracks available.</div>
                           )}
                         </div>
                       </div>
                     )}
 
-                    <label className="flex items-center gap-2 text-sm text-gray-300 select-none">
+                    <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
                       <input
                         type="checkbox"
-                        className="h-4 w-4 rounded border-gray-600 bg-gray-900"
+                        className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
                         checked={externalDawIncludeMetronome}
                         onChange={(e) => handleExternalDawIncludeMetronomeChange(e.target.checked)}
                         disabled={isExporting}
@@ -1403,44 +1406,44 @@ function ExportDialog({
                     </label>
 
                     <div>
-                      <div className="mb-1 text-xs text-gray-400">Mix handling</div>
+                      <div className="mb-1 text-xs text-[var(--player-text-muted)]">Mix handling</div>
                       <div className="space-y-2">
                         {EXTERNAL_DAW_MIX_OPTIONS.map(([key, label, description]) => (
-                          <label key={key} className="flex items-start gap-2">
+                          <label key={key} className="flex items-start gap-2 cursor-pointer">
                             <input
                               type="checkbox"
-                              className="mt-0.5 h-4 w-4 rounded border-gray-600 bg-gray-900"
+                              className="mt-0.5 h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
                               checked={externalDawMixSettings[key]}
                               onChange={(e) => updateExternalDawMixSetting(key, e.target.checked)}
                               disabled={isExporting}
                             />
                             <span>
-                              <span className="block text-sm text-gray-300">{label}</span>
-                              <span className="block text-xs text-gray-500">{description}</span>
+                              <span className="block text-sm text-[var(--player-text-primary)]">{label}</span>
+                              <span className="block text-xs text-[var(--player-text-muted)]">{description}</span>
                             </span>
                           </label>
                         ))}
                       </div>
-                      <p className="mt-2 text-xs text-gray-500">Clip edits are always applied.</p>
+                      <p className="mt-2 text-xs text-[var(--player-text-muted)]">Clip edits are always applied.</p>
                     </div>
                   </div>
                 )}
                 {isInternalProjectExport && (
-                  <div className="mb-3 rounded bg-gray-900 px-3 py-3 text-sm text-gray-300">
-                    <div className="font-medium text-gray-200">Apollo Project ZIP</div>
-                    <p className="mt-1 text-xs text-gray-500">
+                  <div className="mb-3 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3 py-3 text-sm text-[var(--player-text-secondary)]">
+                    <div className="font-medium text-[var(--player-text-primary)]">Apollo Project ZIP</div>
+                    <p className="mt-1 text-xs text-[var(--player-text-muted)]">
                       Includes the Apollo project data and source media for importing back into Apollo.
                     </p>
                   </div>
                 )}
                 <div className="mt-auto">
                   <div className="mb-3">
-                    <label className="block text-xs text-gray-400 mb-1">Export name</label>
+                    <label className="block text-xs text-[var(--player-text-muted)] mb-1">Export name</label>
                     <input
                       type="text"
                       value={exportBaseName}
                       onChange={(e) => setExportBaseName(e.target.value)}
-                      className="w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-sm focus:outline-none"
+                      className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
                       placeholder="Export base name"
                       disabled={isExporting}
                     />
@@ -1452,9 +1455,9 @@ function ExportDialog({
                       || (isRenderedMixExport && selectedPresetIds.length === 0)
                       || (isExternalDawExport && !isExternalDawSelectionValid)
                     }
-                    className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    className="player-play-cta w-full px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2"
                   >
-                    <Upload size={20} />
+                    <Upload size={19} />
                     <span>Export</span>
                   </button>
                 </div>
@@ -1462,25 +1465,25 @@ function ExportDialog({
             </div>
           </div>
         ) : (
-          <div className="flex-1 overflow-auto px-3 pt-0 pb-3">
-            <div className="bg-gray-900 rounded-lg p-4">
+          <div className="flex-1 overflow-auto px-4 pt-3 pb-3">
+            <div className="bg-[var(--player-bg-surface-subtle)] border border-[var(--player-border-subtle)] rounded-xl p-4">
               {progressError && (
-                <div className="mb-4 rounded border border-red-700 bg-red-900/20 px-3 py-2 text-sm text-red-300">
+                <div className="mb-4 rounded-lg border border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] px-3 py-2 text-sm text-[var(--player-danger-text)]">
                   {progressError}
                 </div>
               )}
-              <div className="mb-2 text-sm text-gray-300">
+              <div className="mb-2 text-sm text-[var(--player-text-primary)]">
                 <div>
                   {`${currentStage.label}${currentStage.detail ? ` ${currentStage.detail}` : ''}`}
                 </div>
               </div>
-              <div className="h-2 w-full rounded bg-gray-800 border border-gray-700 overflow-hidden">
+              <div className="h-2 w-full rounded-full bg-[var(--player-slider-track)] overflow-hidden">
                 <div
-                  className="h-full bg-green-500"
+                  className="h-full bg-[var(--player-accent)] transition-all"
                   style={{ width: `${overallPercent}%` }}
                 />
               </div>
-              <div className="mt-3 space-y-1 text-xs text-gray-300">
+              <div className="mt-3 space-y-1 text-xs text-[var(--player-text-secondary)] tabular-nums">
                 <div className="flex items-center justify-between">
                   <span>Progress</span>
                   <span>{formatExactPercent(overallPercent)}</span>
@@ -1501,7 +1504,7 @@ function ExportDialog({
         )}
 
         {showProgressWindow && (
-          <div className="px-3 pt-0 pb-3 flex items-center justify-center">
+          <div className="px-4 pt-1 pb-4 flex items-center justify-center">
             <button
               onClick={() => {
                 if (progressStatus === 'done') {
@@ -1511,10 +1514,10 @@ function ExportDialog({
                 abortControllerRef.current?.abort();
                 setProgressMessage('Cancelling...');
               }}
-              className={`px-6 py-2 rounded transition-colors ${
+              className={`px-6 py-2 rounded-lg text-sm font-semibold transition-colors ${
                 progressStatus === 'done'
-                  ? 'bg-gray-700 hover:bg-gray-600'
-                  : 'bg-red-600 hover:bg-red-700'
+                  ? 'border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)]'
+                  : 'bg-[var(--player-danger-solid)] hover:bg-[var(--player-danger-solid-hover)] text-[var(--player-danger-foreground)]'
               }`}
             >
               {progressStatus === 'done' ? 'Close' : 'Abort'}
