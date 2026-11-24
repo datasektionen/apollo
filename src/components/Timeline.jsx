@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Plus, VolumeX } from 'lucide-react';
+import { Plus, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
 import {
   clipGainDbToPosition,
   positionToClipGainDb,
@@ -3031,6 +3031,15 @@ function Timeline({
 
   const zoomOverlay = (
     <div className="zoom-minimal-overlay" onMouseDown={(event) => event.stopPropagation()} title="At deep zoom the native scroll rail covers a local segment. Press 0 to fit the project.">
+      <button
+        type="button"
+        onClick={handleZoomOut}
+        aria-label="Zoom out"
+        title="Zoom out (-)"
+        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)] transition-colors"
+      >
+        <ZoomOut size={12} />
+      </button>
       <div className="zoom-minimal-shell">
         <div className="zoom-minimal-stick" />
         <input
@@ -3046,6 +3055,15 @@ function Timeline({
           aria-valuetext={`${formatVisibleDuration(clampedVisibleMs)} visible`}
         />
       </div>
+      <button
+        type="button"
+        onClick={handleZoomIn}
+        aria-label="Zoom in"
+        title="Zoom in (+)"
+        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)] transition-colors"
+      >
+        <ZoomIn size={12} />
+      </button>
     </div>
   );
 
@@ -3215,10 +3233,10 @@ function Timeline({
         aria-label="Add track"
         title="Add track"
         disabled={!onAddTrack}
-        className="flex h-5 w-5 md:h-6 md:w-6 items-center justify-center rounded-md text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] disabled:invisible transition-colors"
+        className="flex h-5 w-5 md:h-6 md:w-6 items-center justify-center rounded-md border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)] hover:bg-[var(--player-hover)] disabled:invisible transition-colors"
         onClick={() => onAddTrack?.()}
       >
-        <Plus size={16} strokeWidth={2.25} />
+        <Plus size={15} strokeWidth={2.25} />
       </button>
       <button
         type="button"
@@ -3227,7 +3245,7 @@ function Timeline({
         aria-pressed={followEnabled}
         className={`flex h-5 w-5 md:h-6 md:w-6 items-center justify-center rounded-md border transition-colors ${
           followEnabled
-            ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+            ? 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-accent-text)]'
             : 'border-transparent text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
         }`}
         onClick={() => setFollowEnabled((enabled) => {
@@ -3267,10 +3285,14 @@ function Timeline({
           style={{
             ...loopBand,
             height: RULER_LABEL_HEIGHT,
-            backgroundColor: loopRange.enabled ? 'var(--daw-loop-active)' : 'var(--daw-loop-inactive)',
-            borderTop: loopRange.enabled ? '2px solid var(--daw-loop-active-edge)' : '2px solid rgba(255, 255, 255, 0.16)',
-            borderLeft: loopRange.enabled ? '1px solid var(--daw-loop-active-edge)' : '1px solid rgba(255, 255, 255, 0.14)',
-            borderRight: loopRange.enabled ? '1px solid var(--daw-loop-active-edge)' : '1px solid rgba(255, 255, 255, 0.14)',
+            backgroundColor: loopRange.enabled ? 'var(--daw-loop-active)' : 'rgba(255, 255, 255, 0.025)',
+            ...(loopRange.enabled
+              ? {
+                  borderTop: '2px solid var(--daw-loop-active-edge)',
+                  borderLeft: '1px solid var(--daw-loop-active-edge)',
+                  borderRight: '1px solid var(--daw-loop-active-edge)',
+                }
+              : {}),
           }}
         />
       ) : null}

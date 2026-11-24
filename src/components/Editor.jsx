@@ -4588,11 +4588,11 @@ function Editor({
                     }}
                     disabled={recordButtonDisabled}
                     aria-label={recordBlockReason || (isRecording ? 'Stop recording' : 'Record')}
-                    className={`p-1.5 md:p-2 rounded-lg border transition-colors ${
+                    className={`p-1.5 md:p-2 rounded-lg transition-colors ${
                       isRecording
-                        ? 'bg-[var(--daw-record-bg)] hover:bg-[var(--daw-record-hover)] border-[var(--daw-record-border)] text-white shadow-[var(--daw-record-glow)] animate-pulse'
-                        : 'bg-red-500/[0.16] hover:bg-[var(--daw-record-bg)] border-red-500/60 text-red-500 hover:text-white'
-                    } disabled:bg-[var(--player-bg-elevated)] disabled:border-red-500/25 disabled:text-red-500/45 disabled:shadow-none disabled:cursor-not-allowed`}
+                        ? 'bg-[var(--daw-record-bg)] hover:bg-[var(--daw-record-hover)] text-white shadow-[var(--daw-record-glow)] animate-pulse'
+                        : 'bg-red-500/20 hover:bg-[var(--daw-record-bg)] text-red-400 hover:text-white'
+                    } disabled:bg-white/[0.04] disabled:text-red-500/45 disabled:shadow-none disabled:cursor-not-allowed`}
                   >
                     {!isRecording && selectedTrackLockedByOther ? (
                       <Lock size={15} />
@@ -5057,7 +5057,7 @@ function Editor({
                   }
                 }}
               >
-                <div className={`grid ${dawGridColsClass} min-w-0 min-h-full`}>
+                <div className={`grid ${dawGridColsClass} min-w-0 min-h-full pb-12 md:pb-0`}>
                   <div
                     className={`bg-[var(--daw-bg-sidebar)] border-r border-[var(--daw-border-row)] min-h-full min-w-0 overflow-hidden ${mobileTrackListCompact ? 'daw-tracklist-compact' : ''}`}
                     onContextMenu={(e) => {

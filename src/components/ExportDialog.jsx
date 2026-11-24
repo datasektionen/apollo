@@ -1291,17 +1291,6 @@ function ExportDialog({
                               }}
                             />
                           </div>
-                          <div
-                            className="absolute z-10 left-0 right-0 top-1/2 -translate-y-1/2 flex items-center justify-between pointer-events-none"
-                            style={{ paddingLeft: '7px', paddingRight: '7px' }}
-                          >
-                            {Array.from({ length: 13 }, (_, idx) => (
-                              <span
-                                key={idx}
-                                className={`block w-px ${idx === 6 ? 'h-3.5 bg-white/60' : idx % 2 === 0 ? 'h-3 bg-white/45' : 'h-2 bg-white/25'}`}
-                              />
-                            ))}
-                          </div>
                           <input
                             type="range"
                             min={-6}
@@ -1312,6 +1301,14 @@ function ExportDialog({
                             onChange={(e) => handleUpdateExportSetting({ practiceFocusDiffDb: Number(e.target.value) })}
                             disabled={isExporting}
                           />
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-between px-[7px] pointer-events-none">
+                          {Array.from({ length: 13 }, (_, idx) => (
+                            <span
+                              key={idx}
+                              className={`block w-px ${idx === 6 ? 'h-2 bg-white/60' : idx % 2 === 0 ? 'h-1.5 bg-white/40' : 'h-1 bg-white/20'}`}
+                            />
+                          ))}
                         </div>
                       </div>
                     </div>

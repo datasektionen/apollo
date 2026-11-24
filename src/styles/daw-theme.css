@@ -48,9 +48,9 @@
   --daw-record-soft: rgba(220, 38, 38, 0.16);
   --daw-record-border: rgba(239, 68, 68, 0.65);
   --daw-record-glow: 0 0 16px rgba(239, 68, 68, 0.42);
-  --daw-mute-active-bg: rgba(220, 38, 38, 0.24);
-  --daw-mute-active-border: rgba(248, 113, 113, 0.62);
-  --daw-mute-active-fg: #fecaca;
+  --daw-mute-active-bg: rgba(220, 38, 38, 0.36);
+  --daw-mute-active-border: rgba(248, 113, 113, 0.82);
+  --daw-mute-active-fg: #fee2e2;
   --daw-solo-active-bg: rgba(198, 155, 57, 0.24);
   --daw-solo-active-border: rgba(217, 183, 109, 0.68);
   --daw-solo-active-fg: #f3d796;
@@ -233,7 +233,8 @@
 .daw-theme .zoom-minimal-overlay {
   display: flex;
   align-items: center;
-  padding: 4px 6px;
+  gap: 6px;
+  padding: 4px 8px;
   border-radius: 9999px;
   background: rgba(16, 16, 20, 0.92);
   border: 1px solid var(--player-border-default, rgba(255, 255, 255, 0.14));
@@ -289,6 +290,10 @@
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2352525b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
+.daw-theme .daw-compact-mute-badge {
+  display: none;
+}
+
 /* Mobile / narrow viewport track rail mode (zero effect at md+ / desktop) */
 @media (max-width: 767px) {
   .daw-theme .daw-tracklist-compact [data-tree-row-id] > div {
@@ -303,5 +308,8 @@
   .daw-theme .daw-tracklist-compact .daw-role-badge {
     width: 44px;
     height: 44px;
+  }
+  .daw-theme .daw-tracklist-compact .daw-compact-mute-badge {
+    display: flex;
   }
 }

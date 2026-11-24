@@ -1351,7 +1351,7 @@ function TrackList({
               >
                 <div
                   data-track-interactive="true"
-                  className="flex-shrink-0"
+                  className="relative flex-shrink-0"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
@@ -1367,6 +1367,14 @@ function TrackList({
                   >
                     <GroupIcon key={groupIconKey} size={28} strokeWidth={1.75} className="shrink-0" />
                   </button>
+                  {row.muted ? (
+                    <span
+                      className="daw-compact-mute-badge pointer-events-none absolute -bottom-1 -right-1 h-4 w-4 items-center justify-center rounded-full bg-red-600 text-white ring-2 ring-[var(--daw-bg-sidebar)]"
+                      aria-hidden="true"
+                    >
+                      <VolumeX size={10} strokeWidth={2.5} />
+                    </span>
+                  ) : null}
                 </div>
 
                 <div data-track-details="true" className="flex-1 min-w-0 flex flex-col gap-1">
@@ -1715,7 +1723,7 @@ function TrackList({
             >
                 <div
                   data-track-interactive="true"
-                  className="flex-shrink-0"
+                  className="relative flex-shrink-0"
                   onClick={() => selectRow(row)}
                 >
                 <button
@@ -1745,6 +1753,14 @@ function TrackList({
                 >
                   <TrackIcon key={trackIconKey} size={28} strokeWidth={1.75} className="shrink-0" />
                 </button>
+                {track.muted ? (
+                  <span
+                    className="daw-compact-mute-badge pointer-events-none absolute -bottom-1 -right-1 h-4 w-4 items-center justify-center rounded-full bg-red-600 text-white ring-2 ring-[var(--daw-bg-sidebar)]"
+                    aria-hidden="true"
+                  >
+                    <VolumeX size={10} strokeWidth={2.5} />
+                  </span>
+                ) : null}
               </div>
 
               <div data-track-details="true" className="flex-1 min-w-0 flex flex-col gap-1">
