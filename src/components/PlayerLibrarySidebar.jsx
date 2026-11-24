@@ -21,6 +21,7 @@ import {
   LIBRARY_SORT_OPTIONS,
   buildLibrarySearchItems,
   buildLibraryVisibleItems,
+  canDropLibraryEntryOnTarget,
   clampLibrarySidebarWidth,
   commitLibrarySidebarDrag,
   libraryEntryFromSearchItem,
@@ -38,7 +39,7 @@ import { PLAYER_COLLECTION_TYPES } from '../types/player';
 const ENTRY_ICON_SIZE = 24;
 const HEADER_ICON_SIZE = 20;
 const TOOLBAR_ICON_SIZE = 16;
-const RESIZE_GAP_PX = 12;
+const RESIZE_GAP_PX = 10;
 const CARD_BORDER_PX = 1;
 const LIST_PAD_MIN = 4;
 const LIST_PAD_MAX = 8;
@@ -151,20 +152,37 @@ function HeaderToggleIcon({ progress, hovering, instant, animating }) {
   );
 }
 
+function isSameDropTarget(left, right) {
+  if (left === right) return true;
+  if (!left || !right || left.kind !== right.kind) return false;
+  if (left.kind === 'folder') return String(left.folderId) === String(right.folderId);
+  if (left.kind === 'playlist') return String(left.playlistId) === String(right.playlistId);
+  return left.kind === 'root';
+}
+
 function LibraryEntryRow({
   entry,
   isActive,
   layout,
+  draggableEnabled = true,
+  isDragging = false,
+  isDropTarget = false,
+  suppressHoverTooltip = false,
   onSelect,
   onPlayMix,
   onContextMenu,
   onHoverChange,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }) {
   const EntryIcon = ENTRY_ICONS[entry.kind] || Folder;
   const subtitle = libraryEntrySubtitle(entry);
   const fullyMinimized = layout.progress <= 0;
   const handleHover = (event, hovering) => {
-    if (!fullyMinimized) {
+    if (!fullyMinimized || suppressHoverTooltip) {
       onHoverChange(null);
       return;
     }
@@ -184,6 +202,7 @@ function LibraryEntryRow({
   return (
     <button
       type="button"
+      draggable={draggableEnabled}
       onClick={() => onSelect(entry)}
       onDoubleClick={async () => {
         if (entry.kind === 'mix' && entry.mix) {
@@ -193,12 +212,23 @@ function LibraryEntryRow({
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
+        onHoverChange(null);
         onContextMenu(entry, event);
       }}
       onMouseEnter={(event) => handleHover(event, true)}
       onMouseLeave={(event) => handleHover(event, false)}
+      onDragStart={(event) => onDragStart?.(entry, event)}
+      onDragEnd={(event) => onDragEnd?.(entry, event)}
+      onDragOver={(event) => onDragOver?.(entry, event)}
+      onDragLeave={(event) => onDragLeave?.(entry, event)}
+      onDrop={(event) => onDrop?.(entry, event)}
       data-active={isActive ? 'true' : 'false'}
-      className="player-library-row relative flex w-full min-w-0 items-center overflow-hidden rounded-lg text-left"
+      data-drop-target={isDropTarget ? 'true' : 'false'}
+      className={`player-library-row relative flex w-full min-w-0 items-center overflow-hidden rounded-lg text-left transition-colors ${
+        isDragging ? 'opacity-45' : ''
+      } ${
+        isDropTarget ? 'bg-[var(--player-accent-soft)] ring-1 ring-inset ring-[var(--player-accent)]' : ''
+      }`}
       style={{
         height: layout.rowHeight,
         paddingLeft: layout.iconPad,
@@ -207,12 +237,6 @@ function LibraryEntryRow({
       }}
       aria-label={fullyMinimized ? `${entry.name} (${subtitle})` : undefined}
     >
-      {isActive && !fullyMinimized ? (
-        <span
-          aria-hidden="true"
-          className="absolute left-0 top-2 bottom-2 w-[2.5px] rounded-r-full bg-[var(--player-accent)]"
-        />
-      ) : null}
       <EntryIcon
         size={ENTRY_ICON_SIZE}
         className={`shrink-0 transition-colors ${
@@ -260,6 +284,10 @@ export function PlayerLibrarySidebar({
   onCreateFolder,
   onCreatePlaylist,
   onContextMenu,
+  contextMenuOpen = false,
+  externalDraggedEntry = null,
+  onMoveEntry = null,
+  onEntryDragStart = null,
   playerTheme = 'dark-gold',
 }) {
   const saved = useMemo(() => readLibrarySidebarSettings(), []);
@@ -277,6 +305,8 @@ export function PlayerLibrarySidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   const [hoverTooltip, setHoverTooltip] = useState(null);
+  const [draggedEntry, setDraggedEntry] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
   const searchInputRef = useRef(null);
   const resizeRef = useRef(null);
   const animRef = useRef(null);
@@ -370,6 +400,26 @@ export function PlayerLibrarySidebar({
     const frame = window.requestAnimationFrame(() => searchInputRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [searchOpen]);
+
+  const activeDraggedEntry = draggedEntry || externalDraggedEntry || null;
+  const suppressHoverTooltip = contextMenuOpen || createOpen || sortOpen || Boolean(activeDraggedEntry);
+  const canDropOnRoot = useMemo(() => canDropLibraryEntryOnTarget(
+    activeDraggedEntry,
+    { kind: 'root' },
+    { folders, playlistItemsByPlaylistId }
+  ), [activeDraggedEntry, folders, playlistItemsByPlaylistId]);
+
+  useEffect(() => {
+    if (suppressHoverTooltip) {
+      setHoverTooltip(null);
+    }
+  }, [suppressHoverTooltip]);
+
+  useEffect(() => {
+    if (!activeDraggedEntry) {
+      setDropTarget(null);
+    }
+  }, [activeDraggedEntry]);
 
   useEffect(() => {
     if (!fullyMinimized) return;
@@ -485,6 +535,106 @@ export function PlayerLibrarySidebar({
     return activeCollectionType === PLAYER_COLLECTION_TYPES.MY_DEVICE_MIXES
       && activeCollectionId === 'root'
       && String(activeQueueItem?.mixId || '') === String(entry.mix?.id || '');
+  };
+
+  const updateDropTarget = useCallback((nextTarget) => {
+    setDropTarget((previous) => (isSameDropTarget(previous, nextTarget) ? previous : nextTarget));
+  }, []);
+
+  const clearDropTargetIfSame = useCallback((expectedTarget) => {
+    setDropTarget((previous) => (isSameDropTarget(previous, expectedTarget) ? null : previous));
+  }, []);
+
+  const targetForEntry = (entry) => {
+    if (entry?.kind === 'folder' && entry.folder?.id) {
+      return { kind: 'folder', folderId: entry.folder.id };
+    }
+    if (entry?.kind === 'playlist' && entry.playlist?.id) {
+      return { kind: 'playlist', playlistId: entry.playlist.id };
+    }
+    return null;
+  };
+
+  const handleRowDragStart = (entry, event) => {
+    if (isResizing) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('application/x-apollo-library-entry', entry.id);
+    event.dataTransfer.setData('text/plain', entry.id);
+    setHoverTooltip(null);
+    setDraggedEntry(entry);
+    onEntryDragStart?.(entry);
+  };
+
+  const handleRowDragEnd = () => {
+    setDraggedEntry(null);
+    setDropTarget(null);
+  };
+
+  const handleRowDragOver = (entry, event) => {
+    if (!activeDraggedEntry) return;
+    const rowTarget = targetForEntry(entry);
+    if (
+      !rowTarget
+      || !canDropLibraryEntryOnTarget(activeDraggedEntry, rowTarget, { folders, playlistItemsByPlaylistId })
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    updateDropTarget(rowTarget);
+  };
+
+  const handleRowDragLeave = (entry, event) => {
+    const rowTarget = targetForEntry(entry);
+    if (!rowTarget) return;
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      clearDropTargetIfSame(rowTarget);
+    }
+  };
+
+  const handleRowDrop = (entry, event) => {
+    if (!activeDraggedEntry) return;
+    const rowTarget = targetForEntry(entry);
+    if (
+      !rowTarget
+      || !canDropLibraryEntryOnTarget(activeDraggedEntry, rowTarget, { folders, playlistItemsByPlaylistId })
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const moving = activeDraggedEntry;
+    setDraggedEntry(null);
+    setDropTarget(null);
+    void onMoveEntry?.(moving, rowTarget);
+  };
+
+  const handleRootDragOver = (event) => {
+    if (!canDropOnRoot) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'move';
+    updateDropTarget({ kind: 'root' });
+  };
+
+  const handleRootDragLeave = (event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      clearDropTargetIfSame({ kind: 'root' });
+    }
+  };
+
+  const handleRootDrop = (event) => {
+    if (!canDropOnRoot) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const moving = activeDraggedEntry;
+    setDraggedEntry(null);
+    setDropTarget(null);
+    void onMoveEntry?.(moving, { kind: 'root' });
   };
 
   const toggleMode = () => {
@@ -615,9 +765,18 @@ export function PlayerLibrarySidebar({
       style={{ width: sidebarWidth }}
     >
       <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[10px] border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface)]">
-        <div className={`relative z-20 flex h-11 min-h-11 max-h-11 shrink-0 items-center border-b border-[var(--player-border-subtle)] ${
-          fullyMinimized ? 'justify-center px-1' : 'gap-1 pl-[15px] pr-2'
-        }`}>
+        <div
+          onDragOver={handleRootDragOver}
+          onDragLeave={handleRootDragLeave}
+          onDrop={handleRootDrop}
+          className={`relative z-20 flex h-11 min-h-11 max-h-11 shrink-0 items-center border-b border-[var(--player-border-subtle)] transition-colors ${
+            fullyMinimized ? 'justify-center px-1' : 'gap-1 pl-[15px] pr-2'
+          } ${
+            canDropOnRoot && dropTarget?.kind === 'root'
+              ? 'bg-[var(--player-accent-soft)] ring-1 ring-inset ring-[var(--player-accent)]'
+              : ''
+          }`}
+        >
           <button
             type="button"
             onClick={toggleMode}
@@ -682,7 +841,14 @@ export function PlayerLibrarySidebar({
 
         {libraryScopeFolderId && !searchQuery ? (
           <div
-            className="shrink-0 overflow-hidden border-b border-[var(--player-border-subtle)]"
+            onDragOver={handleRootDragOver}
+            onDragLeave={handleRootDragLeave}
+            onDrop={handleRootDrop}
+            className={`shrink-0 overflow-hidden border-b border-[var(--player-border-subtle)] transition-colors ${
+              canDropOnRoot && dropTarget?.kind === 'root'
+                ? 'bg-[var(--player-accent-soft)] ring-1 ring-inset ring-[var(--player-accent)]'
+                : ''
+            }`}
             style={{
               paddingLeft: lerp(4, 8, progress),
               paddingRight: lerp(4, 8, progress),
@@ -806,30 +972,50 @@ export function PlayerLibrarySidebar({
         </div>
 
         <div
-          className="flex-1 overflow-auto"
+          className={`flex-1 overflow-auto transition-colors ${
+            !libraryScopeFolderId && canDropOnRoot && dropTarget?.kind === 'root'
+              ? 'bg-[var(--player-accent-softer)]'
+              : ''
+          }`}
           style={{
             padding: layout.listPad,
             rowGap: 2,
             display: 'flex',
             flexDirection: 'column',
           }}
+          onDragOver={!libraryScopeFolderId ? handleRootDragOver : undefined}
+          onDragLeave={!libraryScopeFolderId ? handleRootDragLeave : undefined}
+          onDrop={!libraryScopeFolderId ? handleRootDrop : undefined}
           onContextMenu={(event) => {
             event.preventDefault();
+            setHoverTooltip(null);
             onContextMenu?.(null, event);
           }}
         >
-          {displayedItems.map((entry) => (
-            <LibraryEntryRow
-              key={entry.id}
-              entry={entry}
-              isActive={isEntryActive(entry)}
-              layout={layout}
-              onSelect={onSelectEntry}
-              onPlayMix={onPlayMix}
-              onContextMenu={(nextEntry, event) => onContextMenu?.(nextEntry, event)}
-              onHoverChange={setHoverTooltip}
-            />
-          ))}
+          {displayedItems.map((entry) => {
+            const rowTarget = targetForEntry(entry);
+            return (
+              <LibraryEntryRow
+                key={entry.id}
+                entry={entry}
+                isActive={isEntryActive(entry)}
+                layout={layout}
+                draggableEnabled={!isResizing}
+                isDragging={activeDraggedEntry?.id === entry.id}
+                isDropTarget={Boolean(rowTarget && isSameDropTarget(dropTarget, rowTarget))}
+                suppressHoverTooltip={suppressHoverTooltip}
+                onSelect={onSelectEntry}
+                onPlayMix={onPlayMix}
+                onContextMenu={(nextEntry, event) => onContextMenu?.(nextEntry, event)}
+                onHoverChange={setHoverTooltip}
+                onDragStart={handleRowDragStart}
+                onDragEnd={handleRowDragEnd}
+                onDragOver={handleRowDragOver}
+                onDragLeave={handleRowDragLeave}
+                onDrop={handleRowDrop}
+              />
+            );
+          })}
           {!displayedItems.length ? (
             <div
               className="text-xs text-[var(--player-text-muted)]"
@@ -842,6 +1028,21 @@ export function PlayerLibrarySidebar({
               }}
             >
               {searchQuery ? 'No matching library items.' : 'No library items here.'}
+            </div>
+          ) : null}
+          {canDropOnRoot && !fullyMinimized ? (
+            <div
+              data-library-root-dropzone="true"
+              onDragOver={handleRootDragOver}
+              onDragLeave={handleRootDragLeave}
+              onDrop={handleRootDrop}
+              className={`mt-1 rounded-lg border border-dashed px-3 py-2 text-center text-xs font-medium transition-colors ${
+                dropTarget?.kind === 'root'
+                  ? 'border-[var(--player-accent)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                  : 'border-[var(--player-border-default)] text-[var(--player-text-muted)]'
+              }`}
+            >
+              Drop here to move to Library root
             </div>
           ) : null}
         </div>
@@ -874,7 +1075,7 @@ export function PlayerLibrarySidebar({
 
       {createMenuNode}
       {sortMenuNode}
-      <LibraryHoverTooltip tooltip={hoverTooltip} playerTheme={playerTheme} />
+      <LibraryHoverTooltip tooltip={suppressHoverTooltip ? null : hoverTooltip} playerTheme={playerTheme} />
     </div>
   );
 }

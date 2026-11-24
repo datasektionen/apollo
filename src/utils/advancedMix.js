@@ -10,9 +10,9 @@ export const ADVANCED_MIX_FOCUS_MODES = {
 
 export const ADVANCED_MIX_PRACTICE_FOCUS_STEPS = [
   'omitted',
-  -15, -12, -9, -6, -3,
+  -20, -18, -16, -14, -12, -10, -8, -6, -4, -2,
   0,
-  3, 6, 9, 12, 15,
+  2, 4, 6, 8, 10, 12, 14, 16, 18, 20,
   'solo',
 ];
 export const ADVANCED_MIX_PRACTICE_FOCUS_NUMERIC_STEPS = ADVANCED_MIX_PRACTICE_FOCUS_STEPS.filter((step) => typeof step === 'number');

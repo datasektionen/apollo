@@ -155,13 +155,7 @@ export function MobileLibraryTab({
                   role="button"
                   tabIndex={0}
                 >
-                  {isThisPlaying ? (
-                    <span
-                      aria-hidden="true"
-                      className="absolute left-1.5 top-3 bottom-3 w-[2.5px] rounded-full bg-[var(--player-accent)]"
-                    />
-                  ) : null}
-                  <div className="flex items-center gap-3 min-w-0 flex-1 pl-1">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="flex w-6 shrink-0 items-center justify-center">
                       {activeAndPlaying ? (
                         <span className="flex items-end gap-[2px] h-3.5" aria-hidden="true">

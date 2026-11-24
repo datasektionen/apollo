@@ -1,3 +1,5 @@
+import { formatMusicalNumberForDisplay } from './naming';
+
 export const PLAYER_SEARCH_TYPES = {
   ALL: 'all',
   SHOWS: 'shows',
@@ -227,7 +229,7 @@ export function scoreTextMatch(haystack, terms = []) {
 }
 
 function songTitle(song) {
-  const number = String(song?.musicalNumber || '').trim();
+  const number = formatMusicalNumberForDisplay(song?.musicalNumber || '');
   const name = String(song?.projectName || song?.name || 'Untitled').trim();
   return number ? `${number} - ${name}` : name;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Info } from 'lucide-react';
 import { AUTO_PAN_STRATEGIES } from '../utils/choirAutoPan';
+import PlayerRangeSlider from './PlayerRangeSlider';
 import { PAN_LAW_OPTIONS_DB } from '../utils/audio';
 import { audioManager } from '../lib/audioManager';
 import {
@@ -158,6 +159,7 @@ function SettingSliderRow({
   onChange,
   disabled = false,
   extraControl = null,
+  usePlayerSliders = false,
 }) {
   const [draft, setDraft] = useState(String(value));
 
@@ -183,17 +185,30 @@ function SettingSliderRow({
         <span className="text-xs text-gray-300 truncate" title={label}>{label}</span>
         <SettingInfoTooltip {...info} />
       </div>
-      <input
-        type="range"
-        aria-label={label}
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full h-2 rounded bg-gray-800 cursor-pointer accent-blue-500"
-      />
+      {usePlayerSliders ? (
+        <PlayerRangeSlider
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(Number(e.target.value))}
+          ariaLabel={label}
+          className="w-full h-5"
+        />
+      ) : (
+        <input
+          type="range"
+          aria-label={label}
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="w-full h-2 rounded bg-gray-800 cursor-pointer accent-blue-500"
+        />
+      )}
       <input
         type="number"
         aria-label={`${label} input`}
@@ -235,6 +250,7 @@ export function PlaybackDevicesSettingsPanel({
   measuringRecordingDelay = false,
   recordingDelayError = '',
   showPlaybackSpeedSettings = false,
+  usePlayerSliders = false,
 }) {
   const detectedStereoOutput = outputChannelCount > 1;
   const speedSettings = normalizePlaybackSpeedSettings(audioSettings?.playbackSpeedSettings);
@@ -419,6 +435,7 @@ export function PlaybackDevicesSettingsPanel({
                 step={100}
                 value={speedSettings.tonalityHz}
                 onChange={(tonalityHz) => updateSpeedSettings({ tonalityHz })}
+                usePlayerSliders={usePlayerSliders}
               />
 
               {/* 4. Vocal Formant Compensation */}
@@ -434,6 +451,7 @@ export function PlaybackDevicesSettingsPanel({
                 step={10}
                 value={speedSettings.formantBaseHz}
                 onChange={(formantBaseHz) => updateSpeedSettings({ formantBaseHz })}
+                usePlayerSliders={usePlayerSliders}
                 extraControl={
                   <input
                     type="checkbox"
@@ -458,6 +476,7 @@ export function PlaybackDevicesSettingsPanel({
                 step={5}
                 value={speedSettings.blockMs}
                 onChange={(blockMs) => updateSpeedSettings({ blockMs })}
+                usePlayerSliders={usePlayerSliders}
               />
 
               {/* 6. Overlap */}
@@ -473,6 +492,7 @@ export function PlaybackDevicesSettingsPanel({
                 step={1}
                 value={speedSettings.overlap}
                 onChange={(overlap) => updateSpeedSettings({ overlap, highOverlap: overlap >= 8 })}
+                usePlayerSliders={usePlayerSliders}
               />
             </div>
           </div>

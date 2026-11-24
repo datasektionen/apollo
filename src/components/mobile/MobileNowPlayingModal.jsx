@@ -23,6 +23,7 @@ import {
   Scale,
 } from 'lucide-react';
 import { formatClock, formatDurationMs } from '../../utils/playerTime';
+import { formatMusicalNumberForDisplay } from '../../utils/naming';
 import { PLAYER_LOOP_MODES } from '../../types/player';
 import {
   ADVANCED_MIX_PRACTICE_FOCUS_STEPS,
@@ -38,6 +39,8 @@ import {
 import { getPlacedLyricLines } from '../../utils/lyricTimeline';
 import { getProjectCredits } from '../../lib/serverApi';
 import PlayerLyricsView from '../PlayerLyricsView';
+import PlayerRangeSlider from '../PlayerRangeSlider';
+import PracticeFocusSlider from '../PracticeFocusSlider';
 
 function formatFocusBadge(step) {
   if (step === 'omitted') return 'Omitted';
@@ -89,13 +92,7 @@ function MobileSliderControl({
           onClick={onIconClick}
           aria-label={iconLabel}
           title={iconLabel}
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors active:scale-95 ${
-            danger
-              ? 'border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] text-[var(--player-danger)]'
-              : active
-                ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] hover:text-[var(--player-accent-hover)]'
-                : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
-          }`}
+          className="flex h-9 w-9 shrink-0 items-center justify-center text-[var(--player-text-secondary)] active:scale-95 transition-transform"
         >
           <Icon size={18} />
         </button>
@@ -237,7 +234,7 @@ export function MobileNowPlayingModal({
 
   const title = activeQueueItem.name || activeQueueItem.title || 'Untitled Track';
   const subtitle = activeQueueItem.showName || activeQueueItem.artist || activeQueueItem.projectName || 'Apollo Choir';
-  const musicalNumber = activeQueueItem.musicalNumber || '';
+  const musicalNumber = formatMusicalNumberForDisplay(activeQueueItem.musicalNumber || '');
   const collectionName = activeQueueItem.collectionName || activeQueueItem.showName || 'Queue';
   const totalDurationLabel = formatDurationMs(
     activeQueueItem.durationMs ?? (durationSec > 0 ? durationSec * 1000 : 0)
@@ -283,6 +280,7 @@ export function MobileNowPlayingModal({
 
   const clampedPan = Math.max(0, Math.min(200, Number(practicePanRange) ?? 100));
   const panPct = (clampedPan / 200) * 100;
+  const panFocusAxisPct = ((200 - (clampedPan / 2)) / 200) * 100;
 
   const isFocusActive = focusStep === 'omitted' || focusStep === 'solo' || Number(focusStep) !== 0;
   const isPanActive = clampedPan !== 100;
@@ -475,19 +473,19 @@ export function MobileNowPlayingModal({
 
           {/* Scrubber / Progress Bar */}
           <div className="space-y-1.5">
-            <input
-              type="range"
-              min="0"
+            <PlayerRangeSlider
+              touch
+              min={0}
               max={seekMax}
-              step="0.01"
+              step={0.01}
               value={seekVal}
+              percent={seekPct}
               onPointerDown={beginTimelineScrub}
               onPointerUp={endTimelineScrub}
               onPointerCancel={endTimelineScrub}
               onChange={(e) => onSeek?.(Number(e.target.value))}
-              style={{ '--player-range-pct': `${seekPct}%` }}
-              className="player-range player-range-touch w-full cursor-pointer block"
-              aria-label="Seek track position"
+              ariaLabel="Seek track position"
+              className="w-full h-6"
             />
             <div className="flex justify-between text-[11px] font-medium text-[var(--player-text-secondary)] tabular-nums">
               <span>{formatClock(currentTimeSec)}</span>
@@ -629,16 +627,16 @@ export function MobileNowPlayingModal({
               iconLabel={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
               onIconClick={handleMetronomeIconClick}
             >
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
+              <PlayerRangeSlider
+                touch
+                min={0}
+                max={100}
+                step={1}
                 value={effectiveMetronome}
+                percent={effectiveMetronome}
                 onChange={(e) => onSetMetronomeVolume?.(Number(e.target.value))}
-                style={{ '--player-range-pct': `${effectiveMetronome}%` }}
-                className="player-range player-range-touch w-full cursor-pointer"
-                aria-label="Metronome Volume Slider"
+                ariaLabel="Metronome Volume Slider"
+                className="w-full h-6"
               />
             </MobileSliderControl>
           )}
@@ -652,62 +650,36 @@ export function MobileNowPlayingModal({
             iconLabel="Cycle practice focus"
             onIconClick={handleFocusIconClick}
           >
-            <span
-              aria-hidden="true"
-              className={`pointer-events-none absolute left-0 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full transition-colors ${
-                focusStep === 'omitted'
-                  ? 'bg-[var(--player-accent)] ring-2 ring-[var(--player-focus-ring)]'
-                  : 'bg-[var(--player-border-strong)]'
-              }`}
-            />
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
-            />
-            <span
-              aria-hidden="true"
-              className={`pointer-events-none absolute right-0 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full transition-colors ${
-                focusStep === 'solo'
-                  ? 'bg-[var(--player-accent)] ring-2 ring-[var(--player-focus-ring)]'
-                  : 'bg-[var(--player-border-strong)]'
-              }`}
-            />
-            <input
-              type="range"
-              min="0"
-              max={focusSteps.length - 1}
-              step="1"
-              value={clampedFocusIdx}
-              onChange={(e) => onSetPracticeFocusControl?.(Number(e.target.value))}
-              style={getBipolarTrackStyle(focusPct)}
-              className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
-              aria-label="Practice Focus Slider"
+            <PracticeFocusSlider
+              touch
+              valueIndex={clampedFocusIdx}
+              onChangeIndex={(idx) => onSetPracticeFocusControl?.(idx)}
+              ariaLabel="Practice Focus"
+              inputAriaLabel="Practice Focus Slider"
+              className="w-full"
             />
           </MobileSliderControl>
 
           <MobileSliderControl
             divider
-            label="Choir Width"
+            label="Practice Pan"
             readout={`${clampedPan}%`}
             active={isPanActive}
             icon={ChevronsLeftRightEllipsis}
-            iconLabel="Jump choir width to extreme"
+            iconLabel="Jump practice pan to extreme"
             onIconClick={handlePanIconClick}
           >
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
-            />
-            <input
-              type="range"
-              min="0"
-              max="200"
-              step="5"
+            <PlayerRangeSlider
+              touch
+              min={0}
+              max={200}
+              step={5}
               value={clampedPan}
+              percent={panPct}
+              secondaryDotPercent={focusStep === 'omitted' || focusStep === 'solo' ? null : panFocusAxisPct}
               onChange={(e) => onSetPracticePanRange?.(Number(e.target.value))}
-              style={getBipolarTrackStyle(panPct)}
-              className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
-              aria-label="Practice Pan Range Slider"
+              ariaLabel="Practice Pan Range Slider"
+              className="w-full h-6"
             />
           </MobileSliderControl>
 
@@ -720,20 +692,17 @@ export function MobileNowPlayingModal({
             iconLabel="Step playback speed"
             onIconClick={handleSpeedIconClick}
           >
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
-            />
-            <input
-              type="range"
+            <PlayerRangeSlider
+              touch
+              bipolar
               min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
               max={PLAYBACK_SPEED_DRAG_BOUNDS.MAX}
               step={PLAYBACK_SPEED_DRAG_BOUNDS.STEP}
               value={clampedSpeed}
+              percent={speedPct}
               onChange={(e) => onSetPlaybackSpeed?.(Number(e.target.value))}
-              style={getBipolarTrackStyle(speedPct)}
-              className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
-              aria-label="Playback Speed Slider"
+              ariaLabel="Playback Speed Slider"
+              className="w-full h-6"
             />
           </MobileSliderControl>
 
@@ -746,20 +715,17 @@ export function MobileNowPlayingModal({
             iconLabel={isTransposeActive ? 'Reset pitch transpose to 0 st' : 'Restore previous pitch transpose'}
             onIconClick={handleTransposeIconClick}
           >
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
-            />
-            <input
-              type="range"
+            <PlayerRangeSlider
+              touch
+              bipolar
               min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
               max={PLAYBACK_TRANSPOSE_BOUNDS.MAX}
               step={PLAYBACK_TRANSPOSE_BOUNDS.STEP}
               value={clampedTranspose}
+              percent={transposePct}
               onChange={(e) => onSetPlaybackTranspose?.(Number(e.target.value))}
-              style={getBipolarTrackStyle(transposePct)}
-              className="player-range player-range-bipolar player-range-touch relative z-10 w-full cursor-pointer"
-              aria-label="Pitch Transpose Slider"
+              ariaLabel="Pitch Transpose Slider"
+              className="w-full h-6"
             />
           </MobileSliderControl>
 
@@ -773,19 +739,19 @@ export function MobileNowPlayingModal({
             iconLabel={isMuted || effectiveVolume === 0 ? 'Unmute master volume' : 'Mute master volume'}
             onIconClick={handleToggleMute}
           >
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="1"
+            <PlayerRangeSlider
+              touch
+              min={0}
+              max={100}
+              step={1}
               value={effectiveVolume}
+              percent={effectiveVolume}
               onChange={(e) => {
                 setIsMuted(false);
                 onSetVolume?.(Number(e.target.value));
               }}
-              style={{ '--player-range-pct': `${effectiveVolume}%` }}
-              className="player-range player-range-touch w-full cursor-pointer"
-              aria-label="Master Volume Slider"
+              ariaLabel="Master Volume Slider"
+              className="w-full h-6"
             />
           </MobileSliderControl>
         </section>
@@ -812,7 +778,7 @@ export function MobileNowPlayingModal({
                 durationMs={durationSec * 1000}
                 songTitle={title}
                 showHeader={false}
-                contentClassName="px-0 pt-5 pb-6"
+                contentClassName="px-0"
                 onSeek={onSeek}
               />
             </div>

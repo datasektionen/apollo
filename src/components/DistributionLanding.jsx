@@ -76,6 +76,7 @@ function PlatformCard({
   download,
   trailingIcon: TrailingIcon = ChevronRight,
 }) {
+  const isDownloadIcon = TrailingIcon === Download;
   const cardClass = `group flex w-full items-center justify-between rounded-2xl border p-4 text-left transition-all cursor-pointer ${
     active
       ? 'border-[var(--player-accent-border)] bg-[var(--player-bg-elevated)] shadow-[var(--player-shadow-accent)]'
@@ -103,7 +104,9 @@ function PlatformCard({
       </div>
       <TrailingIcon
         size={18}
-        className={`shrink-0 transition-transform group-hover:translate-x-0.5 ${
+        className={`shrink-0 transition-transform duration-150 ${
+          isDownloadIcon ? 'group-hover:scale-110' : 'group-hover:translate-x-0.5'
+        } ${
           active ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)] group-hover:text-[var(--player-text-primary)]'
         }`}
       />
@@ -126,7 +129,7 @@ function PlatformCard({
 }
 
 const KBD_PILL_CLASS = 'inline-flex items-center gap-1 rounded-md border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2 py-0.5 text-xs font-semibold text-[var(--player-text-primary)]';
-const PRIMARY_CTA_CLASS = 'flex w-full items-center justify-center gap-2.5 rounded-xl bg-[var(--player-accent)] hover:bg-[var(--player-accent-hover)] py-3.5 text-sm font-bold text-[var(--player-accent-foreground)] shadow-[var(--player-shadow-accent)] transition-colors disabled:opacity-50';
+const PRIMARY_CTA_CLASS = 'group flex w-full items-center justify-center gap-2.5 rounded-xl bg-[var(--player-accent)] hover:bg-[var(--player-accent-hover)] py-3.5 text-sm font-bold text-[var(--player-accent-foreground)] shadow-[var(--player-shadow-accent)] transition-colors disabled:opacity-50';
 const GUIDE_CARD_CLASS = 'player-hero-surface rounded-2xl border border-[var(--player-accent-border)] bg-[var(--player-bg-surface)] p-5 sm:p-7 shadow-[var(--player-shadow-elevated)] space-y-5';
 
 export default function DistributionLanding() {
@@ -207,7 +210,7 @@ export default function DistributionLanding() {
         disabled={installingPwa}
         className={PRIMARY_CTA_CLASS}
       >
-        <Download size={18} />
+        <Download size={18} className="transition-transform duration-150 group-hover:scale-110" />
         <span>{installingPwa ? 'Installing...' : 'Install Apollo PWA'}</span>
       </button>
     ) : null
@@ -225,7 +228,7 @@ export default function DistributionLanding() {
             download={isDirectApk ? 'apollo.apk' : undefined}
             className={`${PRIMARY_CTA_CLASS} text-base`}
           >
-            <Download size={20} />
+            <Download size={20} className="transition-transform duration-150 group-hover:scale-110" />
             <span>Download APK</span>
           </a>
         </section>

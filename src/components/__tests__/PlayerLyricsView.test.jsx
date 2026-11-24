@@ -259,7 +259,8 @@ describe('PlayerLyricsView', () => {
     act(() => vi.advanceTimersByTime(500));
     act(() => scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true })));
 
-    expect(scrollContainer.className).toContain('pt-4 pb-4');
+    const lyricList = scrollContainer.querySelector('[data-lyric-id]')?.parentElement;
+    expect(lyricList?.className).toContain('pt-[62px] pb-[118px]');
     expect(scrollContainer.className).not.toContain('pb-[70vh]');
     expect(view.container.querySelector('button[aria-label="Sync to current lyric"]')).toBeNull();
   });

@@ -46,6 +46,7 @@ export function MobilePlayerView({
   folders,
   playlistItemsByPlaylistId,
   tuttiMixes,
+  homeMixes = null,
   globalMixes,
   myMixes,
   onPlayMix,
@@ -94,7 +95,7 @@ export function MobilePlayerView({
         {activeTab === 'home' && (
           <MobileHomeTab
             shows={shows}
-            tuttiMixes={tuttiMixes}
+            tuttiMixes={homeMixes ?? tuttiMixes}
             playlists={playlists}
             activeQueueItem={activeQueueItem}
             isPlaying={isPlaying}

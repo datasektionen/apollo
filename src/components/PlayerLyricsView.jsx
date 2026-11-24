@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, ChevronsDown, ChevronsUp } from 'lucide-react';
 import { getPlacedLyricLines } from '../utils/lyricTimeline';
 
-const LYRICS_TOP_INSET_PX = 16;
+const LYRICS_TOP_INSET_PX = 62;
 
 function CircleChevronsIcon({ direction }) {
   const Chevrons = direction === 'up' ? ChevronsUp : ChevronsDown;
@@ -21,7 +21,7 @@ function PlayerLyricsView({
   isLoading = false,
   songTitle = '',
   showHeader = true,
-  contentClassName = 'px-6 pt-4 pb-4 sm:px-12',
+  contentClassName = 'px-6 sm:px-12',
   onSeek,
 }) {
   const lines = Array.isArray(lyrics?.lines) ? lyrics.lines : [];
@@ -216,11 +216,11 @@ function PlayerLyricsView({
         onScroll={handleScroll}
       >
         {isLoading && lines.length === 0 ? (
-          <div className="mx-auto max-w-3xl py-6 text-lg text-[var(--player-text-secondary)]">Loading lyrics…</div>
+          <div className="mx-auto max-w-3xl pt-[62px] pb-6 text-lg text-[var(--player-text-secondary)]">Loading lyrics…</div>
         ) : lines.length === 0 ? (
-          <div className="mx-auto max-w-3xl py-6 text-lg text-[var(--player-text-muted)]">No lyrics available for this song.</div>
+          <div className="mx-auto max-w-3xl pt-[62px] pb-6 text-lg text-[var(--player-text-muted)]">No lyrics available for this song.</div>
         ) : (
-          <div className="mx-auto max-w-3xl space-y-5 pb-16">
+          <div className="mx-auto max-w-3xl space-y-5 pt-[62px] pb-[118px]">
             {lines.map((line, index) => {
               const text = String(line?.text ?? '');
               if (!text.trim()) {

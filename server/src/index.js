@@ -113,6 +113,47 @@ import {
   WRITE_REJECTED_CODE,
 } from './rbac.js';
 import { trackAccessStampsDiffer, collectTrackAccessStamps } from '../../shared/accessRules.js';
+import {
+  normalizeMusicalNumber,
+  isValidMusicalNumber,
+  compareMusicalNumbers,
+  formatMusicalNumberForDisplay,
+  musicalNumberUniquenessKey,
+} from '../../shared/musicalNumber.js';
+
+function isUniqueMusicalNumberError(error) {
+  if (error?.code !== '23505') return false;
+  const constraint = String(error?.constraint || '').toLowerCase();
+  const detail = String(error?.detail || '').toLowerCase();
+  return constraint === 'idx_projects_show_musical_number_unique' || detail.includes('musical_number');
+}
+
+function formatDuplicateMusicalNumberMessage(musicalNumber) {
+  const display = formatMusicalNumberForDisplay(musicalNumber) || normalizeMusicalNumber(musicalNumber);
+  return `Musical number "${display}" is already used in this show`;
+}
+
+async function findConflictingMusicalNumberProject(db, showId, musicalNumber, excludeProjectId = null) {
+  const normalizedShowId = String(showId || '').trim();
+  const key = musicalNumberUniquenessKey(musicalNumber);
+  if (!normalizedShowId || !key) return null;
+  const params = [normalizedShowId, key];
+  let excludeClause = '';
+  if (excludeProjectId) {
+    params.push(String(excludeProjectId));
+    excludeClause = 'AND id <> $3';
+  }
+  const result = await db.query(
+    `SELECT id, name, musical_number AS "musicalNumber"
+     FROM projects
+     WHERE show_id = $1
+       AND LOWER(REPLACE(BTRIM(musical_number), '_', '')) = $2
+       ${excludeClause}
+     LIMIT 1`,
+    params
+  );
+  return result.rows[0] || null;
+}
 import { snapshotDurationMsSql } from './projectDuration.js';
 import { collectCreditInvolvements, groupInvolvementsByArtist } from './playerSearch.js';
 
@@ -202,14 +243,6 @@ function toSafeName(name, fallback = 'file') {
   return (name || fallback).replace(/[^a-zA-Z0-9._-]+/g, '_');
 }
 
-function normalizeMusicalNumber(value) {
-  return String(value || '').trim();
-}
-
-function isValidMusicalNumber(value) {
-  return /^[0-9]+\..+$/.test(normalizeMusicalNumber(value));
-}
-
 function normalizeSceneOrder(value) {
   if (value == null || value === '') return null;
   const numeric = Number(value);
@@ -219,57 +252,6 @@ function normalizeSceneOrder(value) {
 
 function normalizeProjectPublished(value) {
   return value === true || String(value ?? '').trim().toLowerCase() === 'true';
-}
-
-function parseMusicalNumberSegments(value) {
-  return normalizeMusicalNumber(value)
-    .split('.')
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-}
-
-function classifyMusicalToken(token) {
-  if (/^dk$/i.test(token)) return 0;
-  if (/^\d+$/.test(token)) return 1;
-  return 2;
-}
-
-function compareMusicalNumbers(leftRaw, rightRaw) {
-  const left = parseMusicalNumberSegments(leftRaw);
-  const right = parseMusicalNumberSegments(rightRaw);
-  const leftMajor = Number.parseInt(left[0] || '0', 10);
-  const rightMajor = Number.parseInt(right[0] || '0', 10);
-
-  if (leftMajor !== rightMajor) return leftMajor - rightMajor;
-
-  const maxParts = Math.max(left.length, right.length);
-  for (let i = 1; i < maxParts; i += 1) {
-    const leftPart = left[i];
-    const rightPart = right[i];
-
-    if (leftPart == null && rightPart == null) return 0;
-    if (leftPart == null) return -1;
-    if (rightPart == null) return 1;
-
-    const leftKind = classifyMusicalToken(leftPart);
-    const rightKind = classifyMusicalToken(rightPart);
-    if (leftKind !== rightKind) return leftKind - rightKind;
-
-    if (leftKind === 1) {
-      const leftNumber = Number.parseInt(leftPart, 10);
-      const rightNumber = Number.parseInt(rightPart, 10);
-      if (leftNumber !== rightNumber) return leftNumber - rightNumber;
-      continue;
-    }
-
-    const textCompare = leftPart.localeCompare(rightPart, undefined, {
-      sensitivity: 'base',
-      numeric: true,
-    });
-    if (textCompare !== 0) return textCompare;
-  }
-
-  return 0;
 }
 
 function compareProjectsByMusicalOrder(left, right) {
@@ -577,6 +559,7 @@ async function appendProjectOp({ projectId, userId, clientOpId, op }) {
     const projectResult = await client.query(
       `SELECT id,
               name,
+              show_id AS "showId",
               published,
               created_by AS "createdByUserId"
        FROM projects
@@ -640,9 +623,22 @@ async function appendProjectOp({ projectId, userId, clientOpId, op }) {
     const currentMusicalNumber = normalizeMusicalNumber(currentSnapshot?.musicalNumber || '');
     if (nextMusicalNumber) {
       if (!isValidMusicalNumber(nextMusicalNumber)) {
-        throw new Error('Invalid musicalNumber in operation payload');
+        const invalidError = new Error('Invalid musicalNumber in operation payload');
+        invalidError.statusCode = 400;
+        throw invalidError;
       }
       if (nextMusicalNumber !== currentMusicalNumber) {
+        const conflictingProject = await findConflictingMusicalNumberProject(
+          client,
+          project.showId,
+          nextMusicalNumber,
+          projectId
+        );
+        if (conflictingProject) {
+          const dupError = new Error(formatDuplicateMusicalNumberMessage(nextMusicalNumber));
+          dupError.statusCode = 409;
+          throw dupError;
+        }
         projectMetadataUpdates.push(`musical_number = $${metadataIdx++}`);
         projectMetadataValues.push(nextMusicalNumber);
       }
@@ -741,6 +737,15 @@ function describeProjectWriteError(error) {
       status: 403,
       code: WRITE_REJECTED_CODE,
       message: String(error.message || 'Change rejected by project permissions'),
+    };
+  }
+  if (error?.statusCode === 409 || isUniqueMusicalNumberError(error)) {
+    return {
+      status: 409,
+      code: 'DUPLICATE_MUSICAL_NUMBER',
+      message: isUniqueMusicalNumberError(error)
+        ? 'Musical number is already used in this show'
+        : String(error.message || 'Musical number is already used in this show'),
     };
   }
   return null;
@@ -2828,11 +2833,12 @@ app.get('/api/projects', requireAuth, async (req, res) => {
 });
 
 app.post('/api/projects', requireAuth, async (req, res) => {
+  let requestedMusicalNumber = '0.0';
   try {
     const name = String(req.body?.name || '').trim();
     const initialSnapshot = req.body?.initialSnapshot;
     const requestedShowId = String(req.body?.showId || initialSnapshot?.showId || '').trim();
-    const requestedMusicalNumber = normalizeMusicalNumber(
+    requestedMusicalNumber = normalizeMusicalNumber(
       req.body?.musicalNumber ?? initialSnapshot?.musicalNumber ?? '0.0'
     );
     const requestedSceneOrder = normalizeSceneOrder(req.body?.sceneOrder);
@@ -2845,7 +2851,7 @@ app.post('/api/projects', requireAuth, async (req, res) => {
       return;
     }
     if (!isValidMusicalNumber(requestedMusicalNumber)) {
-      res.status(400).json({ error: 'Musical number must start with "<number>." (example: 2.1)' });
+      res.status(400).json({ error: 'Musical number must be 1 to 9 characters and include at least one non-underscore character' });
       return;
     }
     if (Number.isNaN(requestedSceneOrder)) {
@@ -2895,6 +2901,19 @@ app.post('/api/projects', requireAuth, async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const conflictingProject = await findConflictingMusicalNumberProject(
+        client,
+        show.id,
+        requestedMusicalNumber
+      );
+      if (conflictingProject) {
+        await client.query('ROLLBACK');
+        res.status(409).json({
+          error: formatDuplicateMusicalNumberMessage(requestedMusicalNumber),
+        });
+        return;
+      }
+
       await client.query(
         `INSERT INTO projects(id, name, musical_number, scene_order, show_id, published, created_by, credits_json)
          VALUES($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
@@ -2943,6 +2962,10 @@ app.post('/api/projects', requireAuth, async (req, res) => {
       snapshot,
     });
   } catch (error) {
+    if (isUniqueMusicalNumberError(error)) {
+      res.status(409).json({ error: formatDuplicateMusicalNumberMessage(requestedMusicalNumber) });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'Failed to create project' });
   }
@@ -2995,6 +3018,7 @@ app.patch('/api/projects/:id', requireAuth, async (req, res) => {
   const permission = await requireProjectPermission(req, res, 'write');
   if (!permission) return;
 
+  let normalizedMusicalNumber = null;
   try {
     const hasName = Object.prototype.hasOwnProperty.call(req.body || {}, 'name');
     const hasMusicalNumber = Object.prototype.hasOwnProperty.call(req.body || {}, 'musicalNumber');
@@ -3022,14 +3046,14 @@ app.patch('/api/projects/:id', requireAuth, async (req, res) => {
     }
 
     if (hasMusicalNumber) {
-      const musicalNumber = normalizeMusicalNumber(req.body?.musicalNumber);
-      if (!isValidMusicalNumber(musicalNumber)) {
-        res.status(400).json({ error: 'Musical number must start with "<number>." (example: 2.1)' });
+      normalizedMusicalNumber = normalizeMusicalNumber(req.body?.musicalNumber);
+      if (!isValidMusicalNumber(normalizedMusicalNumber)) {
+        res.status(400).json({ error: 'Musical number must be 1 to 9 characters and include at least one non-underscore character' });
         return;
       }
       updates.push(`musical_number = $${idx++}`);
-      values.push(musicalNumber);
-      snapshotMetadataUpdates.musicalNumber = musicalNumber;
+      values.push(normalizedMusicalNumber);
+      snapshotMetadataUpdates.musicalNumber = normalizedMusicalNumber;
     }
 
     if (hasSceneOrder) {
@@ -3054,6 +3078,34 @@ app.patch('/api/projects/:id', requireAuth, async (req, res) => {
     let broadcastPayload = null;
     try {
       await client.query('BEGIN');
+      if (hasMusicalNumber) {
+        const projectShowResult = await client.query(
+          `SELECT show_id AS "showId"
+           FROM projects
+           WHERE id = $1
+           FOR UPDATE`,
+          [permission.projectId]
+        );
+        if (projectShowResult.rowCount === 0) {
+          await client.query('ROLLBACK');
+          res.status(404).json({ error: 'Project not found' });
+          return;
+        }
+        const conflictingProject = await findConflictingMusicalNumberProject(
+          client,
+          projectShowResult.rows[0].showId,
+          normalizedMusicalNumber,
+          permission.projectId
+        );
+        if (conflictingProject) {
+          await client.query('ROLLBACK');
+          res.status(409).json({
+            error: formatDuplicateMusicalNumberMessage(normalizedMusicalNumber),
+          });
+          return;
+        }
+      }
+
       updated = await client.query(
         `UPDATE projects
          SET ${updates.join(', ')}
@@ -3154,6 +3206,10 @@ app.patch('/api/projects/:id', requireAuth, async (req, res) => {
 
     res.json({ project: updated.rows[0] });
   } catch (error) {
+    if (isUniqueMusicalNumberError(error)) {
+      res.status(409).json({ error: formatDuplicateMusicalNumberMessage(normalizedMusicalNumber) });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: 'Failed to update project' });
   }

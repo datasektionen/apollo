@@ -1,5 +1,6 @@
 import React from 'react';
 import { Play, Pause, Loader2 } from 'lucide-react';
+import { formatMusicalNumberForDisplay } from '../../utils/naming';
 
 export function MobileMiniPlayer({
   activeQueueItem,
@@ -18,8 +19,9 @@ export function MobileMiniPlayer({
 
   const title = activeQueueItem.name || activeQueueItem.title || 'Untitled Track';
   const showName = activeQueueItem.showName || activeQueueItem.artist || activeQueueItem.projectName || 'Apollo Choir';
+  const displayNumber = formatMusicalNumberForDisplay(activeQueueItem.musicalNumber);
   const subline = [
-    activeQueueItem.musicalNumber ? `No. ${activeQueueItem.musicalNumber}` : null,
+    displayNumber ? `No. ${displayNumber}` : null,
     showName,
   ].filter(Boolean).join(' · ');
 
@@ -38,12 +40,6 @@ export function MobileMiniPlayer({
       }}
     >
       <div className="flex h-14 items-center gap-3 pl-3.5 pr-2">
-        {/* Crisp 3px Gold Leading Accent Bar (Replaces fake square cover) */}
-        <span
-          aria-hidden="true"
-          className="h-8 w-[3px] shrink-0 rounded-full bg-[var(--player-accent)]"
-        />
-
         {/* Track Title and Musical Number / Show */}
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-[var(--player-text-primary)]">

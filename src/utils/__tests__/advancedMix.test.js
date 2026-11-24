@@ -67,9 +67,16 @@ describe('ADVANCED_MIX_PRACTICE_FOCUS_SLIDER_POSITIONS', () => {
     );
 
     expect(byStep.get('omitted')).toBe(0);
-    expect(byStep.get(-15)).toBe(8);
+    expect(byStep.get(-20)).toBe(8);
     expect(byStep.get(0)).toBe(50);
-    expect(byStep.get(15)).toBe(92);
+    expect(byStep.get(20)).toBe(92);
     expect(byStep.get('solo')).toBe(100);
+    expect(ADVANCED_MIX_PRACTICE_FOCUS_STEPS).toEqual([
+      'omitted',
+      -20, -18, -16, -14, -12, -10, -8, -6, -4, -2,
+      0,
+      2, 4, 6, 8, 10, 12, 14, 16, 18, 20,
+      'solo',
+    ]);
   });
 });

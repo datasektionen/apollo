@@ -97,6 +97,7 @@ export function MobileUserMenuModal({
                 monoOutputActive={monoOutputActive}
                 outputChannelCount={outputChannelCount}
                 showPlaybackSpeedSettings={true}
+                usePlayerSliders={true}
               />
             </div>
           </div>

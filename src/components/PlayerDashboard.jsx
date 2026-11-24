@@ -14,6 +14,7 @@ import {
   Headphones,
   Info,
   Library,
+  ListMusic,
   ListPlus,
   Loader2,
   LogOut,
@@ -43,6 +44,8 @@ import '../styles/player-theme.css';
 import { PlayerSearchBar, PlayerSearchResults, usePlayerSearchResults } from './PlayerSearch';
 import { PlayerLibrarySidebar } from './PlayerLibrarySidebar';
 import { PlayerControlsSidebar } from './PlayerControlsSidebar';
+import PlayerRangeSlider from './PlayerRangeSlider';
+import { compareMusicalNumbers, formatMusicalNumberForDisplay } from '../utils/naming';
 import { useIsMobile } from '../hooks/useIsMobile';
 import MobilePlayerView from './mobile/MobilePlayerView';
 import {
@@ -60,7 +63,11 @@ import {
   PLAYER_SEARCH_TYPES,
   buildPlayerSearchItems,
 } from '../utils/playerSearch';
-import { buildMyDeviceQueue, listLibraryFolderMoveTargets } from '../utils/playerLibrary';
+import {
+  buildMyDeviceQueue,
+  listLibraryFolderMoveTargets,
+  listLibraryPlaylistMoveTargets,
+} from '../utils/playerLibrary';
 import {
   addPlayerPlaylistItem,
   bootstrapServerProject,
@@ -291,29 +298,24 @@ function applyLiveMetronomeMix(snapshot, volume = METRONOME_VOLUME_UNITY) {
   });
 }
 
-function selectFromPrompt(label, options) {
-  if (!Array.isArray(options) || options.length === 0) return null;
-  const selectableOptions = [];
-  const lines = options.map((option) => {
-    if (option?.kind === 'header') {
-      return `${option.label}`;
-    }
-    selectableOptions.push(option);
-    return `${selectableOptions.length}. ${option.label} (${option.value})`;
-  }).join('\n');
-  const input = window.prompt(`${label}\n${lines}`, '1');
-  if (input == null) return null;
-  const trimmed = String(input).trim();
-  const numeric = Number(trimmed);
-  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= selectableOptions.length) {
-    return selectableOptions[numeric - 1].value;
+function computeSliderValueFromClientX(clientX, rect, min, max, step) {
+  const width = Number(rect?.width);
+  if (!Number.isFinite(width) || width <= 0) return Number(min);
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / width));
+  let next = Number(min) + ratio * (Number(max) - Number(min));
+  const numericStep = Number(step || 1);
+  if (numericStep >= 1) {
+    next = Math.round(next / numericStep) * numericStep;
+  } else if (numericStep > 0) {
+    const factor = Math.round(1 / numericStep);
+    next = Math.round(next * factor) / factor;
   }
-  const byValue = selectableOptions.find((option) => option.value === trimmed);
-  return byValue ? byValue.value : null;
+  return Math.max(Number(min), Math.min(Number(max), next));
 }
 
 function buildDefaultMixName(projectLike, mixLabel) {
-  return `${projectLike?.musicalNumber ? `${projectLike.musicalNumber} - ` : ''}${projectLike?.name || projectLike?.projectName || 'Mix'}${mixLabel ? ` - ${mixLabel}` : ''}`;
+  const displayNum = formatMusicalNumberForDisplay(projectLike?.musicalNumber);
+  return `${displayNum ? `${displayNum} - ` : ''}${projectLike?.name || projectLike?.projectName || 'Mix'}${mixLabel ? ` - ${mixLabel}` : ''}`;
 }
 
 function buildMixCategoryOptions(snapshot) {
@@ -941,6 +943,28 @@ function PlayerDashboard({
     return typeof step === 'number' ? step : 0;
   }, [getPracticeFocusStep]);
 
+  const applySliderDragValue = useCallback((kind, next) => {
+    if (kind === 'master') {
+      setVolume(next);
+    } else if (kind === 'metronome') {
+      setMetronomeVolume(next);
+    } else if (kind === 'focus') {
+      const nextFocusIndex = resolvePracticeFocusIndexFromSlider(next);
+      setPracticeFocusControl(nextFocusIndex);
+      return nextFocusIndex;
+    } else if (kind === 'pan') {
+      setPracticePanRange(next);
+    } else if (kind === 'speed') {
+      setPlaybackSpeed(next);
+      const current = realtimePlaybackRef.current;
+      void audioManager.setPlaybackRate(next, current?.project, { smooth: true });
+    } else if (kind === 'transpose') {
+      setPlaybackTranspose(next);
+      void audioManager.setTransposeSemitones(next);
+    }
+    return next;
+  }, [resolvePracticeFocusIndexFromSlider]);
+
   const resolvePracticePlaybackMode = useCallback((presetId) => {
     const step = getPracticeFocusStep(practiceFocusControl);
     if (step === 'omitted') return PRACTICE_REALTIME_MODES.OMITTED;
@@ -1193,60 +1217,31 @@ function PlayerDashboard({
 
   useEffect(() => {
     const handleMove = (event) => {
-      if (!sliderDragRef.current) return;
+      const drag = sliderDragRef.current;
+      if (!drag) return;
       const {
-        startX,
-        startValue,
+        left,
         width,
+        startX,
         moved,
         min,
         max,
         step,
         kind,
-      } = sliderDragRef.current;
+      } = drag;
       const deltaX = event.clientX - startX;
-      if (!moved) {
-        if (Math.abs(deltaX) < 2) return;
-        sliderDragRef.current.moved = true;
+      if (!moved && Math.abs(deltaX) >= 2) {
+        drag.moved = true;
         setSliderEditTooltip(null);
       }
-      let next = startValue + (deltaX / Math.max(1, width)) * (max - min);
-      next = Math.max(min, Math.min(max, next));
-      if (step >= 1) {
-        next = Math.round(next);
-      } else if (step > 0) {
-        const factor = Math.round(1 / step);
-        next = Math.round(next * factor) / factor;
-      }
-      if (Math.abs(next - sliderDragRef.current.lastValue) < 1e-6) {
-        if (kind === 'focus') {
-          setSliderDragTooltip({ kind, value: resolvePracticeFocusIndexFromSlider(next) });
-        } else {
-          setSliderDragTooltip({ kind, value: next });
-        }
+      if (!Number.isFinite(width) || width <= 0) return;
+      const next = computeSliderValueFromClientX(event.clientX, { left, width }, min, max, step);
+      if (Math.abs(next - drag.lastValue) < 1e-6) {
         return;
       }
-      sliderDragRef.current.lastValue = next;
-      if (kind === 'master') {
-        setVolume(next);
-      } else if (kind === 'metronome') {
-        setMetronomeVolume(next);
-      } else if (kind === 'focus') {
-        const nextFocusIndex = resolvePracticeFocusIndexFromSlider(next);
-        setPracticeFocusControl(nextFocusIndex);
-        setSliderDragTooltip({ kind, value: nextFocusIndex });
-        return;
-      } else if (kind === 'pan') {
-        setPracticePanRange(next);
-      } else if (kind === 'speed') {
-        setPlaybackSpeed(next);
-        const current = realtimePlaybackRef.current;
-        void audioManager.setPlaybackRate(next, current?.project, { smooth: true });
-      } else if (kind === 'transpose') {
-        setPlaybackTranspose(next);
-        void audioManager.setTransposeSemitones(next);
-      }
-      setSliderDragTooltip({ kind, value: next });
+      drag.lastValue = next;
+      const tooltipValue = applySliderDragValue(kind, next);
+      setSliderDragTooltip({ kind, value: tooltipValue });
     };
 
     const rememberNonZeroVolume = (ref, value) => {
@@ -1263,7 +1258,7 @@ function PlayerDashboard({
         if (finalValue > 0) {
           rememberNonZeroVolume(ref, finalValue);
         } else {
-          rememberNonZeroVolume(ref, drag.startValue);
+          rememberNonZeroVolume(ref, drag.initialValueBeforeClick ?? drag.startValue);
         }
       }
       if (drag?.kind === 'speed') {
@@ -1288,7 +1283,7 @@ function PlayerDashboard({
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [resolvePracticeFocusIndexFromSlider]);
+  }, [applySliderDragValue]);
 
   const selectedPlaylistItems = useMemo(() => {
     if (!selectedPlaylistId) return [];
@@ -1335,7 +1330,8 @@ function PlayerDashboard({
       .map((show) => ({
         ...show,
         mixes: show.mixes.slice().sort((left, right) => (
-          String(left.musicalNumber || '').localeCompare(String(right.musicalNumber || ''), undefined, { numeric: true, sensitivity: 'base' })
+          compareMusicalNumbers(left?.musicalNumber, right?.musicalNumber)
+          || String(left?.name || left?.projectName || '').localeCompare(String(right?.name || right?.projectName || ''), undefined, { numeric: true, sensitivity: 'base' })
         )),
       }))
       .sort((left, right) => (
@@ -1354,6 +1350,7 @@ function PlayerDashboard({
   )
     ? configuredPlayerShowId
     : (tuttiShows[0]?.id || '');
+  const defaultTuttiShow = tuttiShows.find((show) => String(show.id) === String(defaultTuttiShowId)) || tuttiShows[0] || null;
 
   const searchItems = useMemo(() => {
     const mixById = new Map();
@@ -2183,7 +2180,7 @@ function PlayerDashboard({
   }, [isRendering]);
 
   const beginSliderDrag = useCallback((event, config) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || event.detail > 1) return;
     event.preventDefault();
     const {
       kind,
@@ -2195,24 +2192,33 @@ function PlayerDashboard({
     } = config;
     if (disabled) return;
     const rect = event.currentTarget.getBoundingClientRect();
+    const numMin = Number(min);
+    const numMax = Number(max);
+    const numStep = Number(step || 1);
+    const initialValue = Number(value);
+    const hasWidth = Number.isFinite(rect?.width) && rect.width > 0;
+    const clickedValue = hasWidth
+      ? computeSliderValueFromClientX(event.clientX, rect, numMin, numMax, numStep)
+      : initialValue;
     sliderDragRef.current = {
+      left: rect.left,
+      width: hasWidth ? rect.width : 0,
       startX: event.clientX,
-      startValue: Number(value),
-      lastValue: Number(value),
-      width: rect.width,
+      initialValueBeforeClick: initialValue,
+      startValue: clickedValue,
+      lastValue: clickedValue,
       moved: false,
-      min: Number(min),
-      max: Number(max),
-      step: Number(step || 1),
+      min: numMin,
+      max: numMax,
+      step: numStep,
       kind,
     };
-    if (kind === 'focus') {
-      setSliderDragTooltip({ kind, value: resolvePracticeFocusIndexFromSlider(Number(value)) });
-    } else {
-      setSliderDragTooltip({ kind, value: Number(value) });
-    }
+    const tooltipValue = hasWidth
+      ? applySliderDragValue(kind, clickedValue)
+      : (kind === 'focus' ? resolvePracticeFocusIndexFromSlider(clickedValue) : clickedValue);
+    setSliderDragTooltip({ kind, value: tooltipValue });
     setSliderEditTooltip(null);
-  }, [resolvePracticeFocusIndexFromSlider]);
+  }, [applySliderDragValue, resolvePracticeFocusIndexFromSlider]);
 
   const formatSliderValue = useCallback((kind, value) => {
     if (kind === 'master' || kind === 'metronome') {
@@ -2923,24 +2929,34 @@ function PlayerDashboard({
     await playMixItem(queueItem, index);
   }, [handleSelectItem, playMixItem]);
 
+  const handleNavigateToShow = useCallback((showId) => {
+    const normalizedShowId = String(showId || '').trim();
+    if (!normalizedShowId) return;
+    if (!tuttiShows.some((candidate) => String(candidate.id) === normalizedShowId)) return;
+    if (searchDebounceTimerRef.current) {
+      clearTimeout(searchDebounceTimerRef.current);
+    }
+    if (!inRouter) setMainPanelView('library');
+    setLyricsViewOpen(false);
+    setSearchDraft('');
+    lastSyncedSearchQueryRef.current = '';
+    setSelectedPlaylistId(null);
+    setSelectedFolderId(null);
+    setLibraryScopeFolderId(null);
+    handleSelectCollection(PLAYER_COLLECTION_TYPES.TUTTI, `show:${normalizedShowId}`);
+    setActiveIndex(-1);
+    if (inRouter) {
+      navigate(`/player/shows/${encodeURIComponent(normalizedShowId)}`);
+    }
+  }, [handleSelectCollection, inRouter, navigate, tuttiShows]);
+
   const handleSearchSelect = useCallback(async (item) => {
     if (!item) return;
     if (searchDebounceTimerRef.current) {
       clearTimeout(searchDebounceTimerRef.current);
     }
     if (item.type === 'show' && item.payload?.id) {
-      if (!inRouter) setMainPanelView('library');
-      setSearchDraft('');
-      lastSyncedSearchQueryRef.current = '';
-      setSelectedPlaylistId(null);
-      setSelectedFolderId(null);
-      setLibraryScopeFolderId(null);
-      handleSelectCollection(PLAYER_COLLECTION_TYPES.TUTTI, `show:${item.payload.id}`);
-      setActiveIndex(-1);
-      if (inRouter) {
-        navigate(`/player/shows/${item.payload.id}`);
-        return;
-      }
+      handleNavigateToShow(item.payload.id);
       return;
     }
     if (item.type === 'song' && item.payload) {
@@ -3020,6 +3036,7 @@ function PlayerDashboard({
   }, [
     ensureSearchCredits,
     globalMixes,
+    handleNavigateToShow,
     handleSelectCollection,
     handleSelectLibraryEntry,
     myMixes,
@@ -3244,6 +3261,72 @@ function PlayerDashboard({
     }
   }, [session]);
 
+  const handleMoveLibraryEntry = useCallback(async (entry, target) => {
+    if (!entry || !target) return;
+    setPlaylistDragState(null);
+    try {
+      if (target.kind === 'folder') {
+        const folderId = target.folderId ?? null;
+        if (entry.kind === 'folder' && entry.folder) {
+          await updatePlayerFolder(entry.folder.id, { parentFolderId: folderId }, session);
+        } else if (entry.kind === 'playlist' && entry.playlist) {
+          await updatePlayerPlaylist(entry.playlist.id, { folderId }, session);
+        } else {
+          return;
+        }
+        await refreshPlayerData();
+        return;
+      }
+
+      if (target.kind === 'playlist') {
+        const playlistId = target.playlistId ?? null;
+        if (!playlistId || entry.kind !== 'mix' || !entry.mix) return;
+        const sourcePlaylistId = entry.sourcePlaylistId || null;
+        const sourcePlaylistItemId = entry.sourcePlaylistItemId || null;
+        if (sourcePlaylistId && String(sourcePlaylistId) === String(playlistId)) {
+          return;
+        }
+        const existingItems = playlistItemsByPlaylistId?.[playlistId] || [];
+        const alreadyExists = existingItems.some(
+          (item) => String(item?.mixId || '') === String(entry.mix.id)
+        );
+        if (alreadyExists) {
+          setError('Mix already exists in selected playlist.');
+          return;
+        }
+        if (sourcePlaylistId && sourcePlaylistItemId) {
+          await deletePlayerPlaylistItem(sourcePlaylistId, sourcePlaylistItemId, session);
+        }
+        await addPlayerPlaylistItem(playlistId, entry.mix.id, session);
+        if (entry.mix.folderId) {
+          await updateVirtualMix(entry.mix.id, { folderId: null }, session);
+        }
+        await refreshPlayerData();
+        return;
+      }
+
+      if (target.kind === 'root') {
+        if (entry.kind === 'folder' && entry.folder) {
+          await updatePlayerFolder(entry.folder.id, { parentFolderId: null }, session);
+        } else if (entry.kind === 'playlist' && entry.playlist) {
+          await updatePlayerPlaylist(entry.playlist.id, { folderId: null }, session);
+        } else if (entry.kind === 'mix' && entry.mix) {
+          if (entry.sourcePlaylistId && entry.sourcePlaylistItemId) {
+            await deletePlayerPlaylistItem(entry.sourcePlaylistId, entry.sourcePlaylistItemId, session);
+          }
+          if (entry.mix.folderId) {
+            await updateVirtualMix(entry.mix.id, { folderId: null }, session);
+          }
+        } else {
+          return;
+        }
+        await refreshPlayerData();
+      }
+    } catch (moveError) {
+      setError(moveError.message || 'Failed to move library item');
+    }
+  }, [playlistItemsByPlaylistId, refreshPlayerData, session]);
+
   const handleLibraryContextAction = useCallback(async (action, payload) => {
     const entry = libraryContextMenu?.entry || null;
     setLibraryContextMenu(null);
@@ -3259,19 +3342,8 @@ function PlayerDashboard({
       }
       if (!entry) return;
 
-      const moveFolderOrPlaylist = async (folderId) => {
-        if (entry.kind === 'folder' && entry.folder) {
-          await updatePlayerFolder(entry.folder.id, { parentFolderId: folderId }, session);
-        } else if (entry.kind === 'playlist' && entry.playlist) {
-          await updatePlayerPlaylist(entry.playlist.id, { folderId }, session);
-        } else {
-          return;
-        }
-        await refreshPlayerData();
-      };
-
       if (action === 'move_to_folder') {
-        await moveFolderOrPlaylist(payload ?? null);
+        await handleMoveLibraryEntry(entry, payload ? { kind: 'folder', folderId: payload } : { kind: 'root' });
         return;
       }
 
@@ -3285,7 +3357,22 @@ function PlayerDashboard({
         }
         const folder = await createPlayerFolder({ name: normalized, parentFolderId }, session);
         if (!folder?.id) return;
-        await moveFolderOrPlaylist(folder.id);
+        await handleMoveLibraryEntry(entry, { kind: 'folder', folderId: folder.id });
+        return;
+      }
+
+      if (action === 'move_to_playlist') {
+        await handleMoveLibraryEntry(entry, payload ? { kind: 'playlist', playlistId: payload } : { kind: 'root' });
+        return;
+      }
+
+      if (action === 'move_to_new_playlist') {
+        const name = window.prompt('Playlist name');
+        const normalized = String(name || '').trim();
+        if (!normalized) return;
+        const playlist = await createPlayerPlaylist({ name: normalized, folderId: libraryScopeFolderId || null }, session);
+        if (!playlist?.id) return;
+        await handleMoveLibraryEntry(entry, { kind: 'playlist', playlistId: playlist.id });
         return;
       }
 
@@ -3324,40 +3411,6 @@ function PlayerDashboard({
           await handleDeleteMix(entry.mix);
           return;
         }
-        if (action === 'move') {
-          const destination = selectFromPrompt(
-            `Move mix "${entry.mix.name}" to`,
-            [
-              { value: '__root__', label: 'My Library (Root)' },
-              ...playlists.map((playlist) => ({ value: `playlist:${playlist.id}`, label: `Playlist: ${playlist.name}` })),
-            ]
-          );
-          if (destination == null) return;
-          const sourcePlaylistId = entry.sourcePlaylistId || null;
-          const sourcePlaylistItemId = entry.sourcePlaylistItemId || null;
-          const destinationPlaylistId = String(destination).startsWith('playlist:')
-            ? String(destination).slice('playlist:'.length)
-            : null;
-          if (sourcePlaylistId && destinationPlaylistId === sourcePlaylistId) {
-            return;
-          }
-          if (sourcePlaylistId && sourcePlaylistItemId) {
-            await deletePlayerPlaylistItem(sourcePlaylistId, sourcePlaylistItemId, session);
-          }
-          if (String(destination).startsWith('playlist:')) {
-            const playlistId = destinationPlaylistId;
-            if (!playlistId) return;
-            const existingItems = playlistItemsByPlaylistId?.[playlistId] || [];
-            const alreadyExists = existingItems.some((item) => String(item?.mixId || '') === String(entry.mix.id));
-            if (alreadyExists) {
-              setError('Mix already exists in selected playlist.');
-              return;
-            }
-            await addPlayerPlaylistItem(playlistId, entry.mix.id, session);
-          }
-          await refreshPlayerData();
-          return;
-        }
         if (action === 'duplicate') {
           const duplicated = await createVirtualMix({
             projectId: entry.mix.projectId,
@@ -3392,6 +3445,7 @@ function PlayerDashboard({
     handleDeleteFolder,
     handleDeleteMix,
     handleDeletePlaylist,
+    handleMoveLibraryEntry,
     handleRenameFolder,
     handleRenameMix,
     handleRenamePlaylist,
@@ -3399,8 +3453,6 @@ function PlayerDashboard({
     libraryScopeFolderId,
     openCreditsForMix,
     onOpenAdvancedMix,
-    playlistItemsByPlaylistId,
-    playlists,
     promptCreateMixFromProject,
     refreshPlayerData,
     session,
@@ -3415,12 +3467,24 @@ function PlayerDashboard({
     return { left: `${x}px`, top: `${y}px` };
   }, [projectContextMenu]);
 
+  const externalDraggedLibraryEntry = useMemo(() => (
+    playlistDragState?.mix
+      ? {
+          kind: 'mix',
+          id: `mix:${playlistDragState.mix.id}`,
+          mix: playlistDragState.mix,
+          sourcePlaylistId: playlistDragState.playlistId,
+          sourcePlaylistItemId: playlistDragState.itemId,
+        }
+      : null
+  ), [playlistDragState]);
+
   const libraryContextMenuStyle = useMemo(() => {
     if (!libraryContextMenu) return null;
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1280;
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 720;
-    const x = Math.max(8, Math.min(libraryContextMenu.x, viewportWidth - 188));
-    const y = Math.max(8, Math.min(libraryContextMenu.y, viewportHeight - 320));
+    const x = Math.max(8, Math.min(libraryContextMenu.x, viewportWidth - 208));
+    const y = Math.max(8, Math.min(libraryContextMenu.y, viewportHeight - 360));
     return { left: `${x}px`, top: `${y}px` };
   }, [libraryContextMenu]);
 
@@ -3714,11 +3778,12 @@ function PlayerDashboard({
           // Active queue
           activeQueueItem={activeQueueItem}
           // Library content
-          shows={tuttiShows}
+          shows={defaultTuttiShow ? [defaultTuttiShow] : []}
           playlists={playlists}
           folders={folders}
           playlistItemsByPlaylistId={playlistItemsByPlaylistId}
           tuttiMixes={tuttiMixes}
+          homeMixes={defaultTuttiShow?.mixes || []}
           globalMixes={globalMixes}
           myMixes={myMixes}
           onPlayMix={handlePlayMobileMix}
@@ -3949,6 +4014,14 @@ function PlayerDashboard({
               onPlayMix={handlePlayLibraryMix}
               onCreateFolder={handleCreateFolder}
               onCreatePlaylist={handleCreatePlaylist}
+              contextMenuOpen={Boolean(libraryContextMenu)}
+              externalDraggedEntry={externalDraggedLibraryEntry}
+              onMoveEntry={handleMoveLibraryEntry}
+              onEntryDragStart={() => {
+                setLibraryContextMenu(null);
+                setLibraryMoveSubmenuOpen(false);
+                setProjectContextMenu(null);
+              }}
               onContextMenu={(entry, event) => {
                 setLibraryMoveSubmenuOpen(false);
                 setLibraryContextMenu({ entry, x: event.clientX, y: event.clientY });
@@ -3984,6 +4057,7 @@ function PlayerDashboard({
                       outputChannelCount={outputChannelCount}
                       playbackPanLawDb={playbackPanLawDb}
                       showPlaybackSpeedSettings={true}
+                      usePlayerSliders={true}
                     />
                   </div>
                 </>
@@ -4015,33 +4089,6 @@ function PlayerDashboard({
                       <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)]">
                         {isPlaylistCollectionView ? 'Playlist' : 'Show'}
                       </span>
-                      {!isPlaylistCollectionView && tuttiShows.length > 1 ? (
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {tuttiShows.map((show) => {
-                            const showSelected = activeTuttiShow?.id === show.id;
-                            return (
-                              <button
-                                key={show.id}
-                                type="button"
-                                onClick={() => {
-                                  handleSelectCollection(PLAYER_COLLECTION_TYPES.TUTTI, `show:${show.id}`);
-                                  setSelectedPlaylistId(null);
-                                  setSelectedFolderId(null);
-                                  setActiveIndex(-1);
-                                  if (inRouter) navigate(`/player/shows/${show.id}`);
-                                }}
-                                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                                  showSelected
-                                    ? 'bg-[var(--player-pill-active-bg)] text-[var(--player-pill-active-fg)]'
-                                    : 'border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
-                                }`}
-                              >
-                                {show.name}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null}
                     </div>
                     <h2 className="m-0 mt-1.5 truncate text-3xl lg:text-[2.5rem] font-extrabold leading-[1.08] tracking-[-0.025em] text-[var(--player-text-primary)]">
                       {isPlaylistCollectionView
@@ -4101,7 +4148,7 @@ function PlayerDashboard({
                     </div>
                   </header>
                   {isPlaylistCollectionView ? (
-                    <div className="grid h-10 min-h-10 max-h-10 shrink-0 grid-cols-[44px_minmax(0,1fr)_64px_24px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
+                    <div className="grid h-10 min-h-10 max-h-10 shrink-0 grid-cols-[44px_minmax(0,1fr)_64px_56px] items-center border-b border-[var(--player-border-subtle)] pl-6 pr-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                       <div className="translate-x-px">#</div>
                       <div>Title</div>
                       <div className="flex items-center justify-end">
@@ -4112,9 +4159,8 @@ function PlayerDashboard({
                       <div />
                     </div>
                   ) : (
-                    <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[44px_60px_minmax(0,1fr)_64px_24px] items-center border-b border-[var(--player-border-subtle)] px-6 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
+                    <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[72px_minmax(0,1fr)_64px_56px] items-center border-b border-[var(--player-border-subtle)] pl-6 pr-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                       <div className="translate-x-px">#</div>
-                      <div>No.</div>
                       <div>Title</div>
                       <div className="flex items-center justify-end">
                         <span title="Length" aria-label="Length" className="inline-flex items-center">
@@ -4153,6 +4199,10 @@ function PlayerDashboard({
                             && !isNoopPlaylistDropSlot(activeDrag.fromIndex, activePlaylistRows.length)
                             && activeDrag.overSlotIndex === activePlaylistRows.length
                           );
+                          const showId = row.mix?.showId ? String(row.mix.showId) : '';
+                          const canNavigateToShow = Boolean(
+                            showId && tuttiShows.some((candidate) => String(candidate.id) === showId)
+                          );
                           return (
                             <div
                               key={row.id}
@@ -4165,10 +4215,10 @@ function PlayerDashboard({
                                 <div className="pointer-events-none absolute left-4 right-4 bottom-0 z-20 h-0.5 bg-[var(--player-accent)]" />
                               ) : null}
                               <div
-                                draggable={playlistRowDragEnabled}
+                                draggable={!row.unavailable && Boolean(row.mix) && playlistReorderPendingId !== selectedPlaylist.id}
                                 data-active={isActive ? 'true' : 'false'}
                                 onDragStart={(event) => {
-                                  if (!playlistRowDragEnabled) return;
+                                  if (row.unavailable || !row.mix || playlistReorderPendingId === selectedPlaylist.id) return;
                                   event.dataTransfer.effectAllowed = 'move';
                                   event.dataTransfer.setData('text/plain', row.id);
                                   setLibraryContextMenu(null);
@@ -4176,6 +4226,7 @@ function PlayerDashboard({
                                   setPlaylistDragState({
                                     playlistId: selectedPlaylist.id,
                                     itemId: row.id,
+                                    mix: row.mix,
                                     fromIndex: index,
                                     overSlotIndex: null,
                                   });
@@ -4206,6 +4257,7 @@ function PlayerDashboard({
                                 onContextMenu={(event) => {
                                   if (row.unavailable || !row.mix) return;
                                   event.preventDefault();
+                                  setLibraryMoveSubmenuOpen(false);
                                   setLibraryContextMenu({
                                     entry: {
                                       kind: 'mix',
@@ -4224,20 +4276,12 @@ function PlayerDashboard({
                                 onDoubleClick={async () => {
                                   await handlePlayPlaylistRow(row);
                                 }}
-                                className={`player-track-row group relative grid grid-cols-[44px_minmax(0,1fr)_64px_24px] items-center rounded-lg px-4 py-2.5 min-h-[52px] text-sm ${
+                                className={`player-track-row group relative grid grid-cols-[44px_minmax(0,1fr)_64px_56px] items-center rounded-lg pl-4 pr-0 py-2.5 min-h-[52px] text-sm cursor-default ${
                                   row.unavailable ? 'text-[var(--player-text-disabled)]' : ''
                                 } ${
-                                  playlistRowDragEnabled ? 'cursor-grab active:cursor-grabbing' : ''
-                                } ${
-                                  isDraggedRow ? 'opacity-40' : ''
+                                  isDraggedRow ? 'opacity-40 cursor-grabbing' : ''
                                 }`}
                               >
-                                {isActive ? (
-                                  <span
-                                    aria-hidden="true"
-                                    className="absolute left-0 top-2.5 bottom-2.5 w-[2.5px] rounded-r-full bg-[var(--player-accent)]"
-                                  />
-                                ) : null}
                                 <div className="flex items-center pl-0.5">
                                   {isActive && isPlaying ? (
                                     <span className="group-hover:hidden flex items-end gap-[2px] h-3.5" aria-hidden="true">
@@ -4260,7 +4304,7 @@ function PlayerDashboard({
                                         event.stopPropagation();
                                         await handlePlayPlaylistRow(row);
                                       }}
-                                      className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded text-[var(--player-text-primary)] hover:text-[var(--player-accent-text)] focus:text-[var(--player-accent-text)]"
+                                      className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded cursor-pointer text-[var(--player-text-primary)] hover:text-[var(--player-accent-text)] focus:text-[var(--player-accent-text)]"
                                       title={`Play ${rowTitle}`}
                                     >
                                       <Play size={14} className="fill-current" />
@@ -4278,21 +4322,41 @@ function PlayerDashboard({
                                     {rowTitle}
                                   </div>
                                   {!row.unavailable && row.mix?.showName ? (
-                                    <div className="truncate text-xs text-[var(--player-text-secondary)]">
-                                      {row.mix.showName}
-                                    </div>
+                                    canNavigateToShow ? (
+                                      <div className="min-w-0 truncate">
+                                        <button
+                                          type="button"
+                                          draggable={false}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            handleNavigateToShow(showId);
+                                          }}
+                                          onDoubleClick={(event) => event.stopPropagation()}
+                                          className="max-w-full truncate text-left text-xs text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] hover:underline cursor-pointer transition-colors"
+                                          title={`Open ${row.mix.showName}`}
+                                        >
+                                          {row.mix.showName}
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="truncate text-xs text-[var(--player-text-secondary)]">
+                                        {row.mix.showName}
+                                      </div>
+                                    )
                                   ) : null}
                                 </div>
                                 <div className="text-right text-xs text-[var(--player-text-secondary)] tabular-nums">
                                   {formatDurationMs(row.mix?.durationMs, isActive ? durationSec : 0)}
                                 </div>
-                                <div className="flex justify-end">
+                                <div className="flex items-center justify-center">
                                   {!row.unavailable && row.mix ? (
                                     <button
+                                      type="button"
                                       draggable={false}
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         const rect = event.currentTarget.getBoundingClientRect();
+                                        setLibraryMoveSubmenuOpen(false);
                                         setLibraryContextMenu({
                                           entry: {
                                             kind: 'mix',
@@ -4304,7 +4368,7 @@ function PlayerDashboard({
                                           y: rect.bottom + 4,
                                         });
                                       }}
-                                      className="rounded-md p-1 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] hover:bg-[var(--player-pressed)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                                      className="cursor-pointer rounded-md p-1 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] hover:bg-[var(--player-pressed)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                                       title="Options"
                                     >
                                       <MoreHorizontal size={14} />
@@ -4331,7 +4395,8 @@ function PlayerDashboard({
                             && activeCollectionId === collectionId
                             && activeIndex === index
                           );
-                          const listTitle = `${mix.musicalNumber || '0.0'} - ${mix.projectName || mix.name || 'Untitled Project'}`;
+                          const displayNum = formatMusicalNumberForDisplay(mix.musicalNumber);
+                          const listTitle = `${displayNum ? `${displayNum} - ` : ''}${mix.projectName || mix.name || 'Untitled Project'}`;
                           return (
                             <div
                               key={mix.id}
@@ -4345,15 +4410,9 @@ function PlayerDashboard({
                                 handleSelectItem(PLAYER_COLLECTION_TYPES.TUTTI, collectionId, index);
                                 setProjectContextMenu({ mix, x: event.clientX, y: event.clientY });
                               }}
-                              className="player-track-row group relative grid grid-cols-[44px_60px_minmax(0,1fr)_64px_24px] items-center rounded-lg px-4 py-1.5 min-h-[44px] text-sm cursor-pointer"
+                              className="player-track-row group relative grid grid-cols-[72px_minmax(0,1fr)_64px_56px] items-center rounded-lg pl-4 pr-0 py-1.5 min-h-[44px] text-sm cursor-default"
                             >
-                              {isActive ? (
-                                <span
-                                  aria-hidden="true"
-                                  className="absolute left-0 top-2 bottom-2 w-[2.5px] rounded-r-full bg-[var(--player-accent)]"
-                                />
-                              ) : null}
-                              <div className="flex items-center pl-0.5">
+                              <div className="flex items-center pl-0.5 pr-2 min-w-0">
                                 {isActive && isPlaying ? (
                                   <span className="group-hover:hidden flex items-end gap-[2px] h-3.5" aria-hidden="true">
                                     <span className="player-eq-bar" />
@@ -4361,10 +4420,10 @@ function PlayerDashboard({
                                     <span className="player-eq-bar" />
                                   </span>
                                 ) : (
-                                  <span className={`group-hover:hidden tabular-nums text-xs ${
+                                  <span className={`group-hover:hidden truncate tabular-nums text-xs ${
                                     isActive ? 'text-[var(--player-accent-text)] font-semibold' : 'text-[var(--player-text-muted)]'
                                   }`}>
-                                    {index + 1}
+                                    {displayNum || (index + 1)}
                                   </span>
                                 )}
                                 <button
@@ -4373,23 +4432,11 @@ function PlayerDashboard({
                                     event.stopPropagation();
                                     await playQueueItem(index);
                                   }}
-                                  className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded text-[var(--player-text-primary)] hover:text-[var(--player-accent-text)] focus:text-[var(--player-accent-text)]"
+                                  className="hidden group-hover:flex -translate-x-[1px] items-center justify-center rounded cursor-pointer text-[var(--player-text-primary)] hover:text-[var(--player-accent-text)] focus:text-[var(--player-accent-text)]"
                                   title={`Play ${listTitle}`}
                                 >
                                   <Play size={14} className="fill-current" />
                                 </button>
-                              </div>
-                              <div className="flex items-center">
-                                <span
-                                  aria-hidden="true"
-                                  className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums ${
-                                    isActive
-                                      ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                                      : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)]'
-                                  }`}
-                                >
-                                  {mix.musicalNumber || '0.0'}
-                                </span>
                               </div>
                               <div className="min-w-0 truncate">
                                 <span className="sr-only">{listTitle}</span>
@@ -4407,14 +4454,15 @@ function PlayerDashboard({
                               <div className="text-right text-xs text-[var(--player-text-secondary)] tabular-nums">
                                 {formatDurationMs(mix.durationMs, isActive ? durationSec : 0)}
                               </div>
-                              <div className="flex justify-end">
+                              <div className="flex items-center justify-center">
                                 <button
+                                  type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     const rect = event.currentTarget.getBoundingClientRect();
                                     setProjectContextMenu({ mix, x: rect.right, y: rect.bottom + 4 });
                                   }}
-                                  className="rounded-md p-1 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] hover:bg-[var(--player-pressed)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                                  className="cursor-pointer rounded-md p-1 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] hover:bg-[var(--player-pressed)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                                   title="Options"
                                 >
                                   <MoreHorizontal size={14} />
@@ -4451,8 +4499,13 @@ function PlayerDashboard({
               focusStep={focusStep}
               focusSliderPosition={focusSliderPosition}
               onTogglePracticeFocus={handleTogglePracticeFocus}
+              onSetPracticeFocusControl={setPracticeFocusControl}
               onFocusSliderClick={handleFocusSliderClick}
+              onFocusDragTooltipChange={(nextIndex) =>
+                setSliderDragTooltip(nextIndex == null ? null : { kind: 'focus', value: nextIndex })
+              }
               practicePanRange={practicePanRange}
+              visualPanRangeValue={visualPanRangeValue}
               panControlDisabled={panControlDisabled}
               showPanRangeHighlight={showPanRangeHighlight}
               practicePanHighlightPixel={practicePanHighlightPixel}
@@ -4473,7 +4526,80 @@ function PlayerDashboard({
         </div>
       </div>
 
-      {libraryContextMenu ? (
+      {libraryContextMenu ? (() => {
+        const contextEntry = libraryContextMenu.entry;
+        const flipSubmenuLeft = libraryContextMenu.x > (typeof window !== 'undefined' ? window.innerWidth - 420 : 0);
+        const renderLibraryMoveSubmenu = ({
+          label,
+          createLabel,
+          CreateIcon,
+          createAction,
+          rootAction,
+          targets,
+          TargetIcon,
+          targetAction,
+          emptyLabel,
+        }) => (
+          <div
+            className="relative"
+            onMouseEnter={() => setLibraryMoveSubmenuOpen(true)}
+            onMouseLeave={() => setLibraryMoveSubmenuOpen(false)}
+          >
+            <button
+              type="button"
+              onClick={() => setLibraryMoveSubmenuOpen((previous) => !previous)}
+              className="player-menu-item flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm"
+            >
+              <span className="flex items-center gap-2.5">
+                <FolderInput size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                <span>{label}</span>
+              </span>
+              <ChevronRight size={14} className="shrink-0 text-[var(--player-text-muted)]" />
+            </button>
+            {libraryMoveSubmenuOpen ? (
+              <div
+                className={`absolute top-0 z-[60] ${
+                  flipSubmenuLeft ? 'right-full pr-1.5' : 'left-full pl-1.5'
+                }`}
+              >
+                <div className="player-menu max-h-64 min-w-[192px] overflow-auto rounded-xl py-1">
+                  <button
+                    type="button"
+                    onClick={async () => handleLibraryContextAction(createAction)}
+                    className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
+                  >
+                    <CreateIcon size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                    <span className="truncate">{createLabel}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => handleLibraryContextAction(rootAction, null)}
+                    className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
+                  >
+                    <Library size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                    <span className="truncate">Library root</span>
+                  </button>
+                  <div className="my-1 border-t border-[var(--player-border-subtle)]" />
+                  {targets.length ? targets.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={async () => handleLibraryContextAction(targetAction, item.id)}
+                      className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
+                    >
+                      <TargetIcon size={15} className="shrink-0 text-[var(--player-text-muted)]" />
+                      <span className="truncate">{item.name}</span>
+                    </button>
+                  )) : (
+                    <div className="px-3.5 py-1.5 text-xs text-[var(--player-text-muted)]">{emptyLabel}</div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        );
+
+        return (
         <div
           ref={libraryContextMenuRef}
           className="fixed z-50"
@@ -4496,10 +4622,10 @@ function PlayerDashboard({
               <FolderPlus size={15} className="shrink-0 text-[var(--player-text-muted)]" />
               <span>Create folder</span>
             </button>
-            {libraryContextMenu.entry ? (
+            {contextEntry ? (
               <div className="my-1 border-t border-[var(--player-border-subtle)]" />
             ) : null}
-            {libraryContextMenu.entry?.kind === 'mix' ? (
+            {contextEntry?.kind === 'mix' ? (
               <>
                 <button
                   type="button"
@@ -4517,14 +4643,17 @@ function PlayerDashboard({
                   <Pencil size={15} className="shrink-0 text-[var(--player-text-muted)]" />
                   <span>Rename</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={async () => handleLibraryContextAction('move')}
-                  className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
-                >
-                  <FolderInput size={15} className="shrink-0 text-[var(--player-text-muted)]" />
-                  <span>Move</span>
-                </button>
+                {renderLibraryMoveSubmenu({
+                  label: 'Move to playlist',
+                  createLabel: 'New playlist',
+                  CreateIcon: ListPlus,
+                  createAction: 'move_to_new_playlist',
+                  rootAction: 'move_to_playlist',
+                  targets: listLibraryPlaylistMoveTargets(playlists, contextEntry.sourcePlaylistId),
+                  TargetIcon: ListMusic,
+                  targetAction: 'move_to_playlist',
+                  emptyLabel: 'No playlists',
+                })}
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('duplicate')}
@@ -4559,69 +4688,22 @@ function PlayerDashboard({
                   <span>Delete</span>
                 </button>
               </>
-            ) : libraryContextMenu.entry ? (
+            ) : contextEntry ? (
               <>
-                <div
-                  className="relative"
-                  onMouseEnter={() => setLibraryMoveSubmenuOpen(true)}
-                  onMouseLeave={() => setLibraryMoveSubmenuOpen(false)}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setLibraryMoveSubmenuOpen((previous) => !previous)}
-                    className="player-menu-item flex w-full items-center justify-between gap-3 px-3.5 py-2 text-left text-sm"
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <FolderInput size={15} className="shrink-0 text-[var(--player-text-muted)]" />
-                      <span>Move to folder</span>
-                    </span>
-                    <ChevronRight size={14} className="shrink-0 text-[var(--player-text-muted)]" />
-                  </button>
-                  {libraryMoveSubmenuOpen ? (
-                    <div
-                      className={`absolute top-0 z-[60] ${
-                        libraryContextMenu.x > (typeof window !== 'undefined' ? window.innerWidth - 320 : 0)
-                          ? 'right-full pr-1.5'
-                          : 'left-full pl-1.5'
-                      }`}
-                    >
-                      <div className="player-menu max-h-64 min-w-[184px] overflow-auto rounded-xl py-1">
-                        <button
-                          type="button"
-                          onClick={async () => handleLibraryContextAction('move_to_new_folder')}
-                          className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
-                        >
-                          <FolderPlus size={15} className="shrink-0 text-[var(--player-text-muted)]" />
-                          <span className="truncate">New folder</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => handleLibraryContextAction('move_to_folder', null)}
-                          className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
-                        >
-                          <Library size={15} className="shrink-0 text-[var(--player-text-muted)]" />
-                          <span className="truncate">Your Library</span>
-                        </button>
-                        {listLibraryFolderMoveTargets(
-                          folders,
-                          libraryContextMenu.entry?.kind === 'folder'
-                            ? libraryContextMenu.entry.folder?.id
-                            : null
-                        ).map((folder) => (
-                          <button
-                            key={folder.id}
-                            type="button"
-                            onClick={async () => handleLibraryContextAction('move_to_folder', folder.id)}
-                            className="player-menu-item flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm"
-                          >
-                            <Folder size={15} className="shrink-0 text-[var(--player-text-muted)]" />
-                            <span className="truncate">{folder.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
+                {renderLibraryMoveSubmenu({
+                  label: 'Move to folder',
+                  createLabel: 'New folder',
+                  CreateIcon: FolderPlus,
+                  createAction: 'move_to_new_folder',
+                  rootAction: 'move_to_folder',
+                  targets: listLibraryFolderMoveTargets(
+                    folders,
+                    contextEntry.kind === 'folder' ? contextEntry.folder?.id : null
+                  ),
+                  TargetIcon: Folder,
+                  targetAction: 'move_to_folder',
+                  emptyLabel: 'No folders',
+                })}
                 <button
                   type="button"
                   onClick={async () => handleLibraryContextAction('rename')}
@@ -4643,7 +4725,8 @@ function PlayerDashboard({
             ) : null}
           </div>
         </div>
-      ) : null}
+        );
+      })() : null}
 
       {projectContextMenu ? (
         <div
@@ -4881,24 +4964,23 @@ function PlayerDashboard({
 
       <div
         data-player-region="transport-bar"
-        className="bg-[var(--player-bg-canvas)] border-t border-[var(--player-border-subtle)] px-5 pt-2 pb-2.5 shrink-0"
+        className="bg-[var(--player-bg-canvas)] px-5 pt-2 pb-2.5 shrink-0"
       >
         <div className="grid min-h-[76px] grid-cols-[minmax(0,1fr)_minmax(380px,660px)_minmax(0,1fr)] items-center gap-4">
           <div className="min-w-0">
             {nowPlayingLabel || activeQueueItem?.name ? (
               (() => {
                 const rawTitle = nowPlayingLabel || activeQueueItem?.name || '';
-                const num = activeQueueItem?.musicalNumber ? String(activeQueueItem.musicalNumber).trim() : '';
-                const strippedTitle = (num && rawTitle.startsWith(`${num} - `))
-                  ? rawTitle.slice(num.length + 3)
-                  : rawTitle;
+                const rawNum = activeQueueItem?.musicalNumber ? String(activeQueueItem.musicalNumber).trim() : '';
+                const displayNum = formatMusicalNumberForDisplay(rawNum);
+                let strippedTitle = rawTitle;
+                if (rawNum && strippedTitle.startsWith(`${rawNum} - `)) {
+                  strippedTitle = strippedTitle.slice(rawNum.length + 3);
+                } else if (displayNum && strippedTitle.startsWith(`${displayNum} - `)) {
+                  strippedTitle = strippedTitle.slice(displayNum.length + 3);
+                }
                 return (
                   <>
-                    {num ? (
-                      <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--player-accent-text)] tabular-nums">
-                        No. {num}
-                      </div>
-                    ) : null}
                     <div
                       className="truncate text-sm font-semibold text-[var(--player-text-primary)]"
                       title={rawTitle}
@@ -4985,18 +5067,18 @@ function PlayerDashboard({
               <span className="w-10 text-right text-[11px] font-medium text-[var(--player-text-muted)] tabular-nums">
                 {formatClock(currentTimeSec)}
               </span>
-              <input
-                type="range"
-                min="0"
+              <PlayerRangeSlider
+                min={0}
                 max={Math.max(durationSec, 0.001)}
-                step="0.01"
+                step={0.01}
                 value={Math.min(currentTimeSec, durationSec || 0)}
+                percent={timelinePct}
                 onPointerDown={beginTimelineScrub}
                 onPointerUp={endTimelineScrub}
                 onPointerCancel={endTimelineScrub}
                 onChange={(e) => handleSeek(Number(e.target.value), e)}
-                className="flex-1 h-5 player-range cursor-pointer block"
-                style={{ '--player-range-pct': `${timelinePct}%` }}
+                ariaLabel="Seek playback position"
+                className="flex-1 h-5"
               />
               <span className="w-10 text-left text-[11px] font-medium text-[var(--player-text-muted)] tabular-nums">
                 {formatClock(durationSec)}
@@ -5035,13 +5117,14 @@ function PlayerDashboard({
                 <VolumeIcon size={18} />
               </button>
               <div className="relative w-40 h-7 flex items-center">
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
+                <PlayerRangeSlider
+                  min={0}
+                  max={100}
+                  step={1}
                   value={volume}
+                  percent={masterVolumePct}
                   readOnly
+                  isDragging={sliderDragTooltip?.kind === 'master'}
                   onMouseDown={(event) => beginSliderDrag(event, {
                     kind: 'master',
                     value: volume,
@@ -5051,9 +5134,9 @@ function PlayerDashboard({
                     disabled: isRendering,
                   })}
                   onDoubleClick={() => openSliderEdit('master', volume, isRendering)}
-                  className="w-36 h-5 player-range cursor-pointer block"
-                  style={{ '--player-range-pct': `${masterVolumePct}%` }}
+                  ariaLabel="Master volume"
                   title="Master Volume (double-click for numeric input)"
+                  className="w-36 h-5"
                 />
                 {sliderDragTooltip?.kind === 'master' && (
                   <div

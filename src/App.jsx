@@ -17,7 +17,7 @@ import { importFromZIP } from './lib/projectPortability';
 import { deleteProject as deleteCachedProject, getMediaBlob, saveRemoteProjectMeta, storeMediaBlob } from './lib/db';
 import { prepareMediaForImportSource } from './lib/mediaEncoding';
 import { registerAndUploadMediaBlob } from './lib/mediaUpload';
-import { normalizeProjectName } from './utils/naming';
+import { normalizeProjectName, suggestNextUniqueMusicalNumber } from './utils/naming';
 import { createId } from './utils/id';
 import { installNativeDragGuard } from './utils/nativeDrag';
 import {
@@ -539,8 +539,10 @@ function App() {
       if (created?.project?.id) {
         navigate(`/daw/projects/${created.project.id}`);
       }
+      return true;
     } catch (error) {
       setServerError(error.message || 'Failed to create project');
+      return false;
     } finally {
       setServerLoading(false);
     }
@@ -568,10 +570,18 @@ function App() {
         || normalizeProjectName(file.name.replace(/\.zip$/i, ''))
         || 'Imported Project';
       const importedProjectId = createId();
+      const existingShowNumbers = (serverProjects || [])
+        .filter((project) => String(project?.showId || '') === String(showId || ''))
+        .map((project) => project.musicalNumber);
+      const uniqueMusicalNumber = suggestNextUniqueMusicalNumber(
+        existingShowNumbers,
+        importedProject.musicalNumber || '0.0'
+      );
       let snapshot = {
         ...importedProject,
         projectId: importedProjectId,
         projectName: importedName,
+        musicalNumber: uniqueMusicalNumber,
         showId,
       };
 
@@ -604,6 +614,7 @@ function App() {
       await createServerProject(importedName, serverSession, {
         projectId: importedProjectId,
         initialSnapshot: snapshot,
+        musicalNumber: uniqueMusicalNumber,
         showId,
       });
 

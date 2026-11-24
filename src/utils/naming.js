@@ -1,6 +1,25 @@
+import {
+  MUSICAL_NUMBER_MAX_LENGTH,
+  compareMusicalNumbers,
+  formatMusicalNumberForDisplay,
+  isValidMusicalNumber,
+  musicalNumberUniquenessKey,
+  normalizeMusicalNumber,
+  suggestNextUniqueMusicalNumber,
+} from '../../shared/musicalNumber.js';
+
 const INVALID_WINDOWS_FILENAME_CHARS_REGEX = /[\\/:*?"<>|]/g;
 const INVALID_WINDOWS_FILENAME_CHARS_TEST_REGEX = /[\\/:*?"<>|]/;
-const MUSICAL_NUMBER_PATTERN = /^[0-9]+\..+$/;
+
+export {
+  MUSICAL_NUMBER_MAX_LENGTH,
+  compareMusicalNumbers,
+  formatMusicalNumberForDisplay,
+  isValidMusicalNumber,
+  musicalNumberUniquenessKey,
+  normalizeMusicalNumber,
+  suggestNextUniqueMusicalNumber,
+};
 
 /**
  * Remove leading/trailing spaces and dots.
@@ -12,15 +31,6 @@ export function trimNameEdges(name) {
 
 export function normalizeProjectName(name) {
   return trimNameEdges(name);
-}
-
-export function normalizeMusicalNumber(value) {
-  return String(value || '').trim();
-}
-
-export function isValidMusicalNumber(value) {
-  const normalized = normalizeMusicalNumber(value);
-  return MUSICAL_NUMBER_PATTERN.test(normalized);
 }
 
 export function normalizeTrackName(name) {

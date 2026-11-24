@@ -189,4 +189,10 @@ describe('PlaybackDevicesSettingsPanel recording delay', () => {
     expect(view.getSettings().playbackSpeedSettings.formantCompensation).toBe(false);
     expect(view.getSettings().playbackSpeedSettings.blockMs).toBe(120);
   });
+
+  it('uses PlayerRangeSlider instead of legacy blue range inputs when usePlayerSliders is true', async () => {
+    const view = await renderPanel({}, { showPlaybackSpeedSettings: true, usePlayerSliders: true });
+    expect(view.container.querySelectorAll('.player-slider-root').length).toBe(4);
+    expect(view.container.querySelector('input[type="range"].accent-blue-500')).toBeNull();
+  });
 });

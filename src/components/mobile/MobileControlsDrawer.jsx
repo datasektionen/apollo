@@ -11,6 +11,8 @@ import {
   formatPlaybackTranspose,
   getNextPlaybackSpeed,
 } from '../../utils/playerControlsSidebar';
+import PlayerRangeSlider from '../PlayerRangeSlider';
+import PracticeFocusSlider from '../PracticeFocusSlider';
 
 function formatFocusLabel(step) {
   if (step === 'omitted') return 'Omitted';
@@ -19,14 +21,6 @@ function formatFocusLabel(step) {
   if (!Number.isFinite(numeric)) return '0 dB';
   if (numeric === 0) return '0 dB';
   return `${numeric > 0 ? '+' : ''}${numeric} dB`;
-}
-
-function getBipolarTrackStyle(pct) {
-  const clamped = Math.max(0, Math.min(100, Number(pct) || 50));
-  return {
-    '--player-bipolar-start': `${Math.min(50, clamped)}%`,
-    '--player-bipolar-end': `${Math.max(50, clamped)}%`,
-  };
 }
 
 export function MobileControlsDrawer({
@@ -139,22 +133,20 @@ export function MobileControlsDrawer({
                   }
                 }}
                 aria-label={isMetronomeMuted ? 'Unmute metronome' : 'Mute metronome'}
-                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                  !isMetronomeMuted
-                    ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                    : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-muted)]'
-                }`}
+                className="flex h-9 w-9 shrink-0 items-center justify-center text-[var(--player-text-secondary)] active:scale-95 transition-transform"
               >
                 <Metronome size={18} />
               </button>
-              <input
-                type="range"
-                min="0"
-                max="100"
+              <PlayerRangeSlider
+                touch
+                min={0}
+                max={100}
+                step={1}
                 value={effectiveMetronome}
+                percent={effectiveMetronome}
                 onChange={(e) => onSetMetronomeVolume?.(Number(e.target.value))}
-                style={{ '--player-range-pct': `${effectiveMetronome}%` }}
-                className="player-range player-range-touch flex-1 cursor-pointer"
+                ariaLabel="Metronome Volume Slider"
+                className="flex-1 h-6"
               />
             </div>
           </div>
@@ -182,24 +174,17 @@ export function MobileControlsDrawer({
                 }
               }}
               aria-label="Cycle practice focus"
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                isFocusActive
-                  ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                  : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]'
-              }`}
+              className="flex h-9 w-9 shrink-0 items-center justify-center text-[var(--player-text-secondary)] active:scale-95 transition-transform"
             >
               <FocusIcon size={18} />
             </button>
-            <input
-              type="range"
-              min="0"
-              max={focusSteps.length - 1}
-              step="1"
-              value={clampedFocusIdx}
-              onChange={(e) => onSetPracticeFocusControl?.(Number(e.target.value))}
-              style={getBipolarTrackStyle(focusPct)}
-              className="player-range player-range-bipolar player-range-touch flex-1 cursor-pointer"
-              aria-label="Practice Focus Slider"
+            <PracticeFocusSlider
+              touch
+              valueIndex={clampedFocusIdx}
+              onChangeIndex={(idx) => onSetPracticeFocusControl?.(idx)}
+              ariaLabel="Practice Focus"
+              inputAriaLabel="Practice Focus Slider"
+              className="flex-1"
             />
           </div>
         </div>
@@ -217,24 +202,21 @@ export function MobileControlsDrawer({
               type="button"
               onClick={() => onSetPlaybackSpeed?.(getNextPlaybackSpeed(playbackSpeed))}
               aria-label="Step playback speed"
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                isSpeedActive
-                  ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                  : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]'
-              }`}
+              className="flex h-9 w-9 shrink-0 items-center justify-center text-[var(--player-text-secondary)] active:scale-95 transition-transform"
             >
               <Gauge size={18} />
             </button>
-            <input
-              type="range"
+            <PlayerRangeSlider
+              touch
+              bipolar
               min={PLAYBACK_SPEED_DRAG_BOUNDS.MIN}
               max={PLAYBACK_SPEED_DRAG_BOUNDS.MAX}
               step={PLAYBACK_SPEED_DRAG_BOUNDS.STEP}
               value={clampedSpeed}
+              percent={speedPct}
               onChange={(e) => onSetPlaybackSpeed?.(Number(e.target.value))}
-              style={getBipolarTrackStyle(speedPct)}
-              className="player-range player-range-bipolar player-range-touch flex-1 cursor-pointer"
-              aria-label="Playback Speed Slider"
+              ariaLabel="Playback Speed Slider"
+              className="flex-1 h-6"
             />
           </div>
         </div>
@@ -260,24 +242,21 @@ export function MobileControlsDrawer({
                 }
               }}
               aria-label="Toggle pitch transpose"
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                isTransposeActive
-                  ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                  : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)]'
-              }`}
+              className="flex h-9 w-9 shrink-0 items-center justify-center text-[var(--player-text-secondary)] active:scale-95 transition-transform"
             >
               <Music size={18} />
             </button>
-            <input
-              type="range"
+            <PlayerRangeSlider
+              touch
+              bipolar
               min={PLAYBACK_TRANSPOSE_BOUNDS.MIN}
               max={PLAYBACK_TRANSPOSE_BOUNDS.MAX}
               step={PLAYBACK_TRANSPOSE_BOUNDS.STEP}
               value={clampedTranspose}
+              percent={transposePct}
               onChange={(e) => onSetPlaybackTranspose?.(Number(e.target.value))}
-              style={getBipolarTrackStyle(transposePct)}
-              className="player-range player-range-bipolar player-range-touch flex-1 cursor-pointer"
-              aria-label="Pitch Transpose Slider"
+              ariaLabel="Pitch Transpose Slider"
+              className="flex-1 h-6"
             />
           </div>
         </div>

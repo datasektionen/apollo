@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PlayerDashboard from '../PlayerDashboard';
+import { fetchPlayerMyDevice, fetchPlayerTuttiMixes } from '../../lib/serverApi';
 
 beforeAll(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -328,5 +329,173 @@ describe('PlayerDashboard - Settings and Lyrics View Priority', () => {
     } finally {
       delete window.Capacitor;
     }
+  });
+
+  it('uses default cursor on show and playlist rows, centers 3-dots column, and opens Move submenus', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt');
+    fetchPlayerTuttiMixes.mockResolvedValueOnce([
+      {
+        id: 'mix-tutti-1',
+        projectId: 'proj-1',
+        presetId: 'tutti',
+        name: 'Opening Number',
+        projectName: 'Opening Number',
+        musicalNumber: '1.0',
+        showId: 'show-1',
+        showName: 'Show One',
+        durationMs: 30000,
+      },
+      {
+        id: 'mix-tutti-2',
+        projectId: 'proj-2',
+        presetId: 'tutti',
+        name: 'Finale',
+        projectName: 'Finale',
+        musicalNumber: '2.0',
+        showId: 'show-2',
+        showName: 'Show Two',
+        durationMs: 45000,
+      },
+    ]);
+    fetchPlayerMyDevice.mockResolvedValueOnce({
+      folders: [{ id: 'folder-1', name: 'Practice Folder', parentFolderId: null }],
+      playlists: [
+        { id: 'pl-1', name: 'Rehearsal A', folderId: null },
+        { id: 'pl-2', name: 'Rehearsal B', folderId: null },
+      ],
+      playlistItemsByPlaylistId: {
+        'pl-1': [
+          {
+            id: 'pi-1',
+            mixId: 'mix-saved-1',
+            mix: {
+              id: 'mix-saved-1',
+              projectId: 'proj-2',
+              presetId: 'practice',
+              name: 'Tenor Line',
+              projectName: 'Finale',
+              musicalNumber: '2.0',
+              showId: 'show-2',
+              showName: 'Show Two',
+              durationMs: 45000,
+            },
+          },
+        ],
+        'pl-2': [],
+      },
+      mixes: [
+        {
+          id: 'mix-saved-1',
+          projectId: 'proj-2',
+          presetId: 'practice',
+          name: 'Tenor Line',
+          projectName: 'Finale',
+          musicalNumber: '2.0',
+          showId: 'show-2',
+          showName: 'Show Two',
+          durationMs: 45000,
+        },
+        {
+          id: 'mix-saved-root',
+          projectId: 'proj-1',
+          presetId: 'practice',
+          name: 'Root Saved Mix',
+          projectName: 'Opening Number',
+          musicalNumber: '1.0',
+          showId: 'show-1',
+          showName: 'Show One',
+          folderId: null,
+          durationMs: 30000,
+        },
+      ],
+    });
+
+    await act(async () => {
+      view = render(
+        <PlayerDashboard
+          session={session}
+          onLogout={vi.fn()}
+          onSwitchToDawDashboard={vi.fn()}
+        />
+      );
+    });
+
+    // 1. Show row uses cursor-default and centered 3-dots cell in 56px trailing column
+    const showRow = Array.from(view.container.querySelectorAll('.player-track-row')).find((el) => (
+      el.textContent.includes('Opening Number')
+    ));
+    expect(showRow).toBeTruthy();
+    expect(showRow.className).toContain('cursor-default');
+    expect(showRow.className).not.toContain('cursor-pointer');
+    expect(showRow.className).toContain('grid-cols-[72px_minmax(0,1fr)_64px_56px]');
+    expect(showRow.className).toContain('pr-0');
+    const showDotsBtn = showRow.querySelector('button[title="Options"]');
+    expect(showDotsBtn.parentElement.className).toContain('justify-center');
+
+    // 2. Right-clicking root saved mix opens "Move to playlist" submenu (NOT window.prompt)
+    const rootMixSidebarBtn = Array.from(view.container.querySelectorAll('.player-library-row')).find((el) => (
+      el.textContent.includes('Root Saved Mix')
+    ));
+    expect(rootMixSidebarBtn).toBeTruthy();
+    await act(async () => {
+      rootMixSidebarBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 80, clientY: 160 }));
+    });
+    const moveToPlaylistBtn = Array.from(view.container.querySelectorAll('button')).find((b) => (
+      b.textContent.includes('Move to playlist')
+    ));
+    expect(moveToPlaylistBtn).toBeTruthy();
+    await act(async () => {
+      moveToPlaylistBtn.click();
+    });
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(view.container.textContent).toContain('New playlist');
+    expect(view.container.textContent).toContain('Library root');
+    const newPlNode = Array.from(view.container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'New playlist');
+    const rootNode = Array.from(view.container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Library root');
+    expect(newPlNode.nextElementSibling).toBe(rootNode);
+    expect(rootNode.nextElementSibling?.className).toContain('border-t');
+
+    // 3. Right-clicking a playlist opens "Move to folder" starting with "New folder", "Library root", separator
+    const playlistSidebarBtn = Array.from(view.container.querySelectorAll('.player-library-row')).find((el) => (
+      el.textContent.includes('Rehearsal A')
+    ));
+    await act(async () => {
+      playlistSidebarBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 80, clientY: 160 }));
+    });
+    const moveToFolderBtn = Array.from(view.container.querySelectorAll('button')).find((b) => (
+      b.textContent.includes('Move to folder')
+    ));
+    expect(moveToFolderBtn).toBeTruthy();
+    await act(async () => {
+      moveToFolderBtn.click();
+    });
+    const newFolderNode = Array.from(view.container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'New folder');
+    const folderRootNode = Array.from(view.container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Library root');
+    expect(newFolderNode).toBeTruthy();
+    expect(newFolderNode.nextElementSibling).toBe(folderRootNode);
+    expect(folderRootNode.nextElementSibling?.className).toContain('border-t');
+
+    // 4. Open Rehearsal A playlist: rows use cursor-default, show name is clickable cursor-pointer -> navigates to Show Two
+    await act(async () => {
+      playlistSidebarBtn.click();
+    });
+    const playlistRow = Array.from(view.container.querySelectorAll('.player-track-row')).find((el) => (
+      el.textContent.includes('Tenor Line')
+    ));
+    expect(playlistRow).toBeTruthy();
+    expect(playlistRow.className).toContain('cursor-default');
+    expect(playlistRow.className).not.toContain('cursor-grab');
+    expect(playlistRow.className).toContain('grid-cols-[44px_minmax(0,1fr)_64px_56px]');
+    expect(playlistRow.className).toContain('pr-0');
+    const playlistDotsBtn = playlistRow.querySelector('button[title="Options"]');
+    expect(playlistDotsBtn.parentElement.className).toContain('justify-center');
+
+    const showLinkBtn = Array.from(playlistRow.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Show Two');
+    expect(showLinkBtn).toBeTruthy();
+    expect(showLinkBtn.className).toContain('cursor-pointer');
+    await act(async () => {
+      showLinkBtn.click();
+    });
+    expect(view.container.querySelector('h2')?.textContent).toBe('Show Two');
   });
 });

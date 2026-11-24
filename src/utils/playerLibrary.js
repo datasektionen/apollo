@@ -7,6 +7,7 @@ import {
   createQueueItemFromMix,
   PLAYER_COLLECTION_TYPES,
 } from '../types/player';
+import { formatMusicalNumberForDisplay } from './naming';
 
 export const LIBRARY_SIDEBAR_STORAGE_KEY = 'apollo.playerLibrarySidebar';
 
@@ -285,10 +286,60 @@ export function listLibraryFolderMoveTargets(folders = [], movingFolderId = null
   if (movingFolderId) blocked.add(movingFolderId);
   return [...folders]
     .filter((folder) => folder?.id && !blocked.has(folder.id))
-    .sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    }));
+    .sort((left, right) => compareNames(left.name, right.name));
+}
+
+export function listLibraryPlaylistMoveTargets(playlists = [], sourcePlaylistId = null) {
+  const excludedId = sourcePlaylistId ? String(sourcePlaylistId) : null;
+  return [...(playlists || [])]
+    .filter((playlist) => playlist?.id && String(playlist.id) !== excludedId)
+    .sort((left, right) => compareNames(left.name, right.name));
+}
+
+export function canDropLibraryEntryOnTarget(
+  entry,
+  target,
+  { folders = [], playlistItemsByPlaylistId = {} } = {}
+) {
+  if (!entry || !target) return false;
+  if (target.kind === 'folder') {
+    const folderId = target.folderId ? String(target.folderId) : null;
+    if (!folderId) return false;
+    if (entry.kind === 'folder') {
+      const movingId = entry.folder?.id ? String(entry.folder.id) : null;
+      if (!movingId || movingId === folderId) return false;
+      if (String(entry.folder?.parentFolderId || '') === folderId) return false;
+      return !getFolderDescendantIds(folders, entry.folder.id).has(folderId);
+    }
+    if (entry.kind === 'playlist') {
+      const movingId = entry.playlist?.id ? String(entry.playlist.id) : null;
+      if (!movingId) return false;
+      return String(entry.playlist?.folderId || '') !== folderId;
+    }
+    return false;
+  }
+  if (target.kind === 'playlist') {
+    const playlistId = target.playlistId ? String(target.playlistId) : null;
+    if (!playlistId || entry.kind !== 'mix' || !entry.mix?.id) return false;
+    if (entry.sourcePlaylistId && String(entry.sourcePlaylistId) === playlistId) return false;
+    const existingItems = playlistItemsByPlaylistId?.[playlistId]
+      || playlistItemsByPlaylistId?.[target.playlistId]
+      || [];
+    return !existingItems.some((item) => String(item?.mixId || '') === String(entry.mix.id));
+  }
+  if (target.kind === 'root') {
+    if (entry.kind === 'folder') {
+      return Boolean(entry.folder?.parentFolderId);
+    }
+    if (entry.kind === 'playlist') {
+      return Boolean(entry.playlist?.folderId);
+    }
+    if (entry.kind === 'mix') {
+      return Boolean(entry.sourcePlaylistId) || Boolean(entry.mix?.folderId);
+    }
+    return false;
+  }
+  return false;
 }
 
 export function sortLibraryItems(items, sort = LIBRARY_SORTS.LATEST, reversed = false) {
@@ -357,6 +408,9 @@ export function libraryEntryFromSearchItem(item) {
 
 export function libraryEntrySubtitle(entry) {
   if (entry?.kind === 'playlist') return 'Playlist';
-  if (entry?.kind === 'mix') return `${entry.mix?.musicalNumber || '0.0'} - Mix`;
+  if (entry?.kind === 'mix') {
+    const num = formatMusicalNumberForDisplay(entry.mix?.musicalNumber || '');
+    return `${num || '0.0'} - Mix`;
+  }
   return 'Folder';
 }

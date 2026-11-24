@@ -54,7 +54,7 @@ describe('DistributionLanding Component', () => {
     // 3 main categories with bigger titles
     expect(container.textContent).toContain('Mobile');
     expect(container.textContent).toContain('Desktop');
-    expect(container.textContent).toContain('If you have no space or trust and are with a slightly to significantly worse experince');
+    expect(container.textContent).toContain('If you have 0 space or trust and are fine with a slightly to significantly worse experience');
 
     // No footer
     expect(container.querySelector('footer')).toBeNull();
@@ -155,5 +155,32 @@ describe('DistributionLanding Component', () => {
 
     const allReleaseLinks = Array.from(container.querySelectorAll(`a[href="${customUrl}"]`));
     expect(allReleaseLinks.some((l) => l.textContent.includes('Download APK'))).toBe(true);
+  });
+
+  it('uses scale animation on download-icon cards and slide-right on chevron cards', async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <DistributionLanding />
+        </MemoryRouter>
+      );
+    });
+
+    const androidLink = Array.from(container.querySelectorAll('a')).find((el) => (
+      el.textContent.includes('Android') && el.getAttribute('download')
+    ));
+    expect(androidLink).toBeTruthy();
+    const androidSvgs = androidLink.querySelectorAll('svg');
+    const downloadIconSvg = androidSvgs[androidSvgs.length - 1];
+    expect(downloadIconSvg.getAttribute('class')).toContain('group-hover:scale-110');
+    expect(downloadIconSvg.getAttribute('class')).not.toContain('group-hover:translate-x-0.5');
+
+    const iosBtn = Array.from(container.querySelectorAll('button')).find((b) => (
+      b.textContent.includes('iPhone / iPad')
+    ));
+    const iosSvgs = iosBtn.querySelectorAll('svg');
+    const chevronSvg = iosSvgs[iosSvgs.length - 1];
+    expect(chevronSvg.getAttribute('class')).toContain('group-hover:translate-x-0.5');
+    expect(chevronSvg.getAttribute('class')).not.toContain('group-hover:scale-110');
   });
 });

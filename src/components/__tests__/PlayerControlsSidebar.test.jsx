@@ -57,7 +57,7 @@ describe('PlayerControlsSidebar', () => {
     expect(view.container.textContent).toContain('Metronome');
     expect(view.container.textContent).toContain('80%');
     expect(view.container.textContent).toContain('Practice Focus');
-    expect(view.container.textContent).toContain('Choir Width');
+    expect(view.container.textContent).toContain('Practice Pan');
     expect(view.container.textContent).toContain('100%');
 
     // All 4 buttons with icons exist

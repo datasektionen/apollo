@@ -2,6 +2,7 @@ import React from 'react';
 import { Play, Pause, Shuffle, CircleUserRound } from 'lucide-react';
 import { BrandMark } from '../BrandLogo';
 import { formatDurationMs } from '../../utils/playerTime';
+import { formatMusicalNumberForDisplay } from '../../utils/naming';
 
 function formatShowDurationLabel(mixes = []) {
   const totalMs = (mixes || []).reduce((sum, mix) => {
@@ -120,6 +121,8 @@ export function MobileHomeTab({
               )
             );
             const activeAndPlaying = isThisPlaying && isPlaying;
+            const displayNumber = formatMusicalNumberForDisplay(mix.musicalNumber);
+            const subtitle = mix.showName || 'Choir number';
             return (
               <div
                 key={mix.id}
@@ -137,14 +140,8 @@ export function MobileHomeTab({
                 role="button"
                 tabIndex={0}
               >
-                {isThisPlaying ? (
-                  <span
-                    aria-hidden="true"
-                    className="absolute left-1.5 top-3 bottom-3 w-[2.5px] rounded-full bg-[var(--player-accent)]"
-                  />
-                ) : null}
-                <div className="flex items-center gap-3 min-w-0 flex-1 pl-1">
-                  <div className="flex w-6 shrink-0 items-center justify-center">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="flex min-w-[2.5rem] max-w-[5.25rem] shrink-0 items-center justify-start">
                     {activeAndPlaying ? (
                       <span className="flex items-end gap-[2px] h-3.5" aria-hidden="true">
                         <span className="player-eq-bar" />
@@ -152,10 +149,10 @@ export function MobileHomeTab({
                         <span className="player-eq-bar" />
                       </span>
                     ) : (
-                      <span className={`text-xs font-medium tabular-nums ${
+                      <span className={`truncate text-xs font-medium tabular-nums ${
                         isThisPlaying ? 'text-[var(--player-accent-text)] font-semibold' : 'text-[var(--player-text-muted)]'
                       }`}>
-                        {idx + 1}
+                        {displayNumber || (idx + 1)}
                       </span>
                     )}
                   </div>
@@ -165,8 +162,8 @@ export function MobileHomeTab({
                     }`}>
                       {mix.name || mix.projectName}
                     </div>
-                    <div className="mt-0.5 truncate text-xs text-[var(--player-text-secondary)] tabular-nums">
-                      {mix.musicalNumber ? `No. ${mix.musicalNumber}` : (mix.showName || 'Choir number')}
+                    <div className="mt-0.5 truncate text-xs text-[var(--player-text-secondary)]">
+                      {subtitle}
                     </div>
                   </div>
                 </div>

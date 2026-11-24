@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useInRouterContext, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, Plus, Download, FileAudio, CircleUserRound } from 'lucide-react';
-import { isValidMusicalNumber, normalizeMusicalNumber, normalizeProjectName } from '../utils/naming';
+import {
+  formatMusicalNumberForDisplay,
+  isValidMusicalNumber,
+  musicalNumberUniquenessKey,
+  normalizeMusicalNumber,
+  normalizeProjectName,
+  suggestNextUniqueMusicalNumber,
+} from '../utils/naming';
 import { PlaybackDevicesSettingsPanel } from './SettingsPanels';
 import { usePlaybackDeviceSettings } from '../hooks/usePlaybackDeviceSettings';
 import { BrandWordmark } from './BrandLogo';
@@ -88,6 +95,16 @@ function HostedDashboard({
   const visibleProjects = (projects || []).filter((project) => (
     selectedShow ? project.showId === selectedShow.id : false
   ));
+  const duplicateNewMusicalNumber = isValidMusicalNumber(newMusicalNumber) && visibleProjects.some((project) => (
+    musicalNumberUniquenessKey(project.musicalNumber) === musicalNumberUniquenessKey(newMusicalNumber)
+  ));
+
+  const openNewProjectDialog = () => {
+    setNewMusicalNumber(
+      suggestNextUniqueMusicalNumber(visibleProjects.map((project) => project.musicalNumber), '0.0')
+    );
+    setShowNewProjectDialog(true);
+  };
 
   const handleSelectShow = (showId) => {
     setSelectedShowId(showId);
@@ -151,11 +168,16 @@ function HostedDashboard({
   const handleCreateProject = async () => {
     const normalizedName = normalizeProjectName(newProjectName);
     const normalizedMusicalNumber = normalizeMusicalNumber(newMusicalNumber);
-    if (!normalizedName || !isValidMusicalNumber(normalizedMusicalNumber) || !selectedShow?.id) return;
-    await onCreateProject(normalizedName, normalizedMusicalNumber, selectedShow.id);
-    setNewProjectName('');
-    setNewMusicalNumber('0.0');
-    setShowNewProjectDialog(false);
+    const isDuplicate = isValidMusicalNumber(normalizedMusicalNumber) && visibleProjects.some((project) => (
+      musicalNumberUniquenessKey(project.musicalNumber) === musicalNumberUniquenessKey(normalizedMusicalNumber)
+    ));
+    if (!normalizedName || !isValidMusicalNumber(normalizedMusicalNumber) || isDuplicate || !selectedShow?.id) return;
+    const created = await onCreateProject(normalizedName, normalizedMusicalNumber, selectedShow.id);
+    if (created !== false) {
+      setNewProjectName('');
+      setNewMusicalNumber('0.0');
+      setShowNewProjectDialog(false);
+    }
   };
 
   const promptCreateShow = async () => {
@@ -338,7 +360,7 @@ function HostedDashboard({
                   setCreateMenuOpen((previous) => !previous);
                   return;
                 }
-                setShowNewProjectDialog(true);
+                openNewProjectDialog();
               }}
               className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg p-2 flex items-center justify-center transition-colors disabled:bg-gray-700"
               disabled={loading || (!canCreateProjectsInSelectedShow && !canCreateShows) || (!selectedShow && !canCreateShows)}
@@ -353,7 +375,7 @@ function HostedDashboard({
                   disabled={!canCreateProjectsInSelectedShow || !selectedShow || loading}
                   onClick={() => {
                     setCreateMenuOpen(false);
-                    setShowNewProjectDialog(true);
+                    openNewProjectDialog();
                   }}
                   className="w-full px-3 py-2 text-left text-sm text-gray-200 hover:bg-gray-700 disabled:cursor-not-allowed disabled:text-gray-500 disabled:hover:bg-transparent"
                 >
@@ -517,14 +539,30 @@ function HostedDashboard({
               />
               <input
                 type="text"
+                maxLength={9}
                 value={newMusicalNumber}
                 onChange={(e) => setNewMusicalNumber(e.target.value)}
-                placeholder="Musical number (e.g. 0.0, 2.1, 3.dk)"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleCreateProject();
+                  }
+                }}
+                placeholder="Number (e.g. 1, 2.1, _Intro)"
                 className={`w-full bg-gray-900 border rounded px-4 py-2 mb-2 focus:outline-none ${
-                  isValidMusicalNumber(newMusicalNumber) ? 'border-gray-700 focus:border-blue-500' : 'border-red-500 focus:border-red-400'
+                  isValidMusicalNumber(newMusicalNumber) && !duplicateNewMusicalNumber
+                    ? 'border-gray-700 focus:border-blue-500'
+                    : 'border-red-500 focus:border-red-400'
                 }`}
               />
-              <p className="text-xs text-gray-400 mb-4">Must start with a number and dot, e.g. <code>0.0</code>, <code>2.1</code>, <code>3.dk</code>.</p>
+              {duplicateNewMusicalNumber ? (
+                <p className="text-xs text-red-400 mb-4">
+                  Musical number "{formatMusicalNumberForDisplay(newMusicalNumber)}" is already used in this show (underscores and letter case are ignored).
+                </p>
+              ) : (
+                <p className="text-xs text-gray-400 mb-4">
+                  Unique per show, 1 to 9 characters (underscores sort first and are hidden when displayed).
+                </p>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateProject}
@@ -532,6 +570,7 @@ function HostedDashboard({
                   disabled={
                     !normalizeProjectName(newProjectName)
                     || !isValidMusicalNumber(newMusicalNumber)
+                    || duplicateNewMusicalNumber
                     || !selectedShow?.id
                     || loading
                   }
@@ -605,7 +644,7 @@ function HostedDashboard({
                       }`}
                     >
                       <div className="text-lg text-gray-300 font-mono truncate">
-                        {project.musicalNumber || '0.0'}
+                        {formatMusicalNumberForDisplay(project.musicalNumber) || '0.0'}
                       </div>
                       <div className="min-w-0">
                         {editingProjectId === project.id ? (
@@ -693,13 +732,21 @@ function HostedDashboard({
               const project = contextMenu.project;
               setContextMenu(null);
               const nextRaw = window.prompt(
-                'Set musical number (must start with "<number>.", e.g. 2.1)',
+                'Set musical number (1 to 9 characters; underscores sort first and are hidden when displayed)',
                 project.musicalNumber || '0.0'
               );
               if (nextRaw === null) return;
               const normalized = normalizeMusicalNumber(nextRaw);
               if (!isValidMusicalNumber(normalized)) {
-                window.alert('Invalid musical number format. Example valid values: 0.0, 2.1, 3.dk');
+                window.alert('Musical number must be 1 to 9 characters and include at least one non-underscore character.');
+                return;
+              }
+              const targetKey = musicalNumberUniquenessKey(normalized);
+              const conflicting = visibleProjects.find((candidate) => (
+                candidate.id !== project.id && musicalNumberUniquenessKey(candidate.musicalNumber) === targetKey
+              ));
+              if (conflicting) {
+                window.alert(`Musical number "${formatMusicalNumberForDisplay(normalized)}" is already used in this show.`);
                 return;
               }
               await onUpdateMusicalNumber?.(project, normalized);

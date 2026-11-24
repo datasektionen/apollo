@@ -271,4 +271,145 @@ describe('PlayerLibrarySidebar', () => {
 
     view.unmount();
   });
+
+  it('suppresses collapsed hover tooltips when contextMenuOpen is true', () => {
+    let view = render(
+      <PlayerLibrarySidebar
+        folders={folders}
+        playlists={playlists}
+        myMixes={myMixes}
+        playlistItemsByPlaylistId={{}}
+        onSelectEntry={() => {}}
+        contextMenuOpen={false}
+      />
+    );
+
+    act(() => {
+      view.container.querySelector('button[aria-label="Collapse Your Library"]').click();
+    });
+    flushToggleAnimation();
+
+    const warmupMinBtn = view.container.querySelector('button[aria-label="Warmup (Playlist)"]');
+    expect(warmupMinBtn).toBeTruthy();
+
+    act(() => {
+      warmupMinBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    expect(document.body.textContent).toContain('Warmup');
+
+    view.unmount();
+    view = render(
+      <PlayerLibrarySidebar
+        folders={folders}
+        playlists={playlists}
+        myMixes={myMixes}
+        playlistItemsByPlaylistId={{}}
+        onSelectEntry={() => {}}
+        contextMenuOpen
+      />
+    );
+
+    const warmupSuppressedBtn = view.container.querySelector('button[aria-label="Warmup (Playlist)"]');
+    const folderSuppressedBtn = view.container.querySelector('button[aria-label="Private charts (Folder)"]');
+    act(() => {
+      warmupSuppressedBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      folderSuppressedBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    const hoverPopups = Array.from(document.body.querySelectorAll('.player-menu')).filter((node) => (
+      node.className.includes('pointer-events-none')
+    ));
+    expect(hoverPopups).toHaveLength(0);
+    view.unmount();
+  });
+
+  it('moves dragged items onto folders and Library root', async () => {
+    const moved = [];
+    const nestedPlaylists = [
+      { id: 'pl-1', name: 'Warmup', folderId: null, createdAt: '2026-01-02', updatedAt: '2026-03-01' },
+      { id: 'pl-nested', name: 'Nested PL', folderId: 'folder-1', createdAt: '2026-01-04', updatedAt: '2026-03-05' },
+    ];
+    let view = render(
+      <PlayerLibrarySidebar
+        folders={folders}
+        playlists={nestedPlaylists}
+        myMixes={myMixes}
+        playlistItemsByPlaylistId={{}}
+        onSelectEntry={() => {}}
+        onMoveEntry={(entry, target) => moved.push({ entry, target })}
+      />
+    );
+
+    const dataTransfer = {
+      effectAllowed: 'move',
+      dropEffect: 'move',
+      setData: vi.fn(),
+    };
+
+    const playlistBtn = Array.from(view.container.querySelectorAll('button')).find((b) => b.textContent.includes('Warmup'));
+    const folderBtn = Array.from(view.container.querySelectorAll('button')).find((b) => b.textContent.includes('Private charts'));
+    expect(playlistBtn.getAttribute('draggable')).toBe('true');
+
+    await act(async () => {
+      const startEvt = new Event('dragstart', { bubbles: true, cancelable: true });
+      Object.defineProperty(startEvt, 'dataTransfer', { value: dataTransfer });
+      playlistBtn.dispatchEvent(startEvt);
+    });
+    await act(async () => {
+      const overEvt = new Event('dragover', { bubbles: true, cancelable: true });
+      Object.defineProperty(overEvt, 'dataTransfer', { value: dataTransfer });
+      folderBtn.dispatchEvent(overEvt);
+    });
+    expect(folderBtn.getAttribute('data-drop-target')).toBe('true');
+
+    await act(async () => {
+      const dropEvt = new Event('drop', { bubbles: true, cancelable: true });
+      Object.defineProperty(dropEvt, 'dataTransfer', { value: dataTransfer });
+      folderBtn.dispatchEvent(dropEvt);
+    });
+
+    expect(moved).toHaveLength(1);
+    expect(moved[0]).toEqual(expect.objectContaining({
+      target: { kind: 'folder', folderId: 'folder-1' },
+    }));
+    expect(moved[0].entry.kind).toBe('playlist');
+    expect(moved[0].entry.playlist.id).toBe('pl-1');
+
+    view.unmount();
+
+    moved.length = 0;
+    view = render(
+      <PlayerLibrarySidebar
+        folders={folders}
+        playlists={nestedPlaylists}
+        myMixes={myMixes}
+        playlistItemsByPlaylistId={{}}
+        libraryScopeFolderId="folder-1"
+        onSelectEntry={() => {}}
+        onMoveEntry={(entry, target) => moved.push({ entry, target })}
+      />
+    );
+
+    const nestedBtn = Array.from(view.container.querySelectorAll('button')).find((b) => b.textContent.includes('Nested PL'));
+    await act(async () => {
+      const startEvt = new Event('dragstart', { bubbles: true, cancelable: true });
+      Object.defineProperty(startEvt, 'dataTransfer', { value: dataTransfer });
+      nestedBtn.dispatchEvent(startEvt);
+    });
+
+    const rootDropzone = view.container.querySelector('[data-library-root-dropzone="true"]');
+    expect(rootDropzone).toBeTruthy();
+    await act(async () => {
+      const overEvt = new Event('dragover', { bubbles: true, cancelable: true });
+      Object.defineProperty(overEvt, 'dataTransfer', { value: dataTransfer });
+      rootDropzone.dispatchEvent(overEvt);
+      const dropEvt = new Event('drop', { bubbles: true, cancelable: true });
+      Object.defineProperty(dropEvt, 'dataTransfer', { value: dataTransfer });
+      rootDropzone.dispatchEvent(dropEvt);
+    });
+
+    expect(moved).toHaveLength(1);
+    expect(moved[0].entry.playlist.id).toBe('pl-nested');
+    expect(moved[0].target).toEqual({ kind: 'root' });
+    view.unmount();
+  });
 });

@@ -6,10 +6,12 @@ import {
   buildLibrarySearchItems,
   buildLibraryVisibleItems,
   buildMyDeviceQueue,
+  canDropLibraryEntryOnTarget,
   commitLibrarySidebarDrag,
   libraryEntryFromSearchItem,
   librarySidebarProgress,
   listLibraryFolderMoveTargets,
+  listLibraryPlaylistMoveTargets,
   resolveLibrarySidebarDrag,
   searchPlayerLibrary,
   sortLibraryItems,
@@ -173,6 +175,60 @@ describe('listLibraryFolderMoveTargets', () => {
   it('omits a folder and its descendants', () => {
     const targets = listLibraryFolderMoveTargets(folders, 'folder-b');
     expect(targets.map((folder) => folder.id)).toEqual(['folder-a']);
+  });
+});
+
+describe('listLibraryPlaylistMoveTargets', () => {
+  it('omits the source playlist and sorts remaining playlists alphabetically', () => {
+    const targets = listLibraryPlaylistMoveTargets([
+      { id: 'pl-z', name: 'Zulu' },
+      { id: 'pl-a', name: 'Alpha' },
+      { id: 'pl-src', name: 'Source' },
+    ], 'pl-src');
+    expect(targets.map((playlist) => playlist.id)).toEqual(['pl-a', 'pl-z']);
+  });
+});
+
+describe('canDropLibraryEntryOnTarget', () => {
+  it('validates folder, playlist, and Library root drop targets safely', () => {
+    const folderEntry = { kind: 'folder', folder: folders[0] };
+    const nestedFolderEntry = { kind: 'folder', folder: folders[2] };
+    const playlistEntry = { kind: 'playlist', playlist: playlists[0] };
+    const nestedPlaylistEntry = { kind: 'playlist', playlist: playlists[1] };
+    const mixEntry = {
+      kind: 'mix',
+      mix: { id: 'mix-1', folderId: null },
+      sourcePlaylistId: 'pl-old',
+      sourcePlaylistItemId: 'item-1',
+    };
+
+    expect(canDropLibraryEntryOnTarget(folderEntry, { kind: 'folder', folderId: 'folder-a' }, { folders })).toBe(true);
+    expect(canDropLibraryEntryOnTarget(folderEntry, { kind: 'folder', folderId: 'folder-b' }, { folders })).toBe(false);
+    expect(canDropLibraryEntryOnTarget(folderEntry, { kind: 'folder', folderId: 'folder-nested' }, { folders })).toBe(false);
+    expect(canDropLibraryEntryOnTarget(playlistEntry, { kind: 'folder', folderId: 'folder-a' }, { folders })).toBe(true);
+    expect(canDropLibraryEntryOnTarget(mixEntry, { kind: 'folder', folderId: 'folder-a' }, { folders })).toBe(false);
+
+    expect(canDropLibraryEntryOnTarget(
+      mixEntry,
+      { kind: 'playlist', playlistId: 'pl-new' },
+      { playlistItemsByPlaylistId: {} }
+    )).toBe(true);
+    expect(canDropLibraryEntryOnTarget(
+      mixEntry,
+      { kind: 'playlist', playlistId: 'pl-old' },
+      { playlistItemsByPlaylistId: {} }
+    )).toBe(false);
+    expect(canDropLibraryEntryOnTarget(
+      mixEntry,
+      { kind: 'playlist', playlistId: 'pl-new' },
+      { playlistItemsByPlaylistId: { 'pl-new': [{ mixId: 'mix-1' }] } }
+    )).toBe(false);
+
+    expect(canDropLibraryEntryOnTarget(folderEntry, { kind: 'root' })).toBe(false);
+    expect(canDropLibraryEntryOnTarget(nestedFolderEntry, { kind: 'root' })).toBe(true);
+    expect(canDropLibraryEntryOnTarget(playlistEntry, { kind: 'root' })).toBe(false);
+    expect(canDropLibraryEntryOnTarget(nestedPlaylistEntry, { kind: 'root' })).toBe(true);
+    expect(canDropLibraryEntryOnTarget(mixEntry, { kind: 'root' })).toBe(true);
   });
 });
 

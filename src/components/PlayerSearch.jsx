@@ -23,6 +23,7 @@ import {
   searchPlayerCatalog,
 } from '../utils/playerSearch';
 import { formatDurationMs } from '../utils/playerTime';
+import { formatMusicalNumberForDisplay } from '../utils/naming';
 
 const TYPE_ICONS = {
   show: Clapperboard,
@@ -326,8 +327,9 @@ function CreditDetail({ credit, songsByProjectId, onBack, onSelect, onPlay }) {
           <div className="space-y-1">
             {involvements.map((row, index) => {
               const song = row.projectId ? songsByProjectId.get(String(row.projectId)) : null;
+              const displayNum = formatMusicalNumberForDisplay(row.musicalNumber);
               const title = row.projectName
-                ? `${row.musicalNumber ? `${row.musicalNumber} - ` : ''}${row.projectName}`
+                ? `${displayNum ? `${displayNum} - ` : ''}${row.projectName}`
                 : (row.showName || 'Show');
               const item = song || (row.showId ? {
                 id: `show:${row.showId}`,
