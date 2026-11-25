@@ -43,7 +43,7 @@ write_common_config() {
     application/vnd.android.package-archive apk;
   }
 
-\${APK_CONFIG}
+${APK_CONFIG}
 
   location = /sw.js {
     add_header Cache-Control "no-cache, no-store, must-revalidate";
