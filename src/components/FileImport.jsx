@@ -386,7 +386,7 @@ function FileImport({
               onClick={handleImport}
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                 files.length === 0 || isProcessing || blockedEntries.length > 0
-                  ? 'border border-transparent bg-white/[0.04] text-[var(--player-text-disabled)] cursor-not-allowed'
+                  ? 'border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)] opacity-45 cursor-not-allowed'
                   : 'player-play-cta'
               }`}
               disabled={files.length === 0 || isProcessing || blockedEntries.length > 0}

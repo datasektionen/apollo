@@ -65,8 +65,8 @@
   --daw-role-instrument-fg: #e9d5ff;
 
   --daw-role-lead-accent: #38bdf8;
-  --daw-role-lead-bg: rgba(56, 189, 248, 0.15);
-  --daw-role-lead-border: rgba(56, 189, 248, 0.48);
+  --daw-role-lead-bg: rgba(56, 189, 248, 0.2);
+  --daw-role-lead-border: rgba(56, 189, 248, 0.56);
   --daw-role-lead-fg: #bae6fd;
 
   --daw-role-choir-accent: #34d399;
@@ -244,6 +244,8 @@
 
 .daw-theme .zoom-minimal-shell {
   --daw-zoom-fill: var(--player-slider-fill-rest, #f4f4f2);
+  display: flex;
+  align-items: center;
 }
 
 .daw-theme .zoom-minimal-shell:hover,
@@ -252,6 +254,8 @@
 }
 
 .daw-theme .zoom-minimal-stick {
+  left: 5px;
+  right: 5px;
   height: 3.5px;
   background: linear-gradient(
     to right,
@@ -261,6 +265,17 @@
     var(--player-slider-track, #34373e) 100%
   );
   transition: background 140ms var(--player-ease);
+}
+
+.daw-theme input[type='range'].zoom-minimal-slider {
+  display: block;
+  margin: 0;
+  padding: 0;
+  height: 14px;
+}
+
+.daw-theme input[type='range'].zoom-minimal-slider::-webkit-slider-runnable-track {
+  height: 4px;
 }
 
 .daw-theme input[type='range'].zoom-minimal-slider::-webkit-slider-thumb {
@@ -280,7 +295,7 @@
 .daw-theme input[type='range'].zoom-minimal-slider::-moz-range-thumb {
   width: 11px;
   height: 11px;
-  transform: translateY(-2.5px);
+  transform: none;
   background: var(--player-slider-thumb, #f4f4f2);
   border: 1.5px solid #0c0c0e;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
@@ -367,6 +382,22 @@
   .daw-theme .daw-tracklist-compact .daw-role-badge {
     width: 44px;
     height: 44px;
+  }
+  .daw-theme .daw-tracklist-compact [data-row-depth='1'] > div {
+    padding-left: 11px !important;
+  }
+  .daw-theme .daw-tracklist-compact [data-row-depth='2'] > div,
+  .daw-theme .daw-tracklist-compact [data-row-depth='3'] > div {
+    padding-left: 14px !important;
+  }
+  .daw-theme .daw-tracklist-compact [data-row-depth]:not([data-row-depth='0']) .daw-role-badge {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+  }
+  .daw-theme .daw-tracklist-compact [data-row-depth]:not([data-row-depth='0']) .daw-role-badge svg {
+    width: 22px;
+    height: 22px;
   }
   .daw-theme .daw-tracklist-compact .daw-compact-mute-badge {
     display: flex;

@@ -4410,10 +4410,10 @@ function Editor({
           <div className="flex items-center gap-2.5 min-w-0 md:pr-4">
             <button
               onClick={onBackToDashboard}
-              className="rounded-lg p-1.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors flex-shrink-0"
+              className="rounded-lg p-1.5 text-[var(--player-text-body)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors flex-shrink-0"
               title="Back to Dashboard"
             >
-              <ArrowLeft size={19} />
+              <ArrowLeft size={19} strokeWidth={2.1} />
             </button>
             {!isAdvancedMixSession && !isLocalRecordingSession ? (
               <button
@@ -4422,7 +4422,7 @@ function Editor({
                   setSettingsOpen(true);
                   refreshAudioDevices();
                 }}
-                className="rounded-lg p-1.5 text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors flex-shrink-0"
+                className="rounded-lg p-1.5 text-[var(--player-text-body)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors flex-shrink-0"
                 title="Settings"
               >
                 <Settings size={18} />
@@ -4522,7 +4522,7 @@ function Editor({
 
           <div className="relative min-w-0">
             <div className="flex items-center justify-between gap-2 md:gap-4 overflow-x-auto scrollbar-hidden">
-              <div className="flex items-center gap-0.5 md:gap-1 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--daw-bg-dock)] p-0.5 md:p-1 flex-shrink-0">
+              <div className="flex items-center gap-1 md:gap-1.5 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--daw-bg-dock)] p-1 flex-shrink-0">
                 <button
                   onClick={handleSkipBackward}
                   disabled={hasNoTracks}
@@ -4592,7 +4592,7 @@ function Editor({
                       isRecording
                         ? 'bg-[var(--daw-record-bg)] hover:bg-[var(--daw-record-hover)] text-white shadow-[var(--daw-record-glow)] animate-pulse'
                         : 'bg-red-500/[0.22] hover:bg-[var(--daw-record-bg)] ring-1 ring-inset ring-red-500/50 text-[#ef4444] hover:text-white'
-                    } disabled:bg-white/[0.04] disabled:ring-0 disabled:text-red-500/45 disabled:shadow-none disabled:cursor-not-allowed`}
+                    } disabled:bg-red-500/[0.08] disabled:ring-1 disabled:ring-inset disabled:ring-red-500/25 disabled:text-red-500/65 disabled:shadow-none disabled:cursor-not-allowed`}
                   >
                     {!isRecording && selectedTrackLockedByOther ? (
                       <Lock size={15} />
@@ -5025,9 +5025,14 @@ function Editor({
                 </>
               ) : null}
               <div
-                className="hidden md:block pointer-events-auto absolute right-3 z-30 -translate-y-1/2"
-                style={{ top: `${TIMELINE_RULER_HEIGHT / 2}px` }}
-              >{zoomOverlay}</div>
+                className="hidden md:flex items-center pointer-events-none absolute right-0 top-0 z-30 pl-8 pr-4"
+                style={{
+                  height: `${TIMELINE_RULER_HEIGHT - 1}px`,
+                  background: 'linear-gradient(to right, transparent 0%, var(--daw-bg-ruler-top) 28px, var(--daw-bg-ruler-top) 100%)',
+                }}
+              >
+                <div className="pointer-events-auto">{zoomOverlay}</div>
+              </div>
               <div
                 ref={timelineRowsScrollAreaRef}
                 className="col-span-2 min-h-0 overflow-y-auto scrollbar-hidden relative z-10 overscroll-none"

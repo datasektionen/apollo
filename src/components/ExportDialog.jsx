@@ -1224,9 +1224,11 @@ function ExportDialog({
                         {renderNode(audioExportTree, 0)}
                       </div>
                       <div className="shrink-0 border-t border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)]/70 px-3.5 py-2 flex items-center justify-between text-xs">
-                        <span className="text-[var(--player-text-secondary)]">Selected mixes</span>
-                        <span className="font-mono font-medium tabular-nums text-[var(--player-accent-text)]">
-                          {getNodeFileCountText('all') || '0'}
+                        <span className="text-[var(--player-text-secondary)]">Ready to render</span>
+                        <span className="font-medium tabular-nums text-[var(--player-accent-text)]">
+                          {selectedPresetIds.length === 0
+                            ? 'None selected'
+                            : `${(getNodeFileCountText('all') || '0').replace(/\s*\/\s*/, ' of ')} mixes`}
                         </span>
                       </div>
                     </>
@@ -1271,25 +1273,25 @@ function ExportDialog({
                       <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1">Transformed pan range</label>
                       <input
                         type="number"
-                        className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm font-mono text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
+                        className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm tabular-nums text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
                         value={transformedPanRange}
                         onChange={(e) => handleUpdateExportSetting({ transformedPanRange: Number(e.target.value) })}
                         disabled={isExporting}
                       />
                     </div>
-                    <div className="mb-2.5">
+                    <div className="mb-3.5">
                       <label className="block text-xs font-medium text-[var(--player-text-secondary)]">
                         Practice focus difference (dB)
                       </label>
-                      <div className="relative px-2 pt-4">
+                      <div className="relative px-2 pt-5">
                         <div
-                          className="absolute top-1 text-[11px] tabular-nums whitespace-nowrap text-[var(--player-accent-text)] font-semibold leading-none pointer-events-none"
+                          className="absolute top-0.5 text-[11px] tabular-nums whitespace-nowrap text-[var(--player-accent-text)] font-semibold leading-none pointer-events-none"
                           style={{
                             left: practiceFocusDiffLabelLeft,
                             transform: 'translateX(-50%)',
                           }}
                         >
-                          {practiceFocusDiffDb}
+                          {practiceFocusDiffDb > 0 ? `+${practiceFocusDiffDb} dB` : `${practiceFocusDiffDb} dB`}
                         </div>
                         <div className="relative h-6">
                           <div className="absolute z-0 left-0 right-0 top-1/2 -translate-y-1/2 h-2 rounded-full border border-[var(--player-border-default)] bg-[var(--daw-bg-lcd)] overflow-hidden pointer-events-none">
@@ -1314,13 +1316,18 @@ function ExportDialog({
                             disabled={isExporting}
                           />
                         </div>
-                        <div className="mt-0.5 flex items-center justify-between px-[7px] pointer-events-none">
+                        <div className="mt-0.5 flex items-center justify-between px-[6px] pointer-events-none">
                           {Array.from({ length: 13 }, (_, idx) => (
                             <span
                               key={idx}
                               className={`block w-px ${idx === 6 ? 'h-2 bg-white/60' : idx % 2 === 0 ? 'h-1.5 bg-white/40' : 'h-1 bg-white/20'}`}
                             />
                           ))}
+                        </div>
+                        <div className="mt-1 flex items-center justify-between px-[2px] text-[10px] leading-none tabular-nums text-[var(--player-text-muted)] pointer-events-none">
+                          <span>-6</span>
+                          <span>0</span>
+                          <span>+6</span>
                         </div>
                       </div>
                     </div>

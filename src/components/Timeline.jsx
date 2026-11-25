@@ -3036,9 +3036,9 @@ function Timeline({
         onClick={handleZoomOut}
         aria-label="Zoom out"
         title="Zoom out (-)"
-        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] transition-colors"
+        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-body)] hover:text-[var(--player-text-primary)] transition-colors"
       >
-        <ZoomOut size={13} />
+        <ZoomOut size={14} strokeWidth={2} />
       </button>
       <div
         className="zoom-minimal-shell"
@@ -3063,9 +3063,9 @@ function Timeline({
         onClick={handleZoomIn}
         aria-label="Zoom in"
         title="Zoom in (+)"
-        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] transition-colors"
+        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-body)] hover:text-[var(--player-text-primary)] transition-colors"
       >
-        <ZoomIn size={13} />
+        <ZoomIn size={14} strokeWidth={2} />
       </button>
     </div>
   );
@@ -3283,20 +3283,16 @@ function Timeline({
           className="pointer-events-none absolute inset-x-0 bg-[var(--daw-bg-ruler-seek)] border-t border-white/[0.04]"
           style={{ top: RULER_LABEL_HEIGHT, height: RULER_SEEK_HEIGHT }}
         />
-        {loopBand ? (
+        {loopBand && loopRange.enabled ? (
           <div
             className="pointer-events-none absolute top-0"
             style={{
               ...loopBand,
               height: RULER_LABEL_HEIGHT,
-              backgroundColor: loopRange.enabled ? 'var(--daw-loop-active)' : 'rgba(255, 255, 255, 0.025)',
-              ...(loopRange.enabled
-                ? {
-                    borderTop: '2px solid var(--daw-loop-active-edge)',
-                    borderLeft: '1px solid var(--daw-loop-active-edge)',
-                    borderRight: '1px solid var(--daw-loop-active-edge)',
-                  }
-                : {}),
+              backgroundColor: 'var(--daw-loop-active)',
+              borderTop: '2px solid var(--daw-loop-active-edge)',
+              borderLeft: '1px solid var(--daw-loop-active-edge)',
+              borderRight: '1px solid var(--daw-loop-active-edge)',
             }}
           />
         ) : null}
@@ -3693,7 +3689,11 @@ function Timeline({
                             <div className="absolute top-1 left-0 right-0 text-xs font-medium pointer-events-none"
                               style={{ paddingLeft: labelPadding, paddingRight: labelPadding }}>
                               <span
-                                className="sticky text-[var(--player-accent-text)] whitespace-nowrap overflow-hidden text-ellipsis inline-flex items-center max-w-full drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)]"
+                                className={`sticky whitespace-nowrap overflow-hidden text-ellipsis inline-flex items-center max-w-full drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)] ${
+                                  clipAttenuated
+                                    ? 'text-[var(--player-text-muted)]'
+                                    : 'text-[var(--player-accent-text)]'
+                                }`}
                                 style={{ left: labelPadding }}
                               >
                                 {clip.muted ? <VolumeX size={12} /> : Math.abs(clip.gainDb) >= 0.1 ? gainLabelText : null}

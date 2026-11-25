@@ -281,21 +281,21 @@ input[type="range"].practice-diff-slider::-moz-range-track {
 }
 
 input[type="range"].practice-diff-slider::-webkit-slider-thumb {
-  width: 14px;
-  height: 14px;
-  margin-top: -3px;
+  width: 12px;
+  height: 12px;
+  margin-top: -2px;
   background: #f4f4f2;
-  border: 2px solid #0c0c0e;
-  box-shadow: 0 0 0 1px rgba(217, 183, 109, 0.65);
+  border: 1.5px solid #0c0c0e;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
 }
 
 input[type="range"].practice-diff-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   transform: translateY(0);
   background: #f4f4f2;
-  border: 2px solid #0c0c0e;
-  box-shadow: 0 0 0 1px rgba(217, 183, 109, 0.65);
+  border: 1.5px solid #0c0c0e;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
 }
 
 input[type="range"].practice-diff-slider::-webkit-slider-thumb:hover {

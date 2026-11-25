@@ -1321,6 +1321,7 @@ function TrackList({
             <div
               key={row.nodeId}
               data-tree-row-id={row.nodeId}
+              data-row-depth={previewDepth}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -1343,7 +1344,10 @@ function TrackList({
                 maxHeight: `${row.height}px`,
                 borderLeft: `${isSelectedRow ? 4 : 3}px solid ${row.muted ? `${groupPalette.accent}78` : groupPalette.accent}`,
                 ...(isSelectedRow && !isGroupHighlightedInAdvancedMix
-                  ? { boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(255, 255, 255, 0.04)' }
+                  ? {
+                      backgroundColor: `color-mix(in srgb, ${groupPalette.accent} 8%, #18171c)`,
+                      boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(255, 255, 255, 0.05)',
+                    }
                   : {}),
                 ...rowMotionStyle,
               }}
@@ -1414,7 +1418,9 @@ function TrackList({
                           e.stopPropagation();
                           setEditingName(`group:${row.nodeId}`);
                         }}
-                        className="flex-1 text-base font-semibold text-[var(--player-text-primary)] truncate min-w-0 h-[28px] flex items-center select-none"
+                        className={`flex-1 text-base font-semibold truncate min-w-0 h-[28px] flex items-center select-none ${
+                          row.muted ? 'text-[var(--player-text-secondary)]' : 'text-[var(--player-text-primary)]'
+                        }`}
                         title={groupLocked ? (canManageGroups ? row.name : GROUP_NO_ACCESS_TITLE) : 'Double-click to edit'}
                       >
                         {row.name}
@@ -1519,7 +1525,7 @@ function TrackList({
                       title={canManageGroups ? undefined : GROUP_NO_ACCESS_TITLE}
                     >
                       <div
-                        className={`flex items-center relative ${row.muted ? 'opacity-45' : ''}`}
+                        className={`flex items-center relative ${row.muted ? 'opacity-60' : ''}`}
                         style={{ width: `${getVolumeSliderWidth(true)}px` }}
                         onClick={(e) => e.stopPropagation()}
                         onMouseDown={(e) => e.stopPropagation()}
@@ -1696,6 +1702,7 @@ function TrackList({
           <div
             key={row.nodeId}
             data-tree-row-id={row.nodeId}
+            data-row-depth={previewDepth}
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -1719,7 +1726,10 @@ function TrackList({
               maxHeight: `${trackHeight}px`,
               borderLeft: `${isSelectedRow ? 4 : 3}px solid ${track.muted ? `${trackPalette.accent}78` : trackPalette.accent}`,
               ...(isSelectedRow && !isHighlightedInAdvancedMix
-                ? { boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(255, 255, 255, 0.04)' }
+                ? {
+                    backgroundColor: `color-mix(in srgb, ${trackPalette.accent} 8%, #18171c)`,
+                    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(255, 255, 255, 0.05)',
+                  }
                 : {}),
               ...rowMotionStyle,
             }}
@@ -1801,7 +1811,9 @@ function TrackList({
                         e.stopPropagation();
                         setEditingName(track.id);
                       }}
-                      className="flex-1 text-base font-semibold text-[var(--player-text-primary)] truncate min-w-0 h-[28px] flex items-center select-none"
+                      className={`flex-1 text-base font-semibold truncate min-w-0 h-[28px] flex items-center select-none ${
+                        track.muted ? 'text-[var(--player-text-secondary)]' : 'text-[var(--player-text-primary)]'
+                      }`}
                       title={trackLocked(track.id) ? (thisTrackEditable ? track.name : trackNoAccessTitle(track.id)) : 'Double-click to edit'}
 	                      >
 	                        {track.name}
@@ -1871,7 +1883,7 @@ function TrackList({
                     title={thisTrackEditable ? undefined : trackNoAccessTitle(track.id)}
                   >
                     <div
-                      className={`flex items-center relative ${track.muted ? 'opacity-45' : ''}`}
+                      className={`flex items-center relative ${track.muted ? 'opacity-60' : ''}`}
                       style={{ width: `${getVolumeSliderWidth(false)}px` }}
                       onClick={(e) => e.stopPropagation()}
                       onMouseDown={(e) => e.stopPropagation()}
@@ -2334,8 +2346,8 @@ function TrackList({
 
       {contextMenu && contextMenu.type === 'track' && contextMenu.track && typeMenuOpen && !trackRoleLocked(contextMenu.track.id) && !hasDirectParentTypeLock(contextMenu.row) && (
         <div
-          className="player-menu fixed z-[120] rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden min-w-[162px]"
-          style={{ left: typeMenuPos.x, top: typeMenuPos.y }}
+          className="fixed z-[120] pl-2.5"
+          style={{ left: typeMenuPos.x, top: typeMenuPos.y - 6 }}
           onMouseEnter={() => setIsTypeMenuHover(true)}
           onMouseLeave={() => setIsTypeMenuHover(false)}
           onContextMenu={(e) => {
@@ -2343,31 +2355,33 @@ function TrackList({
             e.stopPropagation();
           }}
         >
-          {trackTypeOptions.map((option) => {
-            const isCurrent = getRowTypeValue(contextMenu.row, contextMenu.track) === option.value;
-            const optPalette = getDawRolePalette(option.value);
-            return (
-              <button
-                key={option.value}
-                className={menuItemClass}
-                onClick={() => {
-                  applyTrackType(contextMenu.row, contextMenu.track, option.value);
-                  setContextMenu(null);
-                }}
-              >
-                <span className="inline-flex w-4 justify-center text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
-                <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: optPalette.accent }} />
-                <span>{option.label}</span>
-              </button>
-            );
-          })}
+          <div className="player-menu rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden min-w-[162px]">
+            {trackTypeOptions.map((option) => {
+              const isCurrent = getRowTypeValue(contextMenu.row, contextMenu.track) === option.value;
+              const optPalette = getDawRolePalette(option.value);
+              return (
+                <button
+                  key={option.value}
+                  className={menuItemClass}
+                  onClick={() => {
+                    applyTrackType(contextMenu.row, contextMenu.track, option.value);
+                    setContextMenu(null);
+                  }}
+                >
+                  <span className="inline-flex w-4 justify-center text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
+                  <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: optPalette.accent }} />
+                  <span>{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
       {contextMenu && contextMenu.type === 'group' && contextMenu.group && groupTypeMenuOpen && !groupLocked && !hasDirectParentTypeLock(contextMenu.group) && (
         <div
-          className="player-menu fixed z-[120] rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden min-w-[164px]"
-          style={{ left: groupTypeMenuPos.x, top: groupTypeMenuPos.y }}
+          className="fixed z-[120] pl-2.5"
+          style={{ left: groupTypeMenuPos.x, top: groupTypeMenuPos.y - 6 }}
           onMouseEnter={() => setIsGroupTypeMenuHover(true)}
           onMouseLeave={() => setIsGroupTypeMenuHover(false)}
           onContextMenu={(e) => {
@@ -2375,31 +2389,33 @@ function TrackList({
             e.stopPropagation();
           }}
         >
-          {trackTypeOptions.map((option) => {
-            const isCurrent = getRowTypeValue(contextMenu.group) === option.value;
-            const optPalette = getDawRolePalette(option.value);
-            return (
-              <button
-                key={option.value}
-                className={menuItemClass}
-                onClick={() => {
-                  applyGroupType(contextMenu.group, option.value);
-                  setContextMenu(null);
-                }}
-              >
-                <span className="inline-flex w-4 justify-center text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
-                <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: optPalette.accent }} />
-                <span>{option.label}</span>
-              </button>
-            );
-          })}
+          <div className="player-menu rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden min-w-[164px]">
+            {trackTypeOptions.map((option) => {
+              const isCurrent = getRowTypeValue(contextMenu.group) === option.value;
+              const optPalette = getDawRolePalette(option.value);
+              return (
+                <button
+                  key={option.value}
+                  className={menuItemClass}
+                  onClick={() => {
+                    applyGroupType(contextMenu.group, option.value);
+                    setContextMenu(null);
+                  }}
+                >
+                  <span className="inline-flex w-4 justify-center text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
+                  <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: optPalette.accent }} />
+                  <span>{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
       {contextMenu && contextMenu.type === 'track' && contextMenu.track && autoPanMenuOpen && !metadataLocked && onSetAutoPanStrategy && (
         <div
-          className="player-menu fixed z-[120] rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden min-w-[172px]"
-          style={{ left: autoPanMenuPos.x, top: autoPanMenuPos.y }}
+          className="fixed z-[120] pl-2.5"
+          style={{ left: autoPanMenuPos.x, top: autoPanMenuPos.y - 6 }}
           onMouseEnter={() => setIsAutoPanMenuHover(true)}
           onMouseLeave={() => setIsAutoPanMenuHover(false)}
           onContextMenu={(e) => {
@@ -2407,39 +2423,41 @@ function TrackList({
             e.stopPropagation();
           }}
         >
-          <button
-            className={menuItemClass}
-            onClick={() => {
-              onToggleAutoPanInverted?.();
-              setContextMenu(null);
-            }}
-          >
-            Inverted Auto Pan: {autoPanInverted ? 'On' : 'Off'}
-          </button>
-
-          <div className="my-1 border-t border-[var(--player-border-subtle)]" />
-
-          <button
-            className={menuItemClass}
-            onClick={() => {
-              onSetAutoPanStrategy?.('off');
-              setContextMenu(null);
-            }}
-          >
-            Off
-          </button>
-          {AUTO_PAN_STRATEGIES.map((option) => (
+          <div className="player-menu rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden min-w-[172px]">
             <button
-              key={option.id}
               className={menuItemClass}
               onClick={() => {
-                onSetAutoPanStrategy?.(option.id);
+                onToggleAutoPanInverted?.();
                 setContextMenu(null);
               }}
             >
-              {option.label}
+              Inverted Auto Pan: {autoPanInverted ? 'On' : 'Off'}
             </button>
-          ))}
+
+            <div className="my-1 border-t border-[var(--player-border-subtle)]" />
+
+            <button
+              className={menuItemClass}
+              onClick={() => {
+                onSetAutoPanStrategy?.('off');
+                setContextMenu(null);
+              }}
+            >
+              Off
+            </button>
+            {AUTO_PAN_STRATEGIES.map((option) => (
+              <button
+                key={option.id}
+                className={menuItemClass}
+                onClick={() => {
+                  onSetAutoPanStrategy?.(option.id);
+                  setContextMenu(null);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
