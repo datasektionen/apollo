@@ -40,3 +40,12 @@ backups/
 server/media/
 certs/*.key
 certs/*.crt
+
+# UI Council eval binaries & generated screenshots (keep scripts tracked)
+.ui-eval/node_modules/
+.ui-eval/.DS_Store
+.ui-eval/baseline/
+.ui-eval/current/
+.ui-eval/daw-baseline/
+.ui-eval/daw-current/
+.ui-eval/references/

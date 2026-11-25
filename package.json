@@ -8,6 +8,8 @@
     "dev:full": "./scripts/dev-full.sh",
     "build": "vite build",
     "test": "vitest",
+    "ui:eval:app": "./.agents/skills/ui-council/scripts/deploy-and-capture.sh app",
+    "ui:eval:daw": "./.agents/skills/ui-council/scripts/deploy-and-capture.sh daw",
     "postinstall": "node scripts/patch-signalsmith-stretch.cjs",
     "cert:lan": "./scripts/generate-lan-cert.sh"
   },
