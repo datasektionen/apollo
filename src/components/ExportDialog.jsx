@@ -1133,15 +1133,15 @@ function ExportDialog({
         className={`bg-[var(--player-bg-surface)] border border-[var(--player-border-strong)] text-[var(--player-text-primary)] rounded-2xl w-full overflow-hidden flex flex-col shadow-[var(--player-shadow-popover)] ${
           showProgressWindow
             ? 'max-w-sm'
-            : 'max-w-3xl max-h-[min(86vh,700px)]'
+            : 'max-w-3xl max-h-[min(84vh,636px)]'
         }`}
       >
         {showProgressWindow ? (
-          <div className="px-4 py-3.5 border-b border-[var(--player-border-subtle)] flex items-center justify-center">
+          <div className="px-5 py-3.5 border-b border-[var(--player-border-subtle)] flex items-center justify-center">
             <h2 className="text-xl font-semibold tracking-tight text-center">{progressTitle}</h2>
           </div>
         ) : (
-          <div className="px-4 py-3.5 border-b border-[var(--player-border-subtle)] flex items-center justify-between">
+          <div className="px-5 py-3.5 border-b border-[var(--player-border-subtle)] flex items-center justify-between">
             <h2 className="text-xl font-semibold tracking-tight">{progressTitle}</h2>
             <button
               onClick={onClose}
@@ -1154,9 +1154,9 @@ function ExportDialog({
         )}
 
         {!showProgressWindow ? (
-          <div className="flex-1 min-h-0 overflow-hidden px-4 pt-3.5 pb-4 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden px-5 pt-4 pb-4 flex flex-col">
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 flex-1 min-h-0 overflow-hidden">
-              <div className="bg-[var(--player-bg-surface-subtle)] border border-[var(--player-border-subtle)] rounded-xl p-3 max-h-[240px] lg:max-h-none overflow-auto min-h-0">
+              <div className="bg-[var(--player-bg-surface-subtle)] border border-[var(--player-border-subtle)] rounded-xl flex flex-col max-h-[260px] lg:max-h-none min-h-0 overflow-hidden">
                 {isRenderedMixExport ? (() => {
                   const renderNode = (node, depth = 0) => {
                     const preset = node.presetId ? PRESET_BY_ID[node.presetId] : null;
@@ -1171,7 +1171,7 @@ function ExportDialog({
                     return (
                       <div key={node.id} className={depth > 0 ? 'mt-0' : ''}>
                         <label
-                          className="flex h-[28px] items-center gap-1.5 rounded-md px-1.5 py-0 leading-none hover:bg-[var(--player-hover)] cursor-pointer transition-colors"
+                          className="flex h-[30px] items-center gap-1.5 rounded-md px-1.5 py-0 leading-none hover:bg-[var(--player-hover)] cursor-pointer transition-colors"
                           style={{ marginLeft: `${depth * 18}px` }}
                         >
                           {hasChildren ? (
@@ -1206,7 +1206,7 @@ function ExportDialog({
                               {label}
                             </span>
                             {fileCountText && (
-                              <span className="shrink-0 text-xs text-[var(--player-text-muted)] leading-none tabular-nums">{fileCountText}</span>
+                              <span className="shrink-0 text-xs text-[var(--player-text-secondary)] leading-none tabular-nums">{fileCountText}</span>
                             )}
                           </span>
                         </label>
@@ -1218,18 +1218,30 @@ function ExportDialog({
                       </div>
                     );
                   };
-                  return renderNode(audioExportTree, 0);
+                  return (
+                    <>
+                      <div className="flex-1 min-h-0 overflow-auto p-3">
+                        {renderNode(audioExportTree, 0)}
+                      </div>
+                      <div className="shrink-0 border-t border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)]/70 px-3.5 py-2 flex items-center justify-between text-xs">
+                        <span className="text-[var(--player-text-secondary)]">Selected mixes</span>
+                        <span className="font-mono font-medium tabular-nums text-[var(--player-accent-text)]">
+                          {getNodeFileCountText('all') || '0'}
+                        </span>
+                      </div>
+                    </>
+                  );
                 })() : (
-                  <div className="h-full flex items-center justify-center text-center text-sm text-[var(--player-text-muted)] px-6">
+                  <div className="flex-1 flex items-center justify-center text-center text-sm text-[var(--player-text-secondary)] px-6">
                     {isExternalDawExport
                       ? 'Exports one time-aligned stem per Apollo track. Group names are included in non-root track filenames.'
                       : 'Exports the Apollo project as an internal Apollo Project ZIP, including its project data and media.'}
                   </div>
                 )}
               </div>
-              <div className="p-0 h-auto lg:h-full min-h-0 overflow-y-auto pr-1 flex flex-col">
-                <div className="mb-3">
-                  <label className="block text-xs text-[var(--player-text-muted)] mb-1">Export type</label>
+              <div className="p-0 h-auto lg:h-full min-h-0 overflow-y-auto pr-0.5 flex flex-col">
+                <div className="mb-2.5">
+                  <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1">Export type</label>
                   <select
                     value={exportType}
                     onChange={(e) => setExportType(e.target.value)}
@@ -1243,8 +1255,8 @@ function ExportDialog({
                 </div>
                 {isRenderedMixExport && (
                   <>
-                    <div className="mb-3">
-                      <label className="block text-xs text-[var(--player-text-muted)] mb-1">File format</label>
+                    <div className="mb-2.5">
+                      <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1">File format</label>
                       <select
                         value={fileFormat}
                         onChange={(e) => setFileFormat(e.target.value)}
@@ -1255,8 +1267,8 @@ function ExportDialog({
                         <option value="wav">WAV</option>
                       </select>
                     </div>
-                    <div className="mb-3">
-                      <label className="block text-xs text-[var(--player-text-muted)] mb-1">Transformed pan range</label>
+                    <div className="mb-2.5">
+                      <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1">Transformed pan range</label>
                       <input
                         type="number"
                         className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm font-mono text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
@@ -1265,13 +1277,13 @@ function ExportDialog({
                         disabled={isExporting}
                       />
                     </div>
-                    <div className="mb-3">
-                      <label className="block text-xs text-[var(--player-text-muted)]">
+                    <div className="mb-2.5">
+                      <label className="block text-xs font-medium text-[var(--player-text-secondary)]">
                         Practice focus difference (dB)
                       </label>
-                      <div className="relative px-2 pt-5">
+                      <div className="relative px-2 pt-4">
                         <div
-                          className="absolute top-1.5 text-[11px] tabular-nums whitespace-nowrap text-[var(--player-accent-text)] font-semibold leading-none pointer-events-none"
+                          className="absolute top-1 text-[11px] tabular-nums whitespace-nowrap text-[var(--player-accent-text)] font-semibold leading-none pointer-events-none"
                           style={{
                             left: practiceFocusDiffLabelLeft,
                             transform: 'translateX(-50%)',
@@ -1312,8 +1324,8 @@ function ExportDialog({
                         </div>
                       </div>
                     </div>
-                    <div className="mb-3">
-                      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
+                    <div className="mb-2.5">
+                      <label className="flex items-center gap-2.5 text-sm text-[var(--player-text-body)] hover:text-[var(--player-text-primary)] select-none cursor-pointer transition-colors">
                         <input
                           type="checkbox"
                           className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
@@ -1324,8 +1336,8 @@ function ExportDialog({
                         <span>Force mono export</span>
                       </label>
                     </div>
-                    <div className="mb-3">
-                      <label className="block text-xs text-[var(--player-text-muted)] mb-1">Panning law</label>
+                    <div className="mb-2.5">
+                      <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1">Panning law</label>
                       <select
                         value={String(exportForceMonoOutput ? 0 : exportPanLawDb)}
                         onChange={(e) => handleUpdateExportSetting({ panLawDb: Number(e.target.value) })}
@@ -1443,9 +1455,9 @@ function ExportDialog({
                     </p>
                   </div>
                 )}
-                <div className="mt-5 pt-1">
+                <div className="mt-auto pt-3 border-t border-[var(--player-border-subtle)]">
                   <div className="mb-3">
-                    <label className="block text-xs text-[var(--player-text-muted)] mb-1">Export name</label>
+                    <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1">Export name</label>
                     <input
                       type="text"
                       value={exportBaseName}
@@ -1462,9 +1474,9 @@ function ExportDialog({
                       || (isRenderedMixExport && selectedPresetIds.length === 0)
                       || (isExternalDawExport && !isExternalDawSelectionValid)
                     }
-                    className="player-play-cta w-full px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2"
+                    className="player-play-cta w-full px-6 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2"
                   >
-                    <Upload size={19} />
+                    <Upload size={18} />
                     <span>Export</span>
                   </button>
                 </div>

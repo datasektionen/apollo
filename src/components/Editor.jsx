@@ -4954,7 +4954,7 @@ function Editor({
               <div className="flex min-w-0 items-stretch border-b border-r border-[var(--daw-border-row)] bg-[var(--daw-bg-ruler-top)]">
                 <div className="min-w-0 flex-1 flex items-stretch">{rulerTools}</div>
               </div>
-              <div className="relative z-20 min-w-0 overflow-hidden">{header}</div>
+              <div className="relative z-20 min-w-0 overflow-visible">{header}</div>
               {lyricsTrackShown ? (
                 <>
                   <div
@@ -5233,11 +5233,11 @@ function Editor({
               </button>
             </div>
             <div className="px-5 py-4">
-              <div className={`mb-4 grid ${caps.canEditProjectSettings && !isLocalRecordingSession ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-1`}>
+              <div className="mb-4 flex items-center gap-1 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-1">
                 <button
                   type="button"
                   onClick={() => setSettingsTab('playback')}
-                  className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-center text-xs sm:text-sm font-medium transition-colors ${
+                  className={`flex-[1.55] whitespace-nowrap rounded-lg px-3 py-1.5 text-center text-xs sm:text-sm font-medium transition-colors ${
                     settingsTab === 'playback'
                       ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
                       : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
@@ -5248,7 +5248,7 @@ function Editor({
                 <button
                   type="button"
                   onClick={() => setSettingsTab('daw')}
-                  className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-center text-xs sm:text-sm font-medium transition-colors ${
+                  className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-center text-xs sm:text-sm font-medium transition-colors ${
                     settingsTab === 'daw'
                       ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
                       : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
@@ -5260,7 +5260,7 @@ function Editor({
                   <button
                     type="button"
                     onClick={() => setSettingsTab('project')}
-                    className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-center text-xs sm:text-sm font-medium transition-colors ${
+                    className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-center text-xs sm:text-sm font-medium transition-colors ${
                       settingsTab === 'project'
                         ? 'bg-[var(--player-accent)] text-[var(--player-accent-foreground)] font-semibold'
                         : 'text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'

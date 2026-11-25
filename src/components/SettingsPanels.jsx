@@ -278,7 +278,7 @@ export function PlaybackDevicesSettingsPanel({
         <div className="mb-3 text-sm font-semibold text-[var(--player-text-primary)]">Input</div>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-[var(--player-text-muted)] mb-1">Input device</label>
+            <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1.5">Input device</label>
             <select
               className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
               value={audioSettings.inputDeviceId}
@@ -309,7 +309,7 @@ export function PlaybackDevicesSettingsPanel({
         <div className="mb-3 text-sm font-semibold text-[var(--player-text-primary)]">Output</div>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-[var(--player-text-muted)] mb-1">Output device</label>
+            <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1.5">Output device</label>
             <select
               className="w-full rounded-lg bg-[var(--player-bg-canvas)] border border-[var(--player-border-default)] px-3 py-2 text-sm text-[var(--player-text-primary)] focus:border-[var(--player-accent-border)] focus:outline-none"
               value={audioSettings.outputDeviceId}
@@ -339,7 +339,7 @@ export function PlaybackDevicesSettingsPanel({
             </label>
           ) : null}
           <div>
-            <label className="block text-xs text-[var(--player-text-muted)] mb-1">Panning law</label>
+            <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1.5">Panning law</label>
             <select
               className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none ${
                 monoOutputActive
@@ -507,7 +507,7 @@ export function DawSettingsPanel({ settings, setSettings }) {
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-xs text-[var(--player-text-muted)] mb-1" htmlFor="daw-amplitude-scale">
+        <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1.5" htmlFor="daw-amplitude-scale">
           Amplitude scale
         </label>
         <select
@@ -522,33 +522,35 @@ export function DawSettingsPanel({ settings, setSettings }) {
           <option value="db">Decibels (-60 dB floor)</option>
         </select>
       </div>
-      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
-        <input
-          type="checkbox"
-          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
-          checked={Boolean(settings.stereo)}
-          onChange={(event) => update({ stereo: event.target.checked })}
-        />
-        <span>Stereo waveforms</span>
-      </label>
-      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
-        <input
-          type="checkbox"
-          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
-          checked={settings.showRms}
-          onChange={(event) => update({ showRms: event.target.checked })}
-        />
-        <span>RMS energy</span>
-      </label>
-      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
-        <input
-          type="checkbox"
-          className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
-          checked={settings.scaleWaveformsByGain !== false}
-          onChange={(event) => update({ scaleWaveformsByGain: event.target.checked })}
-        />
-        <span>Scale waveforms by gain</span>
-      </label>
+      <div className="space-y-3 pt-0.5">
+        <label className="flex items-center gap-2.5 text-sm text-[var(--player-text-body)] hover:text-[var(--player-text-primary)] select-none cursor-pointer transition-colors">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
+            checked={Boolean(settings.stereo)}
+            onChange={(event) => update({ stereo: event.target.checked })}
+          />
+          <span>Stereo waveforms</span>
+        </label>
+        <label className="flex items-center gap-2.5 text-sm text-[var(--player-text-body)] hover:text-[var(--player-text-primary)] select-none cursor-pointer transition-colors">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
+            checked={settings.showRms}
+            onChange={(event) => update({ showRms: event.target.checked })}
+          />
+          <span>RMS energy</span>
+        </label>
+        <label className="flex items-center gap-2.5 text-sm text-[var(--player-text-body)] hover:text-[var(--player-text-primary)] select-none cursor-pointer transition-colors">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
+            checked={settings.scaleWaveformsByGain !== false}
+            onChange={(event) => update({ scaleWaveformsByGain: event.target.checked })}
+          />
+          <span>Scale waveforms by gain</span>
+        </label>
+      </div>
     </div>
   );
 }
@@ -562,7 +564,7 @@ export function ProjectSettingsPanel({
 }) {
   return (
     <div className="space-y-4">
-      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
+      <label className="flex items-center gap-2.5 text-sm text-[var(--player-text-body)] hover:text-[var(--player-text-primary)] select-none cursor-pointer transition-colors">
         <input
           type="checkbox"
           className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
@@ -573,7 +575,7 @@ export function ProjectSettingsPanel({
       </label>
 
       <div>
-        <label className="block text-xs text-[var(--player-text-muted)] mb-1">
+        <label className="block text-xs font-medium text-[var(--player-text-secondary)] mb-1.5">
           Choir auto-pan
         </label>
         <select
@@ -590,7 +592,7 @@ export function ProjectSettingsPanel({
         </select>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
+      <label className="flex items-center gap-2.5 text-sm text-[var(--player-text-body)] hover:text-[var(--player-text-primary)] select-none cursor-pointer transition-colors">
         <input
           type="checkbox"
           className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"
@@ -600,7 +602,7 @@ export function ProjectSettingsPanel({
         <span>Inverted Auto Pan</span>
       </label>
 
-      <label className="flex items-center gap-2 text-sm text-[var(--player-text-secondary)] select-none cursor-pointer">
+      <label className="flex items-center gap-2.5 text-sm text-[var(--player-text-body)] hover:text-[var(--player-text-primary)] select-none cursor-pointer transition-colors">
         <input
           type="checkbox"
           className="h-4 w-4 rounded border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] accent-[var(--player-accent)]"

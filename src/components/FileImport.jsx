@@ -251,7 +251,9 @@ function FileImport({
       }}
     >
       <div
-        className={`bg-[var(--player-bg-surface)] border border-[var(--player-border-strong)] rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)] ${
+        className={`bg-[var(--player-bg-surface)] border border-[var(--player-border-strong)] rounded-2xl ${
+          files.length === 0 ? 'max-w-xl' : 'max-w-3xl'
+        } w-full max-h-[90vh] overflow-hidden flex flex-col text-[var(--player-text-primary)] shadow-[var(--player-shadow-popover)] ${
           isDragging ? 'ring-2 ring-[var(--player-accent)] ring-inset' : ''
         }`}
         onDragOver={handleDragOver}
@@ -384,7 +386,7 @@ function FileImport({
               onClick={handleImport}
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                 files.length === 0 || isProcessing || blockedEntries.length > 0
-                  ? 'border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-muted)] cursor-not-allowed'
+                  ? 'border border-transparent bg-white/[0.04] text-[var(--player-text-disabled)] cursor-not-allowed'
                   : 'player-play-cta'
               }`}
               disabled={files.length === 0 || isProcessing || blockedEntries.length > 0}

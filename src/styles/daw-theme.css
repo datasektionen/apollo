@@ -18,8 +18,8 @@
   --daw-bg-sidebar: #0b0b0d;
   --daw-bg-row: #0e0e11;
   --daw-bg-row-group: #111115;
-  --daw-bg-row-hover: #15151a;
-  --daw-bg-row-selected: #1f1e28;
+  --daw-bg-row-hover: #141417;
+  --daw-bg-row-selected: #1b1a1d;
   --daw-bg-row-active-mix: rgba(198, 155, 57, 0.14);
   --daw-bg-lane: #070709;
   --daw-bg-lane-group: #0a0a0d;
@@ -29,9 +29,9 @@
   /* Studio Borders & Ticks */
   --daw-border-row: rgba(255, 255, 255, 0.075);
   --daw-border-divider: rgba(255, 255, 255, 0.12);
-  --daw-ruler-tick-major: rgba(255, 255, 255, 0.24);
-  --daw-ruler-tick-minor: rgba(255, 255, 255, 0.14);
-  --daw-ruler-text: #c2c2cc;
+  --daw-ruler-tick-major: rgba(255, 255, 255, 0.3);
+  --daw-ruler-tick-minor: rgba(255, 255, 255, 0.18);
+  --daw-ruler-text: #d4d4dc;
 
   /* Playhead, Loop & Marquee */
   --daw-playhead: #d9b76d;
@@ -242,9 +242,25 @@
   backdrop-filter: blur(8px);
 }
 
+.daw-theme .zoom-minimal-shell {
+  --daw-zoom-fill: var(--player-slider-fill-rest, #f4f4f2);
+}
+
+.daw-theme .zoom-minimal-shell:hover,
+.daw-theme .zoom-minimal-shell:focus-within {
+  --daw-zoom-fill: var(--player-slider-fill-hover, #cb9e37);
+}
+
 .daw-theme .zoom-minimal-stick {
-  height: 3px;
-  background: var(--player-slider-track, #34373e);
+  height: 3.5px;
+  background: linear-gradient(
+    to right,
+    var(--daw-zoom-fill) 0%,
+    var(--daw-zoom-fill) var(--daw-zoom-pct, 0%),
+    var(--player-slider-track, #34373e) var(--daw-zoom-pct, 0%),
+    var(--player-slider-track, #34373e) 100%
+  );
+  transition: background 140ms var(--player-ease);
 }
 
 .daw-theme input[type='range'].zoom-minimal-slider::-webkit-slider-thumb {
@@ -330,17 +346,20 @@
   cursor: not-allowed;
 }
 
-.daw-theme .daw-compact-mute-badge {
+.daw-theme .daw-compact-mute-badge,
+.daw-theme .daw-compact-label {
   display: none;
 }
 
 /* Mobile / narrow viewport track rail mode (zero effect at md+ / desktop) */
 @media (max-width: 767px) {
   .daw-theme .daw-tracklist-compact [data-tree-row-id] > div {
-    padding-left: 8px !important;
-    padding-right: 8px !important;
-    gap: 0 !important;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+    gap: 5px !important;
+    flex-direction: column;
     justify-content: center;
+    align-items: center;
   }
   .daw-theme .daw-tracklist-compact [data-track-details='true'] {
     display: none !important;
@@ -351,5 +370,17 @@
   }
   .daw-theme .daw-tracklist-compact .daw-compact-mute-badge {
     display: flex;
+  }
+  .daw-theme .daw-tracklist-compact .daw-compact-label {
+    display: block;
+    max-width: 70px;
+    font-size: 10.5px;
+    line-height: 1.2;
+    font-weight: 500;
+    color: var(--player-text-body, #d6d6dc);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }

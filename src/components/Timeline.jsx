@@ -3036,11 +3036,14 @@ function Timeline({
         onClick={handleZoomOut}
         aria-label="Zoom out"
         title="Zoom out (-)"
-        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)] transition-colors"
+        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] transition-colors"
       >
-        <ZoomOut size={12} />
+        <ZoomOut size={13} />
       </button>
-      <div className="zoom-minimal-shell">
+      <div
+        className="zoom-minimal-shell"
+        style={{ '--daw-zoom-pct': `${Math.max(0, Math.min(100, zoomSliderUiValue * 100))}%` }}
+      >
         <div className="zoom-minimal-stick" />
         <input
           type="range"
@@ -3060,9 +3063,9 @@ function Timeline({
         onClick={handleZoomIn}
         aria-label="Zoom in"
         title="Zoom in (+)"
-        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-muted)] hover:text-[var(--player-text-primary)] transition-colors"
+        className="flex items-center justify-center rounded p-0.5 text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)] transition-colors"
       >
-        <ZoomIn size={12} />
+        <ZoomIn size={13} />
       </button>
     </div>
   );
@@ -3227,7 +3230,7 @@ function Timeline({
   const loopBand = loopRange ? loopBandStyle(loopRange.startMs, loopRange.endMs) : null;
 
   const rulerTools = (
-    <div className="flex h-full w-full items-center justify-between px-1 md:px-2">
+    <div className="flex h-full w-full items-center justify-between px-2 md:pl-4 md:pr-3">
       <button
         type="button"
         aria-label="Add track"
@@ -3245,7 +3248,7 @@ function Timeline({
         aria-pressed={followEnabled}
         className={`flex h-5 w-5 md:h-6 md:w-6 items-center justify-center rounded-md border transition-colors ${
           followEnabled
-            ? 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-accent-text)]'
+            ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
             : 'border-transparent text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
         }`}
         onClick={() => setFollowEnabled((enabled) => {
@@ -3264,98 +3267,105 @@ function Timeline({
   const header = (
     <div
       ref={rulerViewportRef}
-      className="relative w-full min-w-0 overflow-hidden bg-[var(--daw-bg-ruler-top)] border-b border-[var(--daw-border-row)] overscroll-none"
+      className="relative w-full min-w-0 overflow-visible bg-[var(--daw-bg-ruler-top)] border-b border-[var(--daw-border-row)] overscroll-none"
       style={{ height: TIMELINE_RULER_HEIGHT, overscrollBehavior: 'none' }}
     >
-      <div
-        ref={rulerScrollRef}
-        className="ruler-scrollbar-hidden absolute inset-0 overflow-x-scroll overflow-y-hidden"
-        onScroll={(event) => handleNativeScroll(event.currentTarget)}
-      >
-        <div style={{ width: `${segmentWidthPx}px`, height: 1 }} />
-      </div>
-      <div className="pointer-events-none absolute inset-x-0 top-0 bg-[var(--daw-bg-ruler-top)]" style={{ height: RULER_LABEL_HEIGHT }} />
-      <div
-        className="pointer-events-none absolute inset-x-0 bg-[var(--daw-bg-ruler-seek)] border-t border-white/[0.04]"
-        style={{ top: RULER_LABEL_HEIGHT, height: RULER_SEEK_HEIGHT }}
-      />
-      {loopBand ? (
+      <div className="absolute inset-0 overflow-hidden">
         <div
-          className="pointer-events-none absolute top-0"
-          style={{
-            ...loopBand,
-            height: RULER_LABEL_HEIGHT,
-            backgroundColor: loopRange.enabled ? 'var(--daw-loop-active)' : 'rgba(255, 255, 255, 0.025)',
-            ...(loopRange.enabled
-              ? {
-                  borderTop: '2px solid var(--daw-loop-active-edge)',
-                  borderLeft: '1px solid var(--daw-loop-active-edge)',
-                  borderRight: '1px solid var(--daw-loop-active-edge)',
-                }
-              : {}),
-          }}
-        />
-      ) : null}
-      {rulerTicks.map((timeMs) => (
-        <div
-          key={timeMs}
-          data-ruler-tick={timeMs}
-          className="pointer-events-none absolute top-0 z-[1] w-px bg-[var(--daw-ruler-tick-major)]"
-          style={{ left: `${viewportX(timeMs)}px`, height: RULER_LABEL_HEIGHT + 14 }}
+          ref={rulerScrollRef}
+          className="ruler-scrollbar-hidden absolute inset-0 overflow-x-scroll overflow-y-hidden"
+          onScroll={(event) => handleNativeScroll(event.currentTarget)}
         >
-          <span className="absolute left-1.5 top-2 select-none whitespace-nowrap text-[11px] font-medium tabular-nums leading-none text-[var(--daw-ruler-text)]" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.9)' }}>
-            {formatRulerLabel(timeMs, ruler.majorMs, ruler.unit, sampleRate)}
-          </span>
+          <div style={{ width: `${segmentWidthPx}px`, height: 1 }} />
         </div>
-      ))}
-      {rulerFractions.map((timeMs) => (
-        onRulerStep(timeMs, ruler.majorMs) ? null : (
+        <div className="pointer-events-none absolute inset-x-0 top-0 bg-[var(--daw-bg-ruler-top)]" style={{ height: RULER_LABEL_HEIGHT }} />
+        <div
+          className="pointer-events-none absolute inset-x-0 bg-[var(--daw-bg-ruler-seek)] border-t border-white/[0.04]"
+          style={{ top: RULER_LABEL_HEIGHT, height: RULER_SEEK_HEIGHT }}
+        />
+        {loopBand ? (
           <div
-            key={timeMs}
-            data-ruler-fraction={timeMs}
-            className="pointer-events-none absolute z-[1] w-px bg-[var(--daw-ruler-tick-minor)]"
+            className="pointer-events-none absolute top-0"
             style={{
-              left: `${viewportX(timeMs)}px`,
-              top: RULER_LABEL_HEIGHT,
-              height: onRulerStep(timeMs, ruler.minorMs) ? 8 : 4,
-              opacity: 0.75,
+              ...loopBand,
+              height: RULER_LABEL_HEIGHT,
+              backgroundColor: loopRange.enabled ? 'var(--daw-loop-active)' : 'rgba(255, 255, 255, 0.025)',
+              ...(loopRange.enabled
+                ? {
+                    borderTop: '2px solid var(--daw-loop-active-edge)',
+                    borderLeft: '1px solid var(--daw-loop-active-edge)',
+                    borderRight: '1px solid var(--daw-loop-active-edge)',
+                  }
+                : {}),
             }}
           />
-        )
-      ))}
+        ) : null}
+        {rulerTicks.map((timeMs) => (
+          <div
+            key={timeMs}
+            data-ruler-tick={timeMs}
+            className="pointer-events-none absolute top-0 z-[1] w-px bg-[var(--daw-ruler-tick-major)]"
+            style={{ left: `${viewportX(timeMs)}px`, height: RULER_LABEL_HEIGHT + 14 }}
+          >
+            <span className="absolute left-1.5 top-2 select-none whitespace-nowrap text-[11px] font-medium tabular-nums leading-none text-[var(--daw-ruler-text)]" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.9)' }}>
+              {formatRulerLabel(timeMs, ruler.majorMs, ruler.unit, sampleRate)}
+            </span>
+          </div>
+        ))}
+        {rulerFractions.map((timeMs) => (
+          onRulerStep(timeMs, ruler.majorMs) ? null : (
+            <div
+              key={timeMs}
+              data-ruler-fraction={timeMs}
+              className="pointer-events-none absolute z-[1] w-px bg-[var(--daw-ruler-tick-minor)]"
+              style={{
+                left: `${viewportX(timeMs)}px`,
+                top: RULER_LABEL_HEIGHT,
+                height: onRulerStep(timeMs, ruler.minorMs) ? 8 : 4,
+                opacity: 0.85,
+              }}
+            />
+          )
+        ))}
+      </div>
       <div
-        ref={rulerPlayheadRef}
-        data-playhead="ruler"
-        className="pointer-events-none absolute z-10 w-px"
-        style={{
-          left: shownPlayheadLeft,
-          top: RULER_LABEL_HEIGHT,
-          height: RULER_SEEK_HEIGHT,
-        }}
+        className="pointer-events-none absolute inset-0 z-10"
+        style={{ clipPath: 'inset(0px -8px 0px -8px)' }}
       >
         <div
-          className="pointer-events-none absolute top-0 -translate-x-1/2"
-          style={{ left: '0.5px', width: 15, height: 16 }}
+          ref={rulerPlayheadRef}
+          data-playhead="ruler"
+          className="pointer-events-none absolute w-px"
+          style={{
+            left: shownPlayheadLeft,
+            top: RULER_LABEL_HEIGHT,
+            height: RULER_SEEK_HEIGHT,
+          }}
         >
-          <svg
-            width="15"
-            height="16"
-            viewBox="0 0 15 16"
-            style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.75))' }}
+          <div
+            className="pointer-events-none absolute top-0 -translate-x-1/2"
+            style={{ left: '0.5px', width: 15, height: 16 }}
           >
-            <polygon
-              points="0.5,0.5 14.5,0.5 14.5,8.5 7.5,15.5 0.5,8.5"
-              fill={isRecording ? '#ef4444' : '#d9b76d'}
-              stroke="#0a0a0c"
-              strokeWidth="1"
-              strokeLinejoin="round"
-            />
-          </svg>
+            <svg
+              width="15"
+              height="16"
+              viewBox="0 0 15 16"
+              style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.75))' }}
+            >
+              <polygon
+                points="0.5,0.5 14.5,0.5 14.5,8.5 7.5,15.5 0.5,8.5"
+                fill={isRecording ? '#ef4444' : '#d9b76d'}
+                stroke="#0a0a0c"
+                strokeWidth="1"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+          <div
+            className="h-full w-px"
+            style={{ backgroundColor: isRecording ? 'var(--daw-playhead-recording)' : 'var(--daw-playhead)' }}
+          />
         </div>
-        <div
-          className="h-full w-px"
-          style={{ backgroundColor: isRecording ? 'var(--daw-playhead-recording)' : 'var(--daw-playhead)' }}
-        />
       </div>
       <div
         data-ruler-labels
@@ -3627,7 +3637,7 @@ function Timeline({
                             border: `1px solid ${clipBorderColor}`,
                             boxShadow: clipAttenuated || missingMedia
                               ? undefined
-                              : `inset 0 2px 0 ${rolePalette.accent}`,
+                              : 'inset 0 1px 0 rgba(255, 255, 255, 0.08)',
                           }}
                           onClick={(e) => handleClipClick(e, clip, track.id)}
                           onMouseDown={(e) => handleClipMouseDown(e, clip, track)}

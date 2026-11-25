@@ -282,10 +282,10 @@ function TrackList({
     { key: 'file-music', Icon: FileMusic },
   ], []);
 
-  const menuItemClass = 'player-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm whitespace-nowrap';
-  const menuTopItemClass = 'player-menu-item relative flex w-full items-center gap-2 pl-7 pr-3.5 py-1.5 text-left text-sm whitespace-nowrap';
-  const menuDangerClass = 'player-menu-item player-menu-item-danger relative flex w-full items-center gap-2 pl-7 pr-3.5 py-1.5 text-left text-sm whitespace-nowrap';
-  const menuDisabledClass = 'w-full pl-7 pr-3.5 py-1.5 text-left text-xs text-[var(--player-text-muted)] whitespace-nowrap select-none';
+  const menuItemClass = 'player-menu-item flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm whitespace-nowrap';
+  const menuTopItemClass = 'player-menu-item relative flex w-full items-center gap-2 rounded-lg pl-7 pr-3 py-1.5 text-left text-sm whitespace-nowrap';
+  const menuDangerClass = 'player-menu-item player-menu-item-danger relative flex w-full items-center gap-2 rounded-lg pl-7 pr-3 py-1.5 text-left text-sm whitespace-nowrap';
+  const menuDisabledClass = 'w-full pl-7 pr-3 py-1.5 text-left text-xs text-[var(--player-text-muted)] whitespace-nowrap select-none';
   const trackTypeOptions = [
     { value: TRACK_ROLES.INSTRUMENT, label: 'Instrument', groupRole: GROUP_ROLE_INSTRUMENTS },
     { value: TRACK_ROLES.LEAD, label: 'Lead', groupRole: GROUP_ROLE_LEADS },
@@ -1279,12 +1279,12 @@ function TrackList({
           : {};
         const getVolumeSliderWidth = (isGroupRow) => {
           if (isGroupRow) {
-            if (previewDepth <= 1) return 123;
-            // Fold button starts constraining layout from indent level 2.
-            return Math.max(72, 123 - ((previewDepth - 1) * 14));
+            if (previewDepth <= 2) return 108;
+            // Fold button starts constraining layout from indent level 3.
+            return Math.max(72, 108 - ((previewDepth - 2) * 14));
           }
-          if (previewDepth <= 3) return 123;
-          return Math.max(72, 123 - ((previewDepth - 3) * 14));
+          if (previewDepth <= 3) return 108;
+          return Math.max(72, 108 - ((previewDepth - 3) * 14));
         };
 
         if (row.kind === 'group') {
@@ -1349,7 +1349,7 @@ function TrackList({
               }}
             >
               <div
-                className="h-full flex items-center gap-4 pr-4"
+                className="h-full flex items-center gap-3 pr-3.5"
                 style={{ paddingLeft: `${13 + previewDepth * 16}px` }}
               >
                 <div
@@ -1379,6 +1379,7 @@ function TrackList({
                     </span>
                   ) : null}
                 </div>
+                <span className="daw-compact-label" title={row.name}>{row.name}</span>
 
                 <div data-track-details="true" className="flex-1 min-w-0 flex flex-col gap-1">
                   <div
@@ -1724,7 +1725,7 @@ function TrackList({
             }}
           >
             <div
-              className="h-full flex items-center gap-4 pr-4"
+              className="h-full flex items-center gap-3 pr-3.5"
               style={{ paddingLeft: `${13 + previewDepth * 16}px` }}
             >
                 <div
@@ -1768,6 +1769,7 @@ function TrackList({
                   </span>
                 ) : null}
               </div>
+              <span className="daw-compact-label" title={track.name}>{track.name}</span>
 
               <div data-track-details="true" className="flex-1 min-w-0 flex flex-col gap-1">
                 <div
@@ -2007,7 +2009,7 @@ function TrackList({
 
       {contextMenu && (
         <div
-          className="player-menu fixed z-[120] min-w-[180px] rounded-xl py-1 inline-flex flex-col items-stretch overflow-hidden"
+          className="player-menu fixed z-[120] min-w-[184px] rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -2332,7 +2334,7 @@ function TrackList({
 
       {contextMenu && contextMenu.type === 'track' && contextMenu.track && typeMenuOpen && !trackRoleLocked(contextMenu.track.id) && !hasDirectParentTypeLock(contextMenu.row) && (
         <div
-          className="player-menu fixed z-[120] rounded-xl py-1 inline-flex flex-col items-stretch overflow-hidden min-w-[152px]"
+          className="player-menu fixed z-[120] rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden min-w-[162px]"
           style={{ left: typeMenuPos.x, top: typeMenuPos.y }}
           onMouseEnter={() => setIsTypeMenuHover(true)}
           onMouseLeave={() => setIsTypeMenuHover(false)}
@@ -2353,7 +2355,7 @@ function TrackList({
                   setContextMenu(null);
                 }}
               >
-                <span className="inline-block w-3.5 text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
+                <span className="inline-flex w-4 justify-center text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
                 <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: optPalette.accent }} />
                 <span>{option.label}</span>
               </button>
@@ -2364,7 +2366,7 @@ function TrackList({
 
       {contextMenu && contextMenu.type === 'group' && contextMenu.group && groupTypeMenuOpen && !groupLocked && !hasDirectParentTypeLock(contextMenu.group) && (
         <div
-          className="player-menu fixed z-[120] rounded-xl py-1 inline-flex flex-col items-stretch overflow-hidden min-w-[156px]"
+          className="player-menu fixed z-[120] rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden min-w-[164px]"
           style={{ left: groupTypeMenuPos.x, top: groupTypeMenuPos.y }}
           onMouseEnter={() => setIsGroupTypeMenuHover(true)}
           onMouseLeave={() => setIsGroupTypeMenuHover(false)}
@@ -2385,7 +2387,7 @@ function TrackList({
                   setContextMenu(null);
                 }}
               >
-                <span className="inline-block w-3.5 text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
+                <span className="inline-flex w-4 justify-center text-[var(--player-accent-text)] font-semibold">{isCurrent ? '✓' : ''}</span>
                 <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: optPalette.accent }} />
                 <span>{option.label}</span>
               </button>
@@ -2396,7 +2398,7 @@ function TrackList({
 
       {contextMenu && contextMenu.type === 'track' && contextMenu.track && autoPanMenuOpen && !metadataLocked && onSetAutoPanStrategy && (
         <div
-          className="player-menu fixed z-[120] rounded-xl py-1 inline-flex flex-col items-stretch overflow-hidden min-w-[168px]"
+          className="player-menu fixed z-[120] rounded-xl p-1.5 inline-flex flex-col items-stretch overflow-hidden min-w-[172px]"
           style={{ left: autoPanMenuPos.x, top: autoPanMenuPos.y }}
           onMouseEnter={() => setIsAutoPanMenuHover(true)}
           onMouseLeave={() => setIsAutoPanMenuHover(false)}
