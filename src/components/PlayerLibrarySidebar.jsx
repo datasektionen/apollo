@@ -888,7 +888,7 @@ export function PlayerLibrarySidebar({
           style={{
             height: lerp(0, TOOLBAR_HEIGHT, progress),
             opacity: progress,
-            paddingLeft: 8,
+            paddingLeft: 15,
             paddingRight: 8,
             pointerEvents: chromeInteractive ? 'auto' : 'none',
             borderBottomWidth: progress > 0 ? 1 : 0,

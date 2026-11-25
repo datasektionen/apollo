@@ -34,7 +34,7 @@ function IconAction({ label, disabled, onClick, tone = 'default', children }) {
 function ScopeValue({ cell }) {
   if (cell.kind === 'na') {
     return (
-      <span className="inline-flex min-h-[22px] items-center text-sm leading-none text-[var(--player-text-disabled)]">
+      <span className="inline-flex min-h-[22px] items-center text-sm leading-none text-[var(--player-text-muted)]">
         —
       </span>
     );
@@ -48,7 +48,7 @@ function ScopeValue({ cell }) {
   }
   if (cell.kind === 'all') {
     return (
-      <span className="inline-flex rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2.5 py-0.5 text-xs font-medium text-[var(--player-text-muted)]">
+      <span className="inline-flex items-center rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2.5 py-0.5 text-xs font-medium text-[var(--player-text-secondary)]">
         All
       </span>
     );
@@ -56,9 +56,9 @@ function ScopeValue({ cell }) {
   return (
     <span
       title={cell.text}
-      className="inline-block max-w-full truncate rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2.5 py-0.5 text-xs font-semibold text-[var(--player-accent-text)]"
+      className="inline-flex max-w-full items-center rounded-full border border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] px-2.5 py-0.5 text-xs font-semibold text-[var(--player-accent-text)]"
     >
-      {cell.text}
+      <span className="truncate">{cell.text}</span>
     </span>
   );
 }
@@ -301,7 +301,7 @@ export function GrantRulesTable({
                   </div>
                   {inherited && grant.sourceRoleName ? (
                     <div className="mt-1">
-                      <span className="inline-block max-w-full truncate rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2 py-0.5 text-[11px] font-medium leading-tight text-[var(--player-text-secondary)]">
+                      <span className="inline-block max-w-full truncate rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2 py-0.5 text-[11px] font-medium leading-tight text-[var(--player-text-body)]">
                         Inherited from {grant.sourceRoleName}
                       </span>
                     </div>
@@ -334,7 +334,7 @@ export function GrantRulesTable({
           })}
           {canEdit ? (
             <tr className="border-t border-[var(--player-border-subtle)]">
-              <td colSpan={COLUMN_COUNT} className="p-0">
+              <td colSpan={COLUMN_COUNT} className="px-2.5 py-2.5">
                 <button
                   type="button"
                   disabled={disabled}
@@ -342,9 +342,9 @@ export function GrantRulesTable({
                     const id = onAdd?.();
                     if (id) setEditingId(id);
                   }}
-                  className="flex w-full items-center gap-2 px-2 py-2.5 text-left text-sm font-semibold text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-accent-text)] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--player-text-primary)] hover:border-[var(--player-accent-border)] hover:bg-[var(--player-accent-soft)] hover:text-[var(--player-accent-text)] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
                 >
-                  <Plus size={16} />
+                  <Plus size={14} />
                   Add access
                 </button>
               </td>

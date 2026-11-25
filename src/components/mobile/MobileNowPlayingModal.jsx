@@ -436,7 +436,7 @@ export function MobileNowPlayingModal({
                   {lyricPreview.primary}
                 </p>
                 {lyricPreview.secondary ? (
-                  <p className="text-xs font-medium leading-snug text-[var(--player-lyric-past)] line-clamp-2">
+                  <p className="text-xs font-medium leading-snug text-[var(--player-text-secondary)] line-clamp-2">
                     {lyricPreview.secondary}
                   </p>
                 ) : null}
@@ -453,7 +453,7 @@ export function MobileNowPlayingModal({
               </div>
             )}
 
-            <div className="flex items-center justify-between text-[11px] font-medium text-[var(--player-text-muted)]">
+            <div className="flex items-center justify-between border-t border-[var(--player-border-subtle)] pt-2.5 text-[11px] font-medium text-[var(--player-text-secondary)]">
               <span>{focusLabel === '0 dB' ? 'Balanced Mix' : `Focus ${focusLabel}`}</span>
               <span>
                 {formatPlaybackSpeed(playbackSpeed)}x · {formatPlaybackTranspose(playbackTranspose)}
@@ -671,12 +671,12 @@ export function MobileNowPlayingModal({
           >
             <PlayerRangeSlider
               touch
+              bipolar
               min={0}
               max={200}
               step={5}
               value={clampedPan}
               percent={panPct}
-              showCenterTick
               secondaryDotPercent={focusStep === 'omitted' || focusStep === 'solo' ? null : panFocusAxisPct}
               onChange={(e) => onSetPracticePanRange?.(Number(e.target.value))}
               ariaLabel="Practice Pan Range Slider"

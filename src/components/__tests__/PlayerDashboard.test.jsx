@@ -420,14 +420,14 @@ describe('PlayerDashboard - Settings and Lyrics View Priority', () => {
       );
     });
 
-    // 1. Show row uses cursor-default and centered 3-dots cell in 56px trailing column
+    // 1. Show row uses cursor-default and centered 3-dots cell in 34px trailing column
     const showRow = Array.from(view.container.querySelectorAll('.player-track-row')).find((el) => (
       el.textContent.includes('Opening Number')
     ));
     expect(showRow).toBeTruthy();
     expect(showRow.className).toContain('cursor-default');
     expect(showRow.className).not.toContain('cursor-pointer');
-    expect(showRow.className).toContain('grid-cols-[72px_minmax(0,1fr)_64px_56px]');
+    expect(showRow.className).toContain('grid-cols-[72px_minmax(0,1fr)_64px_34px]');
     expect(showRow.className).toContain('pr-0');
     const showDotsBtn = showRow.querySelector('button[title="Options"]');
     expect(showDotsBtn.parentElement.className).toContain('justify-center');
@@ -485,7 +485,7 @@ describe('PlayerDashboard - Settings and Lyrics View Priority', () => {
     expect(playlistRow).toBeTruthy();
     expect(playlistRow.className).toContain('cursor-default');
     expect(playlistRow.className).not.toContain('cursor-grab');
-    expect(playlistRow.className).toContain('grid-cols-[44px_minmax(0,1fr)_64px_56px]');
+    expect(playlistRow.className).toContain('grid-cols-[44px_minmax(0,1fr)_64px_34px]');
     expect(playlistRow.className).toContain('pr-0');
     const playlistDotsBtn = playlistRow.querySelector('button[title="Options"]');
     expect(playlistDotsBtn.parentElement.className).toContain('justify-center');

@@ -101,7 +101,7 @@ export function PlayerRangeSlider({
           aria-hidden="true"
           className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors ${
             isBipolarNeutral
-              ? 'player-slider-neutral-pip z-10 h-2.5 w-[2.5px] bg-[var(--player-slider-fill-rest)]'
+              ? 'player-slider-neutral-pip z-10 h-3 w-[3px] bg-[var(--player-slider-fill-rest)]'
               : 'z-10 h-2.5 w-[1.5px] bg-white/45'
           }`}
         />

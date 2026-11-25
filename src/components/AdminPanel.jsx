@@ -1122,7 +1122,7 @@ export default function AdminPanel({
                         {item.label}
                       </span>
                       {item.count !== null ? (
-                        <span className="hidden md:inline-flex rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)] px-1.5 py-0.5 text-[10px] tabular-nums text-[var(--player-text-muted)] md:px-2 md:text-xs">
+                        <span className="hidden md:inline-flex rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-1.5 py-0.5 text-[10px] tabular-nums text-[var(--player-text-secondary)] md:px-2 md:text-xs">
                           {item.count}
                         </span>
                       ) : null}
@@ -1199,7 +1199,7 @@ export default function AdminPanel({
                 />
               ) : tab === 'roles' ? (
                 selectedRole ? (
-                  <div className="grid gap-3 lg:grid-cols-[12.5rem,minmax(0,1fr)]">
+                  <div className="grid min-h-full gap-3 lg:grid-cols-[12.5rem,minmax(0,1fr)]">
                     <aside className="space-y-2 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] p-2">
                       <div className="flex items-center gap-2">
                         <button
@@ -1273,7 +1273,7 @@ export default function AdminPanel({
                                   event.currentTarget.blur();
                                 }
                               }}
-                              className="min-w-0 flex-1 max-w-lg rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3.5 py-2 text-xl font-bold tracking-tight text-[var(--player-text-primary)] outline-none focus:border-[var(--player-accent-border)] disabled:cursor-default disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:opacity-100"
+                              className="min-w-0 flex-1 max-w-lg rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] px-3.5 py-2 text-xl font-bold tracking-tight text-[var(--player-text-primary)] outline-none focus:border-[var(--player-accent-border)] disabled:cursor-default disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:opacity-100"
                             />
                             <div className="flex flex-wrap items-center gap-2">
                               {!selectedRole.isSystem ? (
@@ -1702,7 +1702,7 @@ export default function AdminPanel({
                                 type="button"
                                 title={isExpanded ? 'Hide extra roles' : 'Show all roles'}
                                 onClick={() => toggleExpandedUserRoles(user.id)}
-                                className="rounded-full bg-white/[0.06] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[var(--player-text-secondary)] hover:bg-white/[0.12] hover:text-[var(--player-text-primary)] transition-colors"
+                                className="rounded-full border border-[var(--player-border-subtle)] bg-white/[0.05] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[var(--player-text-secondary)] hover:bg-white/[0.1] hover:text-[var(--player-text-primary)] transition-colors"
                               >
                                 {isExpanded ? '-' : `+${collapsedExtraRoleCount}`}
                               </button>

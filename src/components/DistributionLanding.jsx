@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Check,
   Download,
   Share,
   PlusSquare,
@@ -77,6 +78,7 @@ function PlatformCard({
   trailingIcon: TrailingIcon = ChevronRight,
 }) {
   const isDownloadIcon = TrailingIcon === Download;
+  const ResolvedTrailingIcon = active && !isDownloadIcon ? Check : TrailingIcon;
   const cardClass = `group flex w-full items-center justify-between rounded-2xl border p-4 text-left transition-all cursor-pointer ${
     active
       ? 'border-[var(--player-accent-border)] bg-[var(--player-bg-elevated)] shadow-[var(--player-shadow-accent)]'
@@ -95,17 +97,19 @@ function PlatformCard({
             className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] ${
               active
                 ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                : 'border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-muted)]'
+                : 'border-[var(--player-border-default)] bg-[var(--player-bg-surface-subtle)] text-[var(--player-text-secondary)]'
             }`}
           >
             {badge}
           </span>
         </div>
       </div>
-      <TrailingIcon
+      <ResolvedTrailingIcon
         size={18}
         className={`shrink-0 transition-transform duration-150 ${
-          isDownloadIcon ? 'group-hover:scale-110' : 'group-hover:translate-x-0.5'
+          isDownloadIcon
+            ? 'group-hover:scale-110'
+            : (active ? '' : 'group-hover:translate-x-0.5')
         } ${
           active ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)] group-hover:text-[var(--player-text-primary)]'
         }`}
@@ -130,7 +134,7 @@ function PlatformCard({
 
 const KBD_PILL_CLASS = 'inline-flex items-center gap-1 rounded-md border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] px-2 py-0.5 text-xs font-semibold text-[var(--player-text-primary)]';
 const PRIMARY_CTA_CLASS = 'group flex w-full items-center justify-center gap-2.5 rounded-xl bg-[var(--player-accent)] hover:bg-[var(--player-accent-hover)] py-3.5 text-sm font-bold text-[var(--player-accent-foreground)] shadow-[var(--player-shadow-accent)] transition-colors disabled:opacity-50';
-const GUIDE_CARD_CLASS = 'player-hero-surface rounded-2xl border border-[var(--player-accent-border)] bg-[var(--player-bg-surface)] p-5 sm:p-7 shadow-[var(--player-shadow-elevated)] space-y-5';
+const GUIDE_CARD_CLASS = 'player-hero-surface rounded-2xl border border-[var(--player-accent-border)] bg-[var(--player-bg-surface)] p-5 sm:px-7 sm:py-6 shadow-[var(--player-shadow-elevated)] space-y-4';
 
 export default function DistributionLanding() {
   const navigate = useNavigate();
@@ -268,11 +272,11 @@ export default function DistributionLanding() {
             title="macOS"
             subtitle="Desktop PWA"
             rightSlot={(
-              <div className="self-start sm:self-auto flex rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-canvas)] p-0.5">
+              <div className="w-full grid grid-cols-2 sm:w-auto sm:flex rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-canvas)] p-0.5">
                 <button
                   type="button"
                   onClick={() => setMacBrowserTab('safari')}
-                  className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-colors ${
+                  className={`rounded-full px-3.5 py-1.5 sm:py-1 text-center text-xs font-semibold transition-colors ${
                     macBrowserTab === 'safari'
                       ? 'bg-[var(--player-bg-active-segment)] text-[var(--player-accent-text)]'
                       : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
@@ -283,7 +287,7 @@ export default function DistributionLanding() {
                 <button
                   type="button"
                   onClick={() => setMacBrowserTab('chrome')}
-                  className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-colors ${
+                  className={`rounded-full px-3.5 py-1.5 sm:py-1 text-center text-xs font-semibold transition-colors ${
                     macBrowserTab === 'chrome'
                       ? 'bg-[var(--player-bg-active-segment)] text-[var(--player-accent-text)]'
                       : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]'
@@ -381,7 +385,7 @@ export default function DistributionLanding() {
       data-player-theme="dark-gold"
     >
       {/* Header with only Apollo Brand Wordmark */}
-      <header className="relative z-20 border-b border-[var(--player-border-subtle)] bg-transparent py-4 flex items-center">
+      <header className="relative z-20 border-b border-[var(--player-border-subtle)] bg-transparent pt-3.5 pb-4 flex items-center">
         <div className="mx-auto w-full max-w-4xl px-4 sm:px-6 flex items-center">
           <BrandWordmark className="h-9" />
         </div>

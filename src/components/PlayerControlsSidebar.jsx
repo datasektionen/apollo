@@ -724,7 +724,7 @@ export function PlayerControlsSidebar({
                     step={1}
                     value={effectivePanRange}
                     percent={panPct}
-                    showCenterTick
+                    bipolar
                     secondaryDotPercent={panControlDisabled ? null : panFocusAxisPct}
                     disabled={panControlDisabled}
                     isDragging={sliderDragTooltip?.kind === 'pan'}
@@ -1055,9 +1055,9 @@ export function PlayerControlsSidebar({
               className="mx-4 mt-2 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3.5 py-4 text-center"
               style={{ opacity: sliderOpacity }}
             >
-              <SlidersHorizontal size={16} className="mx-auto mb-2 text-[var(--player-text-muted)] opacity-75" />
-              <p className="text-xs font-semibold text-[var(--player-text-secondary)]">Track controls</p>
-              <p className="mt-1 text-[11px] leading-relaxed text-[var(--player-text-muted)]">
+              <SlidersHorizontal size={16} className="mx-auto mb-2 text-[var(--player-text-secondary)] opacity-80" />
+              <p className="text-xs font-semibold text-[var(--player-text-primary)]">Track controls</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-[var(--player-text-secondary)]">
                 Select a track to adjust Metronome, Practice Focus, and Pan.
               </p>
             </div>

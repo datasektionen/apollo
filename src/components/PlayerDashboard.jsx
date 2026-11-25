@@ -3932,7 +3932,11 @@ function PlayerDashboard({
           <div className="relative" ref={profileMenuRef}>
             <button
               onClick={() => setProfileMenuOpen((previous) => !previous)}
-              className="h-9 w-9 rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)] flex items-center justify-center transition-colors"
+              className={`h-9 w-9 rounded-full border flex items-center justify-center transition-colors ${
+                profileMenuOpen
+                  ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
+                  : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] hover:bg-[var(--player-hover)] text-[var(--player-text-primary)]'
+              }`}
               title="User menu"
             >
               <CircleUserRound size={18} />
@@ -4138,7 +4142,7 @@ function PlayerDashboard({
                         className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-xs font-semibold transition-colors disabled:opacity-40 ${
                           shuffleEnabled
                             ? 'border-[var(--player-accent-border)] bg-[var(--player-accent-soft)] text-[var(--player-accent-text)]'
-                            : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
+                            : 'border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)] hover:bg-[var(--player-hover)]'
                         }`}
                         title={shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
                       >
@@ -5093,11 +5097,11 @@ function PlayerDashboard({
               disabled={!hasCurrentLyrics}
               className={`relative shrink-0 flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--player-hover)] ${
                 !hasCurrentLyrics
-                  ? 'text-[var(--player-text-muted)]'
+                  ? 'text-[var(--player-text-secondary)]'
                   : (lyricsViewOpen && effectiveMainPanelView !== 'settings'
                       ? 'text-[var(--player-accent-text)]'
                       : 'text-[var(--player-text-secondary)] hover:text-[var(--player-text-primary)]')
-              } disabled:cursor-not-allowed disabled:opacity-55`}
+              } disabled:cursor-not-allowed disabled:opacity-50`}
               title="Lyrics"
               aria-label="Lyrics"
               aria-pressed={lyricsViewOpen && hasCurrentLyrics && effectiveMainPanelView !== 'settings'}

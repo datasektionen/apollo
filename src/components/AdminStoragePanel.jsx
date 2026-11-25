@@ -732,7 +732,11 @@ function StorageBar({
             }`}
           >
             <span
-              className="block h-2.5 w-2.5 shrink-0 translate-y-[0.5px] rounded-full ring-1 ring-[var(--player-border-default)]"
+              className={`block h-2.5 w-2.5 shrink-0 translate-y-[0.5px] rounded-full ring-1 ${
+                segment.id === 'free' || segment.id === 'remaining'
+                  ? 'ring-white/30'
+                  : 'ring-[var(--player-border-default)]'
+              }`}
               style={{ backgroundColor: segment.color }}
             />
             <span className="leading-none">{segment.label}</span>
@@ -1030,7 +1034,13 @@ function HeaderCell({
           }
           onSort(column.key);
         }}
-        className={`flex h-full w-full items-center gap-1 px-3 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] transition-colors ${
+        className={`flex h-full w-full items-center gap-1 px-3 py-3 text-[11px] font-bold uppercase tracking-[0.1em] transition-colors ${
+          column.key === 'sizeBytes'
+            ? 'justify-end text-right'
+            : (column.key === 'projectCount' || column.key === 'clipCount'
+              ? 'justify-center text-center'
+              : 'text-left')
+        } ${
           dragging ? 'cursor-grabbing' : 'cursor-pointer'
         } ${
           active ? 'text-[var(--player-accent-text)]' : 'text-[var(--player-text-muted)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)]'
@@ -1573,7 +1583,7 @@ export default function AdminStoragePanel({
             onClick={requestQuarantineSelected}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               busy || !quarantinableItems.length
-                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-white/[0.03] text-white/45'
+                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-white/[0.04] text-white/50'
                 : 'border-[var(--player-warning-border)] bg-[var(--player-warning-soft)] text-[var(--player-warning-text)] hover:bg-[var(--player-accent-soft)]'
             }`}
           >
@@ -1586,7 +1596,7 @@ export default function AdminStoragePanel({
             onClick={requestRestoreSelected}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               busy || !restorableItems.length
-                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-white/[0.03] text-white/45'
+                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-white/[0.04] text-white/50'
                 : 'border-[var(--player-success-border)] bg-[var(--player-success-soft)] text-[var(--player-success-text)] hover:bg-[var(--player-success-surface)]'
             }`}
           >
@@ -1599,7 +1609,7 @@ export default function AdminStoragePanel({
             onClick={requestDeleteSelected}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               busy || !selectedItems.length
-                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-white/[0.03] text-white/45'
+                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-white/[0.04] text-white/50'
                 : 'border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] text-[var(--player-danger-text)] hover:bg-[var(--player-danger-surface)]'
             }`}
           >
@@ -1709,6 +1719,12 @@ export default function AdminStoragePanel({
                   <div
                     key={column.key}
                     className={`flex min-w-0 items-center whitespace-nowrap px-3 py-2 ${
+                      column.key === 'sizeBytes'
+                        ? 'justify-end text-right'
+                        : (column.key === 'projectCount' || column.key === 'clipCount'
+                          ? 'justify-center text-center'
+                          : '')
+                    } ${
                       columnIndex === visibleColumns.length - 1 ? '' : 'border-r border-[var(--player-border-subtle)]'
                     }`}
                   >
