@@ -4148,7 +4148,7 @@ function PlayerDashboard({
                     </div>
                   </header>
                   {isPlaylistCollectionView ? (
-                    <div className="grid h-10 min-h-10 max-h-10 shrink-0 grid-cols-[44px_minmax(0,1fr)_64px_56px] items-center border-b border-[var(--player-border-subtle)] pl-6 pr-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
+                    <div className="grid h-10 min-h-10 max-h-10 shrink-0 grid-cols-[44px_minmax(0,1fr)_64px_34px] items-center border-b border-[var(--player-border-subtle)] pl-6 pr-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                       <div className="translate-x-px">#</div>
                       <div>Title</div>
                       <div className="flex items-center justify-end">
@@ -4159,7 +4159,7 @@ function PlayerDashboard({
                       <div />
                     </div>
                   ) : (
-                    <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[72px_minmax(0,1fr)_64px_56px] items-center border-b border-[var(--player-border-subtle)] pl-6 pr-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
+                    <div className="grid h-9 min-h-9 max-h-9 shrink-0 grid-cols-[72px_minmax(0,1fr)_64px_34px] items-center border-b border-[var(--player-border-subtle)] pl-6 pr-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--player-text-muted)]">
                       <div className="translate-x-px">#</div>
                       <div>Title</div>
                       <div className="flex items-center justify-end">
@@ -4276,7 +4276,7 @@ function PlayerDashboard({
                                 onDoubleClick={async () => {
                                   await handlePlayPlaylistRow(row);
                                 }}
-                                className={`player-track-row group relative grid grid-cols-[44px_minmax(0,1fr)_64px_56px] items-center rounded-lg pl-4 pr-0 py-2.5 min-h-[52px] text-sm cursor-default ${
+                                className={`player-track-row group relative grid grid-cols-[44px_minmax(0,1fr)_64px_34px] items-center rounded-lg pl-4 pr-0 py-2.5 min-h-[52px] text-sm cursor-default ${
                                   row.unavailable ? 'text-[var(--player-text-disabled)]' : ''
                                 } ${
                                   isDraggedRow ? 'opacity-40 cursor-grabbing' : ''
@@ -4410,7 +4410,7 @@ function PlayerDashboard({
                                 handleSelectItem(PLAYER_COLLECTION_TYPES.TUTTI, collectionId, index);
                                 setProjectContextMenu({ mix, x: event.clientX, y: event.clientY });
                               }}
-                              className="player-track-row group relative grid grid-cols-[72px_minmax(0,1fr)_64px_56px] items-center rounded-lg pl-4 pr-0 py-1.5 min-h-[44px] text-sm cursor-default"
+                              className="player-track-row group relative grid grid-cols-[72px_minmax(0,1fr)_64px_34px] items-center rounded-lg pl-4 pr-0 py-1.5 min-h-[44px] text-sm cursor-default"
                             >
                               <div className="flex items-center pl-0.5 pr-2 min-w-0">
                                 {isActive && isPlaying ? (

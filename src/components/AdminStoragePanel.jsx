@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDown, ArrowUp, Database, HardDrive, RefreshCw, RotateCcw, ScanSearch, Search, Trash2, X } from 'lucide-react';
+import { Archive, ArrowDown, ArrowUp, Database, HardDrive, RefreshCw, RotateCcw, ScanSearch, Search, Trash2, X } from 'lucide-react';
 import {
   deleteAdminMedia,
   listAdminStorage,
@@ -1571,12 +1571,13 @@ export default function AdminStoragePanel({
             type="button"
             disabled={busy || !quarantinableItems.length}
             onClick={requestQuarantineSelected}
-            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               busy || !quarantinableItems.length
-                ? 'cursor-not-allowed border-[var(--player-border-subtle)] bg-transparent text-[var(--player-text-muted)] opacity-60'
+                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-white/[0.03] text-white/45'
                 : 'border-[var(--player-warning-border)] bg-[var(--player-warning-soft)] text-[var(--player-warning-text)] hover:bg-[var(--player-accent-soft)]'
             }`}
           >
+            <Archive size={12} />
             Quarantine
           </button>
           <button
@@ -1585,7 +1586,7 @@ export default function AdminStoragePanel({
             onClick={requestRestoreSelected}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               busy || !restorableItems.length
-                ? 'cursor-not-allowed border-[var(--player-border-subtle)] bg-transparent text-[var(--player-text-muted)] opacity-60'
+                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-white/[0.03] text-white/45'
                 : 'border-[var(--player-success-border)] bg-[var(--player-success-soft)] text-[var(--player-success-text)] hover:bg-[var(--player-success-surface)]'
             }`}
           >
@@ -1598,7 +1599,7 @@ export default function AdminStoragePanel({
             onClick={requestDeleteSelected}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
               busy || !selectedItems.length
-                ? 'cursor-not-allowed border-[var(--player-border-subtle)] bg-transparent text-[var(--player-text-muted)] opacity-60'
+                ? 'cursor-not-allowed border-[var(--player-border-default)] bg-white/[0.03] text-white/45'
                 : 'border-[var(--player-danger-border)] bg-[var(--player-danger-soft)] text-[var(--player-danger-text)] hover:bg-[var(--player-danger-surface)]'
             }`}
           >

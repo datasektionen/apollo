@@ -382,13 +382,13 @@ export default function DistributionLanding() {
     >
       {/* Header with only Apollo Brand Wordmark */}
       <header className="relative z-20 border-b border-[var(--player-border-subtle)] bg-transparent py-4 flex items-center">
-        <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 flex items-center">
+        <div className="mx-auto w-full max-w-4xl px-4 sm:px-6 flex items-center">
           <BrandWordmark className="h-9" />
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 px-4 py-7 sm:px-6 sm:py-10 max-w-3xl mx-auto w-full space-y-9">
+      <main className="flex-1 px-4 py-7 sm:px-6 sm:py-10 max-w-4xl mx-auto w-full space-y-9">
         {/* Active installation guide displayed at the top */}
         {renderActiveGuide()}
 
@@ -459,7 +459,7 @@ export default function DistributionLanding() {
         <section className="space-y-3.5 border-t border-[var(--player-border-subtle)] pt-6 pb-4">
           <h2 className="text-base font-bold text-[var(--player-text-primary)] tracking-tight flex items-start gap-2.5">
             <Globe size={19} className="mt-0.5 shrink-0 text-[var(--player-accent-text)]" />
-            <span>If you have no space or trust and are with a slightly to significantly worse experince</span>
+            <span>If you have 0 space or trust and are fine with a slightly to significantly worse experience</span>
           </h2>
 
           <PlatformCard

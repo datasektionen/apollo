@@ -53,6 +53,8 @@ export function PlayerRangeSlider({
       : 0);
   const clampedPct = clamp(computedPct, 0, 100);
 
+  const isBipolarNeutral = bipolar && Math.abs(clampedPct - 50) < 0.75;
+  const shouldShowCenterTick = showCenterTick || bipolar;
   const fillLeft = bipolar ? `${Math.min(50, clampedPct)}%` : '0%';
   const fillWidth = bipolar ? `${Math.abs(clampedPct - 50)}%` : `${clampedPct}%`;
   const fillRadiusClass = bipolar
@@ -93,11 +95,15 @@ export function PlayerRangeSlider({
         className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-[var(--player-slider-track)]"
       />
 
-      {/* Optional center detent tick (peeks slightly beyond resting track/handle when needed) */}
-      {showCenterTick ? (
+      {/* Center detent tick (bipolar neutral origin pip or midpoint reference notch) */}
+      {shouldShowCenterTick ? (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--player-border-strong)]"
+          className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors ${
+            isBipolarNeutral
+              ? 'player-slider-neutral-pip z-10 h-2.5 w-[2.5px] bg-[var(--player-slider-fill-rest)]'
+              : 'z-10 h-2.5 w-[1.5px] bg-white/45'
+          }`}
         />
       ) : null}
 

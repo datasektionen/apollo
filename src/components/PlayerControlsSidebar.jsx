@@ -384,7 +384,7 @@ export function PlayerControlsSidebar({
   const isFocusActive = focusStep === 'omitted' || focusStep === 'solo' || Number(focusStep) !== 0;
   const isPanActive = practicePanRange !== 100 && !panControlDisabled;
   const focusReadout = formatFocusReadout(focusStep);
-  const labelRowHeight = fullyMinimized ? 0 : lerp(0, 18, progress);
+  const labelRowHeight = fullyMinimized ? 0 : lerp(0, 20, progress);
 
   const metronomePct = Math.max(0, Math.min(100, Number(metronomeVolume) || 0));
   const effectivePanRange = sliderDragTooltip?.kind === 'pan'
@@ -463,7 +463,7 @@ export function PlayerControlsSidebar({
             <div className="flex flex-col">
               {!fullyMinimized ? (
                 <div
-                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  className="flex items-center justify-between gap-2 overflow-hidden text-xs font-medium"
                   style={{
                     paddingLeft: rowPaddingLeft,
                     paddingRight: 16,
@@ -572,7 +572,7 @@ export function PlayerControlsSidebar({
             <div className="flex flex-col">
               {!fullyMinimized ? (
                 <div
-                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  className="flex items-center justify-between gap-2 overflow-hidden text-xs font-medium"
                   style={{
                     paddingLeft: rowPaddingLeft,
                     paddingRight: 16,
@@ -671,7 +671,7 @@ export function PlayerControlsSidebar({
             <div className="flex flex-col">
               {!fullyMinimized ? (
                 <div
-                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  className="flex items-center justify-between gap-2 overflow-hidden text-xs font-medium"
                   style={{
                     paddingLeft: rowPaddingLeft,
                     paddingRight: 16,
@@ -724,6 +724,7 @@ export function PlayerControlsSidebar({
                     step={1}
                     value={effectivePanRange}
                     percent={panPct}
+                    showCenterTick
                     secondaryDotPercent={panControlDisabled ? null : panFocusAxisPct}
                     disabled={panControlDisabled}
                     isDragging={sliderDragTooltip?.kind === 'pan'}
@@ -784,7 +785,7 @@ export function PlayerControlsSidebar({
             <div className="flex flex-col">
               {!fullyMinimized ? (
                 <div
-                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  className="flex items-center justify-between gap-2 overflow-hidden text-xs font-medium"
                   style={{
                     paddingLeft: rowPaddingLeft,
                     paddingRight: 16,
@@ -918,7 +919,7 @@ export function PlayerControlsSidebar({
             <div className="flex flex-col">
               {!fullyMinimized ? (
                 <div
-                  className="flex items-center justify-between gap-2 overflow-hidden text-[11px] font-medium"
+                  className="flex items-center justify-between gap-2 overflow-hidden text-xs font-medium"
                   style={{
                     paddingLeft: rowPaddingLeft,
                     paddingRight: 16,
@@ -1046,6 +1047,19 @@ export function PlayerControlsSidebar({
                   )}
                 </div>
               </div>
+            </div>
+          ) : null}
+
+          {!metronomeControlsEnabled && !practiceControlsEnabled && !fullyMinimized ? (
+            <div
+              className="mx-4 mt-2 rounded-xl border border-[var(--player-border-subtle)] bg-[var(--player-bg-surface-subtle)] px-3.5 py-4 text-center"
+              style={{ opacity: sliderOpacity }}
+            >
+              <SlidersHorizontal size={16} className="mx-auto mb-2 text-[var(--player-text-muted)] opacity-75" />
+              <p className="text-xs font-semibold text-[var(--player-text-secondary)]">Track controls</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-[var(--player-text-muted)]">
+                Select a track to adjust Metronome, Practice Focus, and Pan.
+              </p>
             </div>
           ) : null}
 

@@ -1273,7 +1273,7 @@ export default function AdminPanel({
                                   event.currentTarget.blur();
                                 }
                               }}
-                              className="min-w-0 flex-1 rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3.5 py-2 text-xl font-bold tracking-tight text-[var(--player-text-primary)] outline-none focus:border-[var(--player-accent-border)] disabled:cursor-default disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:opacity-100"
+                              className="min-w-0 flex-1 max-w-lg rounded-lg border border-[var(--player-border-default)] bg-[var(--player-bg-popover)] px-3.5 py-2 text-xl font-bold tracking-tight text-[var(--player-text-primary)] outline-none focus:border-[var(--player-accent-border)] disabled:cursor-default disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:opacity-100"
                             />
                             <div className="flex flex-wrap items-center gap-2">
                               {!selectedRole.isSystem ? (
@@ -1702,7 +1702,7 @@ export default function AdminPanel({
                                 type="button"
                                 title={isExpanded ? 'Hide extra roles' : 'Show all roles'}
                                 onClick={() => toggleExpandedUserRoles(user.id)}
-                                className="rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[var(--player-text-secondary)] hover:bg-[var(--player-hover)] hover:text-[var(--player-text-primary)] transition-colors"
+                                className="rounded-full bg-white/[0.06] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[var(--player-text-secondary)] hover:bg-white/[0.12] hover:text-[var(--player-text-primary)] transition-colors"
                               >
                                 {isExpanded ? '-' : `+${collapsedExtraRoleCount}`}
                               </button>
@@ -1717,9 +1717,9 @@ export default function AdminPanel({
                                   title="Add role"
                                   disabled={saving}
                                   onClick={() => setRolePickerUserId((current) => (current === user.id ? '' : user.id))}
-                                  className="flex h-6 items-center justify-center rounded-full border border-[var(--player-border-subtle)] bg-[var(--player-bg-elevated)] px-2.5 text-[var(--player-text-secondary)] opacity-100 transition hover:bg-[var(--player-hover)] hover:text-[var(--player-accent-text)] md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
+                                  className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--player-border-default)] bg-[var(--player-bg-elevated)] text-[var(--player-text-primary)] opacity-100 transition hover:border-[var(--player-accent-border)] hover:bg-[var(--player-accent-soft)] hover:text-[var(--player-accent-text)] md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
                                 >
-                                  <Plus size={13} />
+                                  <Plus size={14} />
                                 </button>
                                 {rolePickerUserId === user.id ? (
                                   <div className="player-menu absolute left-0 top-full z-40 mt-2 max-h-72 w-64 overflow-auto rounded-xl p-1.5 lg:left-auto lg:right-0">

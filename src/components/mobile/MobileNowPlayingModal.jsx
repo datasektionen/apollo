@@ -676,6 +676,7 @@ export function MobileNowPlayingModal({
               step={5}
               value={clampedPan}
               percent={panPct}
+              showCenterTick
               secondaryDotPercent={focusStep === 'omitted' || focusStep === 'solo' ? null : panFocusAxisPct}
               onChange={(e) => onSetPracticePanRange?.(Number(e.target.value))}
               ariaLabel="Practice Pan Range Slider"

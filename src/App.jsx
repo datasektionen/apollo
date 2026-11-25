@@ -770,7 +770,7 @@ function App() {
 
   return (
     <div
-      className="h-screen w-screen overflow-hidden bg-gray-900 text-white"
+      className="h-screen w-screen overflow-hidden bg-[#050506] text-white"
       style={{ overscrollBehaviorX: 'auto', overscrollBehaviorY: 'none' }}
     >
       <Routes>
